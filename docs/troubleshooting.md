@@ -11,14 +11,18 @@ python core/scripts/bootstrap_repo.py
 python core/scripts/validate_environment.py
 python core/scripts/validate_paths.py
 python core/scripts/validate_manifests.py
+python core/scripts/check_nodes.py
+python core/scripts/verify_models.py
 ```
 
 | Script | Exit code 1 means |
 |--------|-------------------|
 | `bootstrap_repo.py` | Missing top-level directories or config manifests |
 | `validate_environment.py` | Rare — usually exits 0 with warnings |
-| `validate_paths.py` | Missing required repo paths; Colab paths may be absent pre-install |
+| `validate_paths.py` | Missing required repo paths |
 | `validate_manifests.py` | Invalid or incomplete JSON under `configs/` |
+| `check_nodes.py` | One or more registered custom nodes missing from `custom_nodes/` |
+| `verify_models.py` | Only when `--require-active-only` and an `active` model is missing |
 
 ## Installation Issues
 

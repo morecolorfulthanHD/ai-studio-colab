@@ -6,14 +6,21 @@ Cross-engine utility scripts for bootstrap, validation, and batch processing.
 
 ## Bootstrap & Validation (Phase 1)
 
-| Script | Purpose | Notebook-callable |
-|--------|---------|-------------------|
-| `bootstrap_repo.py` | Validate repo structure; document git sync hook | Yes |
-| `validate_environment.py` | Python, Colab, Drive, GPU checks | Yes |
-| `validate_paths.py` | Validate Colab/Drive/repo paths from manifest | Yes |
-| `validate_manifests.py` | Validate JSON manifests under `configs/` | Yes |
-| `list_workflows.py` | List workflow JSON files by category | Yes |
-| `sync_outputs.py` | Copy latest ComfyUI output to Drive (`--dry-run` supported) | Yes |
+| Script | Purpose | Installs? |
+|--------|---------|-----------|
+| `bootstrap_repo.py` | Validate repo structure; document git sync hook | No |
+| `validate_environment.py` | Python, Colab, Drive, GPU checks | No |
+| `validate_paths.py` | Validate Colab/Drive/repo paths from manifest | No |
+| `validate_manifests.py` | Validate JSON schemas under `configs/` | No |
+| `list_workflows.py` | List workflow JSON files by category | No |
+| `sync_outputs.py` | Copy latest ComfyUI output to Drive (`--dry-run`) | No |
+
+## Runtime Verification (Phase 1b)
+
+| Script | Purpose | Installs? |
+|--------|---------|-----------|
+| `check_nodes.py` | Compare `custom_nodes/` vs. `configs/nodes/node_registry.json` | No |
+| `verify_models.py` | Check model files vs. `configs/models/model_registry.json` | No |
 
 ### Usage
 
@@ -24,16 +31,20 @@ python core/scripts/validate_environment.py
 python core/scripts/validate_paths.py
 python core/scripts/validate_manifests.py
 python core/scripts/list_workflows.py
+python core/scripts/check_nodes.py
+python core/scripts/verify_models.py
 python core/scripts/sync_outputs.py --dry-run
 ```
 
-## Planned Scripts (future phases)
+### Notebook integration
+
+The control panel runs bootstrap scripts in **Cell 3b — Repository Bootstrap & Validation** (after Cells 2–3: Drive mount and path setup). Post-install checks: `check_nodes.py`, `verify_models.py`. See [docs/colab-control-panel.md](../../docs/colab-control-panel.md).
+
+## Planned Scripts (future)
 
 | Script | Phase | Purpose |
 |--------|-------|---------|
-| `check_nodes.py` | 1b | Compare installed nodes vs. `configs/nodes/node_registry.json` |
-| `verify_models.py` | 1b | Check models against `configs/models/model_registry.json` |
-| `install_all.sh` | 1b | Orchestrate full platform install |
+| `install_all.sh` | 1c | Orchestrate ComfyUI install + node install |
 | `batch_runner.py` | 7 | Execute workflow chains over input datasets |
 
 Colab-specific logic stays in `colab/utilities/`. Generic validation stays here.

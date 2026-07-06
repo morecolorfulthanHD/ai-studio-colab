@@ -35,11 +35,21 @@ The repository is the **source of truth** for workflows, configs, scripts, and d
 
 ### 2. Run Bootstrap Validation
 
+From the control panel notebook (**Cell 3b — Repository Bootstrap & Validation**) or manually:
+
 ```bash
 python core/scripts/bootstrap_repo.py
 python core/scripts/validate_environment.py
 python core/scripts/validate_paths.py
 python core/scripts/validate_manifests.py
+python core/scripts/list_workflows.py
+```
+
+After ComfyUI is installed, also run:
+
+```bash
+python core/scripts/check_nodes.py
+python core/scripts/verify_models.py
 ```
 
 These scripts validate structure and manifests. They do not install software or download models.
@@ -54,16 +64,24 @@ Use the control panel notebook to mount Drive. Persistent storage root:
 
 Path mappings are defined in `configs/paths/colab_paths.json`.
 
-### 4. Install Runtime Engines (via notebook)
+### 4. Install ComfyUI Runtime
 
-ComfyUI and A1111 install into disposable Colab runtime paths:
+**Option A — repo install script (recommended for bootstrap):**
 
-| Engine | Runtime Path |
-|--------|-------------|
-| ComfyUI | `/content/ComfyUI` |
-| A1111 | `/content/A1111` |
+```bash
+bash core/comfyui/install.sh
+```
 
-Install scripts will live in `core/comfyui/` and `core/automatic1111/` (Phase 1 continuation).
+**Option B — control panel notebook (Cell 9):** `install_comfyui()` with safe/minimal/full modes.
+
+Both install to `/content/ComfyUI` and symlink models to Drive at `drive_models`.
+
+| Engine | Runtime Path | Install |
+|--------|-------------|---------|
+| ComfyUI | `/content/ComfyUI` | `core/comfyui/install.sh` or notebook Cell 9 |
+| A1111 | `/content/A1111` | notebook Cell 9 (`install_a1111`) |
+
+Install scripts in `core/automatic1111/` are planned for a future phase.
 
 ### 5. Install Models
 

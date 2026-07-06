@@ -2,7 +2,7 @@
 
 Phased development plan for AI Studio Colab. Each phase produces tested, documented, reusable building blocks before the next phase begins.
 
-**Current status:** Phase 1 bootstrap foundation in progress. Repository architecture (Phase 0) complete. Notebook relocated. Config manifests and bootstrap scripts added.
+**Current status:** Phase 1b in progress — notebook bootstrap wiring, ComfyUI `install.sh`, and node/model validation scripts.
 
 ---
 
@@ -16,37 +16,45 @@ Phased development plan for AI Studio Colab. Each phase produces tested, documen
 
 ---
 
-## Phase 1 — Bootstrap Foundation (in progress)
+## Phase 1 — Bootstrap Foundation ✓
 
-**Goal:** Repository support files so the Colab control panel can orchestrate ComfyUI, models, nodes, and workflows.
-
-| Deliverable | Location | Status |
-|-------------|----------|--------|
-| Config manifests | `configs/paths/`, `configs/models/`, etc. | Done |
-| Bootstrap scripts | `core/scripts/` | Done |
-| Control panel documentation | `docs/colab-control-panel.md` | Done |
-| ComfyUI install script | `core/comfyui/` | Pending |
-| Shared model path wiring | `core/shared_models/` | Pending |
-| Base txt2img workflow JSON | `workflows/base/txt2img/` | Pending |
-| Notebook integration | `colab/notebooks/` | Pending |
-| Git integration for configs | repo root | Pending |
-
-**Exit criteria:**
-- ComfyUI launches from Colab control panel
-- txt2img produces consistent output from documented settings
-- Model and node versions are pinned in config
+- [x] Config manifests (`configs/paths/`, `configs/models/`, etc.)
+- [x] Bootstrap scripts (`core/scripts/`)
+- [x] Control panel documentation (`docs/colab-control-panel.md`)
+- [x] Relocate `AI_Studio_Control_Panel_Colab.ipynb` to `colab/notebooks/`
 
 ---
 
-## Phase 1b — Core Foundation (continuation)
+## Phase 1b — Notebook Wiring & ComfyUI Install Prep (in progress)
+
+**Goal:** Wire the control panel to repo bootstrap scripts and prepare ComfyUI install layer.
+
+| Deliverable | Location | Status |
+|-------------|----------|--------|
+| Notebook bootstrap cells | `colab/notebooks/` Cell 3b | Done |
+| ComfyUI install script | `core/comfyui/install.sh` | Done |
+| Node validation script | `core/scripts/check_nodes.py` | Done |
+| Model validation script | `core/scripts/verify_models.py` | Done |
+| Model registry runtime paths | `configs/models/model_registry.json` | Done |
+| Notebook → install.sh integration | Cell 9 | Deferred |
+| Custom node install script | `core/comfyui/install_nodes.sh` | Deferred |
+
+**Exit criteria:**
+- Cell 3b runs all bootstrap scripts successfully after repo clone
+- `install.sh` produces working ComfyUI with Drive model symlink
+- `check_nodes.py` and `verify_models.py` report accurate status
+
+---
+
+## Phase 1c — Core Foundation (continuation)
 
 **Goal:** A working ComfyUI installation with a reproducible SD 1.5 txt2img workflow.
 
 | Deliverable | Location |
 |-------------|----------|
-| ComfyUI install script | `core/comfyui/` |
-| Shared model path wiring | `core/shared_models/`, `configs/paths/` |
-| Base txt2img workflow | `workflows/base/txt2img/` |
+| Notebook install.sh integration | `colab/notebooks/` Cell 9 |
+| Custom node install script | `core/comfyui/install_nodes.sh` |
+| Base txt2img workflow JSON | `workflows/base/txt2img/` |
 | Launch integration | `colab/launch/` |
 | Model download logic | driven by `configs/models/model_registry.json` |
 

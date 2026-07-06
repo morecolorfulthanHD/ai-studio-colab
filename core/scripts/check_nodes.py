@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+"""Report installed vs. missing ComfyUI custom nodes from node_registry.json.
+
+Read-only — does not install anything.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+
+def find_repo_root(start: Path | None = None) -> Path:
+    current = (start or Path.cwd()).resolve()
+    for path in (current, *current.parents):
+        if (path / "configs" / "nodes" / "node_registry.json").is_file():
+            return path
+    raise FileNotFoundError("Could not locate repository root.")
+
+
+def load_paths(repo_root: Path) -> Path:
+    manifest = repo_root / "configs" / "paths" / "colab_paths.json"
+    with manifest.open(encoding="utf-8") as fh:
+        data = json.load(fh)
+    comfyui_runtime = Path(data["paths"]["comfyui_runtime"])
+    return comfyui_runtime / "custom_nodes"
+
+
+def load_node_registry(repo_root: Path) -> list[dict]:
+    manifest = repo_root / "configs" / "nodes" / "node_registry.json"
+    with manifest.open(encoding="utf-8") as fh:
+        data = json.load(fh)
+    nodes = data.get("nodes", [])
+    if not isinstance(nodes, list):
+        raise ValueError("node_registry.json: 'nodes' must be a list")
+    return nodes
+
+
+def folder_name(entry: dict) -> str:
+    return entry.get("folder_name") or entry["name"]
+
+
+def inspect_node(path: Path) -> str:
+    if not path.exists():
+        return "missing"
+    if not path.is_dir():
+        return "invalid"
+    if (path / ".git").is_dir():
+        return "installed"
+    return "present"
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Check ComfyUI custom nodes against registry.")
+    parser.add_argument("--repo-root", type=Path, default=None)
+    parser.add_argument(
+        "--custom-nodes-dir",
+        type=Path,
+        default=None,
+        help="Override custom_nodes path (default: from colab_paths.json).",
+    )
+    args = parser.parse_args()
+
+    print("AI Studio Colab — Node Check")
+    print("=" * 40)
+
+    try:
+        repo_root = args.repo_root.resolve() if args.repo_root else find_repo_root()
+        custom_nodes_dir = args.custom_nodes_dir or load_paths(repo_root)
+        registry = load_node_registry(repo_root)
+    except (FileNotFoundError, ValueError, json.JSONDecodeError, KeyError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"Registry:        {repo_root / 'configs/nodes/node_registry.json'}")
+    print(f"custom_nodes dir: {custom_nodes_dir}\n")
+
+    if not custom_nodes_dir.is_dir():
+        print(f"WARN: custom_nodes directory does not exist yet: {custom_nodes_dir}")
+        print("      Install ComfyUI before expecting nodes.\n")
+
+    installed = 0
+    missing = 0
+
+    for entry in registry:
+        name = entry["name"]
+        folder = folder_name(entry)
+        node_path = custom_nodes_dir / folder
+        state = inspect_node(node_path)
+        install_mode = entry.get("install_mode", "planned")
+
+        if state in {"installed", "present"}:
+            installed += 1
+            marker = "INSTALLED" if state == "installed" else "PRESENT"
+        else:
+            missing += 1
+            marker = "MISSING"
+
+        print(f"  [{marker:9}] {name}")
+        print(f"             path: {node_path}")
+        print(f"             install_mode: {install_mode}")
+
+    print(f"\nSummary: {installed} installed/present, {missing} missing (of {len(registry)} registered)")
+
+    if missing > 0:
+        print("\nRESULT: INCOMPLETE — one or more nodes are missing.", file=sys.stderr)
+        return 1
+
+    print("\nRESULT: OK — all registered nodes found.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

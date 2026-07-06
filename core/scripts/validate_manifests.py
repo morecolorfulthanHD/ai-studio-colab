@@ -26,11 +26,13 @@ MANIFEST_RULES: dict[str, dict] = {
         "required_keys": {"version", "models"},
         "entry_keys": {"name", "category", "intended_path", "required_for", "status", "notes"},
         "list_key": "models",
+        "optional_entry_keys": {"runtime_path"},
     },
     "nodes/node_registry.json": {
         "required_keys": {"version", "nodes"},
         "entry_keys": {"name", "repo_url", "category", "required_for", "install_mode", "notes"},
         "list_key": "nodes",
+        "optional_entry_keys": {"folder_name"},
     },
     "presets/default_generation_presets.json": {
         "required_keys": {"version", "presets"},

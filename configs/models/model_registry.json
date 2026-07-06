@@ -5,6 +5,7 @@
       "name": "sd15_checkpoint",
       "category": "checkpoint",
       "intended_path": "assets/checkpoints/v1-5-pruned-emaonly.safetensors",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/checkpoints/sd15.safetensors",
       "required_for": ["base_txt2img", "base_img2img", "sd15_txt2img"],
       "status": "planned",
       "notes": "Primary SD 1.5 base checkpoint for Phase 1 txt2img workflow."
@@ -13,6 +14,7 @@
       "name": "sdxl_base",
       "category": "checkpoint",
       "intended_path": "assets/checkpoints/sd_xl_base_1.0.safetensors",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/checkpoints/sd_xl_base_1.0.safetensors",
       "required_for": [],
       "status": "planned",
       "notes": "SDXL base model for future high-resolution workflows."
@@ -21,6 +23,7 @@
       "name": "sdxl_refiner",
       "category": "checkpoint",
       "intended_path": "assets/checkpoints/sd_xl_refiner_1.0.safetensors",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/checkpoints/sd_xl_refiner_1.0.safetensors",
       "required_for": [],
       "status": "planned",
       "notes": "SDXL refiner for two-stage SDXL generation."
@@ -29,6 +32,7 @@
       "name": "controlnet_canny",
       "category": "controlnet",
       "intended_path": "assets/controlnets/control_v11p_sd15_canny.pth",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/controlnet/control_v11p_sd15_canny_fp16.safetensors",
       "required_for": ["controlnet_canny"],
       "status": "planned",
       "notes": "Canny edge ControlNet for SD 1.5."
@@ -37,6 +41,7 @@
       "name": "controlnet_depth",
       "category": "controlnet",
       "intended_path": "assets/controlnets/control_v11f1p_sd15_depth.pth",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/controlnet/control_v11f1p_sd15_depth_fp16.safetensors",
       "required_for": ["sd15_controlnet_depth", "depth_map_extraction"],
       "status": "planned",
       "notes": "Depth ControlNet for spatial guidance."
@@ -45,6 +50,7 @@
       "name": "controlnet_openpose",
       "category": "controlnet",
       "intended_path": "assets/controlnets/control_v11p_sd15_openpose.pth",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/controlnet/control_v11p_sd15_openpose_fp16.safetensors",
       "required_for": ["openpose_portrait", "sd15_openpose_portrait"],
       "status": "planned",
       "notes": "OpenPose ControlNet for human pose guidance."
@@ -69,6 +75,7 @@
       "name": "svd",
       "category": "video",
       "intended_path": "assets/checkpoints/svd_xt.safetensors",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/svd/svd_xt.safetensors",
       "required_for": ["svd_image_to_video"],
       "status": "planned",
       "notes": "Stable Video Diffusion checkpoint for image-to-video."
@@ -77,6 +84,7 @@
       "name": "animatediff_motion_modules",
       "category": "animation",
       "intended_path": "assets/checkpoints/mm_sd_v15_v2.ckpt",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/animatediff/mm_sd_v15_v2.ckpt",
       "required_for": ["animatediff_sequence"],
       "status": "planned",
       "notes": "AnimateDiff motion module for SD 1.5."
@@ -85,6 +93,7 @@
       "name": "insightface",
       "category": "face",
       "intended_path": "assets/insightface/",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/insightface/models/buffalo_l/w600k_r50.onnx",
       "required_for": ["reactor_faceswap"],
       "status": "planned",
       "notes": "InsightFace ONNX models for face detection and identity."

@@ -2,7 +2,7 @@
 
 A general-purpose, version-controlled AI Studio for high-end image generation, environment generation, character consistency, and video generation.
 
-**Current phase:** Phase 1 bootstrap foundation — repository support files, config manifests, and bootstrap scripts are in place. ComfyUI installation and workflow JSON implementation are next.
+**Current phase:** Phase 1b — notebook bootstrap wiring and ComfyUI install prep. Bootstrap scripts, config manifests, and `core/comfyui/install.sh` are in place.
 
 ## What This Is
 
@@ -111,6 +111,8 @@ python core/scripts/validate_manifests.py
 | `core/scripts/validate_paths.py` | Validate Colab/Drive/repo paths |
 | `core/scripts/validate_manifests.py` | Validate JSON manifests under `configs/` |
 | `core/scripts/list_workflows.py` | List workflow JSON files by category |
+| `core/scripts/check_nodes.py` | Report installed vs. missing custom nodes |
+| `core/scripts/verify_models.py` | Report present vs. missing model files |
 | `core/scripts/sync_outputs.py` | Copy latest ComfyUI output to Drive |
 
 ## Documentation
@@ -126,11 +128,11 @@ python core/scripts/validate_manifests.py
 
 ## Immediate Next Steps
 
-1. Wire notebook cells to call `core/scripts/` bootstrap helpers.
-2. Implement ComfyUI install script in `core/comfyui/`.
+1. Run Cell 3b in the control panel after cloning the repo to `/content/ai-studio-colab`.
+2. Wire notebook Cell 9 to optionally call `bash core/comfyui/install.sh`.
 3. Create first workflow JSON: `workflows/base/txt2img/workflow.json`.
-4. Add model download logic driven by `configs/models/model_registry.json`.
-5. Activate SD 1.5 checkpoint entry (`status: active`) after first successful generation.
+4. Add `core/comfyui/install_nodes.sh` driven by `configs/nodes/node_registry.json`.
+5. Mark `sd15_checkpoint` as `active` in the model registry after first successful generation.
 
 ## Development Philosophy
 

@@ -38,28 +38,38 @@ The control panel will become a self-updating AI Studio orchestrator:
 
 | Capability | Status | Helper |
 |------------|--------|--------|
-| Mount Google Drive | In notebook | — |
-| Verify GPU | In notebook | `validate_environment.py` |
-| Verify paths | Planned | `validate_paths.py` |
+| Mount Google Drive | In notebook (Cell 2) | — |
+| Verify GPU | In notebook (Cell 1) | `validate_environment.py` |
+| Verify paths | Cell 3b | `validate_paths.py` |
+| Repo bootstrap validation | Cell 3b | `bootstrap_repo.py`, `validate_manifests.py`, `list_workflows.py` |
 | Sync / pull repo | Planned | `bootstrap_repo.py` (git hook documented) |
-| Launch ComfyUI | In notebook | `colab/launch/` (future) |
-| Launch A1111 | In notebook | `colab/launch/` (future) |
-| Validate models | Planned | `validate_manifests.py` + future checker |
-| Validate nodes | Planned | future `check_nodes.py` |
-| Install missing models/nodes | Planned | driven by `configs/models/`, `configs/nodes/` |
+| Launch ComfyUI | In notebook (Cell 10) | `core/comfyui/install.sh` (Cell 9 integration planned) |
+| Launch A1111 | In notebook (Cell 10) | `colab/launch/` (future) |
+| Validate models | Available | `verify_models.py` |
+| Validate nodes | Available | `check_nodes.py` |
+| Install missing models/nodes | Planned | driven by registries + notebook managers |
 | Expose workflow menus | Planned | `list_workflows.py` + `workflow_registry.json` |
-| Sync outputs | Planned | `sync_outputs.py` |
+| Sync outputs | Available | `sync_outputs.py` |
 | Backup / restore workflows | Planned | Drive path `drive_workflows` |
 
 ## Bootstrap Scripts (callable from notebook)
 
+Cell 3b runs these automatically after Drive mount:
+
 ```python
-# Example Colab cells (Phase 1 bootstrap)
+# Cell 3b — Repository Bootstrap & Validation
 !python core/scripts/bootstrap_repo.py
 !python core/scripts/validate_environment.py
 !python core/scripts/validate_paths.py
 !python core/scripts/validate_manifests.py
 !python core/scripts/list_workflows.py
+```
+
+After ComfyUI install:
+
+```python
+!python core/scripts/check_nodes.py
+!python core/scripts/verify_models.py
 !python core/scripts/sync_outputs.py --dry-run
 ```
 

@@ -20,9 +20,17 @@ See [docs/colab-control-panel.md](../../docs/colab-control-panel.md) for:
 
 ## Bootstrap Validation (from notebook)
 
+Run **Cell 3b** after Drive mount and path setup (Cells 2–3):
+
 ```python
-!python core/scripts/bootstrap_repo.py
-!python core/scripts/validate_environment.py
-!python core/scripts/validate_paths.py
-!python core/scripts/validate_manifests.py
+# Cell 3b runs automatically:
+# bootstrap_repo.py, validate_environment.py, validate_paths.py,
+# validate_manifests.py, list_workflows.py
+```
+
+After ComfyUI install, run manually:
+
+```python
+!python {REPO_ROOT}/core/scripts/check_nodes.py
+!python {REPO_ROOT}/core/scripts/verify_models.py
 ```
