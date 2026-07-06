@@ -1,0 +1,166 @@
+#!/usr/bin/env python3
+"""Validate JSON manifest files under configs/."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+
+MANIFEST_RULES: dict[str, dict] = {
+    "paths/colab_paths.json": {
+        "required_keys": {"version", "environment", "paths"},
+        "paths_keys": {
+            "drive_root",
+            "comfyui_runtime",
+            "a1111_runtime",
+            "comfyui_output",
+            "drive_outputs",
+            "drive_models",
+            "drive_workflows",
+        },
+    },
+    "models/model_registry.json": {
+        "required_keys": {"version", "models"},
+        "entry_keys": {"name", "category", "intended_path", "required_for", "status", "notes"},
+        "list_key": "models",
+    },
+    "nodes/node_registry.json": {
+        "required_keys": {"version", "nodes"},
+        "entry_keys": {"name", "repo_url", "category", "required_for", "install_mode", "notes"},
+        "list_key": "nodes",
+    },
+    "presets/default_generation_presets.json": {
+        "required_keys": {"version", "presets"},
+        "entry_keys": {
+            "name",
+            "checkpoint",
+            "width",
+            "height",
+            "steps",
+            "cfg",
+            "sampler",
+            "scheduler",
+            "notes",
+        },
+        "list_key": "presets",
+        "optional_entry_keys": {"denoise"},
+    },
+    "workflows/workflow_registry.json": {
+        "required_keys": {"version", "workflows"},
+        "entry_keys": {"id", "category", "path", "status", "required_models", "required_nodes", "notes"},
+        "list_key": "workflows",
+    },
+}
+
+
+def find_repo_root(start: Path | None = None) -> Path:
+    current = (start or Path.cwd()).resolve()
+    for path in (current, *current.parents):
+        if (path / "README.md").is_file() and (path / "configs").is_dir():
+            return path
+    raise FileNotFoundError("Could not locate repository root.")
+
+
+def validate_manifest(rel_path: str, data: object) -> list[str]:
+    rules = MANIFEST_RULES.get(rel_path)
+    if rules is None:
+        return []
+
+    errors: list[str] = []
+    if not isinstance(data, dict):
+        return [f"{rel_path}: root must be a JSON object"]
+
+    missing_top = rules["required_keys"] - set(data.keys())
+    if missing_top:
+        errors.append(f"{rel_path}: missing top-level keys: {sorted(missing_top)}")
+
+    if rel_path == "paths/colab_paths.json":
+        paths = data.get("paths")
+        if isinstance(paths, dict):
+            missing_paths = rules["paths_keys"] - set(paths.keys())
+            if missing_paths:
+                errors.append(f"{rel_path}: missing paths keys: {sorted(missing_paths)}")
+        else:
+            errors.append(f"{rel_path}: 'paths' must be an object")
+
+    list_key = rules.get("list_key")
+    entry_keys = rules.get("entry_keys")
+    optional_keys = rules.get("optional_entry_keys", set())
+
+    if list_key and entry_keys:
+        entries = data.get(list_key)
+        if not isinstance(entries, list):
+            errors.append(f"{rel_path}: '{list_key}' must be a list")
+        else:
+            for index, entry in enumerate(entries):
+                if not isinstance(entry, dict):
+                    errors.append(f"{rel_path}: {list_key}[{index}] must be an object")
+                    continue
+                missing = entry_keys - set(entry.keys())
+                if missing:
+                    errors.append(
+                        f"{rel_path}: {list_key}[{index}] missing keys: {sorted(missing)}"
+                    )
+                extra_unknown = set(entry.keys()) - entry_keys - optional_keys - {"id", "name"}
+                # Allow id/name alias fields without noise
+
+    return errors
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Validate configs/*.json manifests.")
+    parser.add_argument("--repo-root", type=Path, default=None)
+    args = parser.parse_args()
+
+    print("AI Studio Colab — Manifest Validation")
+    print("=" * 40)
+
+    try:
+        repo_root = args.repo_root.resolve() if args.repo_root else find_repo_root()
+    except FileNotFoundError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    configs_root = repo_root / "configs"
+    json_files = sorted(configs_root.rglob("*.json"))
+
+    if not json_files:
+        print("ERROR: No JSON files found under configs/", file=sys.stderr)
+        return 1
+
+    all_errors: list[str] = []
+    passed = 0
+
+    for path in json_files:
+        rel = path.relative_to(configs_root).as_posix()
+        try:
+            with path.open(encoding="utf-8") as fh:
+                data = json.load(fh)
+        except json.JSONDecodeError as exc:
+            print(f"  [FAIL] {rel}: invalid JSON — {exc}")
+            all_errors.append(rel)
+            continue
+
+        errors = validate_manifest(rel, data)
+        if errors:
+            print(f"  [FAIL] {rel}")
+            for err in errors:
+                print(f"         {err}")
+            all_errors.append(rel)
+        else:
+            print(f"  [PASS] {rel}")
+            passed += 1
+
+    print(f"\nRESULT: {passed}/{len(json_files)} manifest(s) passed.")
+    if all_errors:
+        print(f"Failed: {', '.join(all_errors)}", file=sys.stderr)
+        return 1
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

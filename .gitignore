@@ -1,0 +1,58 @@
+# --- Generated output ---
+output/**
+!output/README.md
+
+# --- Model weights and large binaries ---
+assets/checkpoints/**
+!assets/checkpoints/README.md
+assets/controlnets/**
+!assets/controlnets/README.md
+assets/loras/**
+!assets/loras/README.md
+assets/vaes/**
+!assets/vaes/README.md
+assets/embeddings/**
+!assets/embeddings/README.md
+assets/upscalers/**
+!assets/upscalers/README.md
+assets/ipadapter/**
+!assets/ipadapter/README.md
+assets/clip/**
+!assets/clip/README.md
+assets/insightface/**
+!assets/insightface/README.md
+
+# --- Core engine installations (managed separately) ---
+core/comfyui/ComfyUI/
+core/automatic1111/stable-diffusion-webui/
+
+# --- Shared storage runtime data ---
+core/storage/cache/
+core/storage/temp/
+core/storage/uploads/
+
+# --- Use case test outputs ---
+use_cases/**/test_outputs/**
+!use_cases/**/test_outputs/README.md
+
+# --- Python / environment ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.*
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+
+# --- Logs ---
+*.log
+logs/

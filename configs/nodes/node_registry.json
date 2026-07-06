@@ -1,0 +1,58 @@
+{
+  "version": "1.0.0",
+  "nodes": [
+    {
+      "name": "ComfyUI-Manager",
+      "repo_url": "https://github.com/ltdrdata/ComfyUI-Manager",
+      "category": "management",
+      "required_for": ["all"],
+      "install_mode": "planned",
+      "notes": "Node and model management UI for ComfyUI. Installed first in bootstrap sequence."
+    },
+    {
+      "name": "ComfyUI-Impact-Pack",
+      "repo_url": "https://github.com/ltdrdata/ComfyUI-Impact-Pack",
+      "category": "utility",
+      "required_for": ["segmentation_map_extraction", "environment_generation"],
+      "install_mode": "planned",
+      "notes": "Segmentation, detailer, and utility nodes."
+    },
+    {
+      "name": "ComfyUI-AnimateDiff-Evolved",
+      "repo_url": "https://github.com/Kosinkadink/ComfyUI-AnimateDiff-Evolved",
+      "category": "animation",
+      "required_for": ["animatediff_sequence"],
+      "install_mode": "planned",
+      "notes": "AnimateDiff nodes for image-to-animation pipelines."
+    },
+    {
+      "name": "ComfyUI-ReActor",
+      "repo_url": "https://github.com/Gourieff/comfyui-reactor-node",
+      "category": "face",
+      "required_for": ["reactor_faceswap"],
+      "install_mode": "planned",
+      "notes": "Face swap and identity refinement via InsightFace."
+    },
+    {
+      "name": "comfyui_controlnet_aux",
+      "repo_url": "https://github.com/Fannovel16/comfyui_controlnet_aux",
+      "category": "preprocessor",
+      "required_for": [
+        "depth_map_extraction",
+        "normal_map_extraction",
+        "segmentation_map_extraction",
+        "openpose_portrait"
+      ],
+      "install_mode": "planned",
+      "notes": "ControlNet Aux preprocessors for map extraction workflows."
+    },
+    {
+      "name": "was-node-suite-comfyui",
+      "repo_url": "https://github.com/WASasquatch/was-node-suite-comfyui",
+      "category": "utility",
+      "required_for": ["environment_generation", "environment_reconstruction"],
+      "install_mode": "planned",
+      "notes": "Extended image processing and utility nodes."
+    }
+  ]
+}

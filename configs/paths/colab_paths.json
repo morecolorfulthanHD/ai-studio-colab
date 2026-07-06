@@ -1,0 +1,22 @@
+{
+  "version": "1.0.0",
+  "environment": "colab",
+  "description": "Standard path mappings for Google Colab runtime and persistent Drive storage.",
+  "paths": {
+    "drive_root": "/content/drive/MyDrive/AI_Studio",
+    "comfyui_runtime": "/content/ComfyUI",
+    "a1111_runtime": "/content/A1111",
+    "comfyui_output": "/content/ComfyUI/output",
+    "drive_outputs": "/content/drive/MyDrive/AI_Studio/outputs",
+    "drive_models": "/content/drive/MyDrive/AI_Studio/models/shared",
+    "drive_workflows": "/content/drive/MyDrive/AI_Studio/workflows"
+  },
+  "repo_relative": {
+    "workflows": "workflows",
+    "configs": "configs",
+    "assets": "assets",
+    "output": "output",
+    "scripts": "core/scripts"
+  },
+  "notes": "Colab runtime paths are ephemeral. Drive paths persist across sessions. Repository paths are relative to the cloned repo root."
+}

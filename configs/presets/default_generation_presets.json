@@ -1,0 +1,61 @@
+{
+  "version": "1.0.0",
+  "presets": [
+    {
+      "name": "sd15_txt2img",
+      "checkpoint": "sd15_checkpoint",
+      "width": 512,
+      "height": 768,
+      "steps": 28,
+      "cfg": 7.0,
+      "sampler": "euler_ancestral",
+      "scheduler": "normal",
+      "notes": "Default SD 1.5 text-to-image preset for portrait-oriented output."
+    },
+    {
+      "name": "sd15_img2img",
+      "checkpoint": "sd15_checkpoint",
+      "width": 512,
+      "height": 768,
+      "steps": 28,
+      "cfg": 7.0,
+      "sampler": "euler_ancestral",
+      "scheduler": "normal",
+      "denoise": 0.55,
+      "notes": "Image refinement preset. Denoise 0.55 preserves roughly half the source structure."
+    },
+    {
+      "name": "sd15_openpose_portrait",
+      "checkpoint": "sd15_checkpoint",
+      "width": 512,
+      "height": 768,
+      "steps": 30,
+      "cfg": 7.5,
+      "sampler": "dpmpp_2m",
+      "scheduler": "karras",
+      "notes": "OpenPose-guided portrait generation. Requires controlnet_openpose and pose map."
+    },
+    {
+      "name": "sd15_controlnet_depth",
+      "checkpoint": "sd15_checkpoint",
+      "width": 768,
+      "height": 512,
+      "steps": 28,
+      "cfg": 7.0,
+      "sampler": "euler_ancestral",
+      "scheduler": "normal",
+      "notes": "Depth-guided scene composition. Requires controlnet_depth and depth map."
+    },
+    {
+      "name": "sd15_reference_lock",
+      "checkpoint": "sd15_checkpoint",
+      "width": 512,
+      "height": 768,
+      "steps": 28,
+      "cfg": 6.5,
+      "sampler": "euler_ancestral",
+      "scheduler": "normal",
+      "notes": "Reference-conditioned generation via IPAdapter. Requires ipadapter model."
+    }
+  ]
+}
