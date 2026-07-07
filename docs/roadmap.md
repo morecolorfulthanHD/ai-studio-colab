@@ -2,7 +2,7 @@
 
 Phased development plan for AI Studio Colab. Each phase produces tested, documented, reusable building blocks before the next phase begins.
 
-**Current status:** Phase 1b in progress — notebook bootstrap wiring, ComfyUI `install.sh`, and node/model validation scripts.
+**Current status:** Epic 2 Package 1 — runtime platform foundation (`core/runtime/`, structured health, install planners).
 
 ---
 
@@ -25,24 +25,41 @@ Phased development plan for AI Studio Colab. Each phase produces tested, documen
 
 ---
 
-## Phase 1b — Notebook Wiring & ComfyUI Install Prep (in progress)
+## Phase 1b — Notebook Wiring & ComfyUI Install Prep ✓
 
-**Goal:** Wire the control panel to repo bootstrap scripts and prepare ComfyUI install layer.
+- [x] Notebook bootstrap cells (Cell 3b)
+- [x] ComfyUI `install.sh`
+- [x] `check_nodes.py`, `verify_models.py`
+
+---
+
+## Epic 2 — Runtime Platform
+
+### Package 1 — Runtime Foundation (in progress)
+
+**Goal:** Transform the repository into a registry-driven runtime platform with structured health reporting.
 
 | Deliverable | Location | Status |
 |-------------|----------|--------|
-| Notebook bootstrap cells | `colab/notebooks/` Cell 3b | Done |
-| ComfyUI install script | `core/comfyui/install.sh` | Done |
-| Node validation script | `core/scripts/check_nodes.py` | Done |
-| Model validation script | `core/scripts/verify_models.py` | Done |
-| Model registry runtime paths | `configs/models/model_registry.json` | Done |
-| Notebook → install.sh integration | Cell 9 | Deferred |
-| Custom node install script | `core/comfyui/install_nodes.sh` | Deferred |
+| Runtime manager | `core/runtime/runtime_manager.py` | Done |
+| Registry loader | `core/runtime/registry_loader.py` | Done |
+| Health model | `core/runtime/runtime_health.py` | Done |
+| Runtime state | `core/runtime/runtime_state.py` | Done |
+| Runtime report CLI | `core/scripts/runtime_report.py` | Done |
+| Install planners (dry-run) | `install_nodes.py`, `install_models.py`, `a1111/install.py` | Done |
+| Notebook Cell 3c | `colab/notebooks/` | Done |
+| Runtime platform docs | `docs/runtime-platform.md` | Done |
 
 **Exit criteria:**
-- Cell 3b runs all bootstrap scripts successfully after repo clone
-- `install.sh` produces working ComfyUI with Drive model symlink
-- `check_nodes.py` and `verify_models.py` report accurate status
+- `runtime_report.py` answers platform health with structured JSON
+- Install planners emit execution plans without downloading
+- Notebook Cell 3c displays runtime summary
+
+### Package 2 — Install Execution (planned)
+
+- Execute install plans from registry planners
+- Wire runtime manager into notebook Cell 9
+- First workflow JSON (`base/txt2img`)
 
 ---
 

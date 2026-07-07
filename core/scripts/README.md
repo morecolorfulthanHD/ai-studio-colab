@@ -22,6 +22,14 @@ Cross-engine utility scripts for bootstrap, validation, and batch processing.
 | `check_nodes.py` | Compare `custom_nodes/` vs. `configs/nodes/node_registry.json` | No |
 | `verify_models.py` | Check model files vs. `configs/models/model_registry.json` | No |
 
+## Runtime Platform (Epic 2)
+
+| Script | Purpose | Installs? |
+|--------|---------|-----------|
+| `runtime_report.py` | Unified health report (human, `--summary`, `--json`) | No |
+
+See [core/runtime/README.md](../runtime/README.md) and [docs/runtime-platform.md](../../docs/runtime-platform.md).
+
 ### Usage
 
 ```bash
@@ -31,6 +39,8 @@ python core/scripts/validate_environment.py
 python core/scripts/validate_paths.py
 python core/scripts/validate_manifests.py
 python core/scripts/list_workflows.py
+python core/scripts/runtime_report.py
+python core/scripts/runtime_report.py --json
 python core/scripts/check_nodes.py
 python core/scripts/verify_models.py
 python core/scripts/sync_outputs.py --dry-run
@@ -38,7 +48,10 @@ python core/scripts/sync_outputs.py --dry-run
 
 ### Notebook integration
 
-The control panel runs bootstrap scripts in **Cell 3b — Repository Bootstrap & Validation** (after Cells 2–3: Drive mount and path setup). Post-install checks: `check_nodes.py`, `verify_models.py`. See [docs/colab-control-panel.md](../../docs/colab-control-panel.md).
+- **Cell 3b** — Repository bootstrap validation (after Drive mount)
+- **Cell 3c** — Runtime platform health (`runtime_report.py`)
+
+Post-install: `check_nodes.py`, `verify_models.py`. See [docs/colab-control-panel.md](../../docs/colab-control-panel.md).
 
 ## Planned Scripts (future)
 

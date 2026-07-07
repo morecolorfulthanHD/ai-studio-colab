@@ -2,7 +2,7 @@
 
 Setup and launch procedures for AI Studio Colab.
 
-**Current phase:** Phase 1 bootstrap — config manifests and validation scripts are ready. ComfyUI install automation is the next step.
+**Current phase:** Epic 2 Package 1 — runtime platform with structured health reporting and install planners.
 
 ## Prerequisites
 
@@ -53,6 +53,26 @@ python core/scripts/verify_models.py
 ```
 
 These scripts validate structure and manifests. They do not install software or download models.
+
+### 2b. Runtime Platform Health
+
+From **Cell 3c — Runtime Platform Health** or manually:
+
+```bash
+python core/scripts/runtime_report.py
+python core/scripts/runtime_report.py --summary
+python core/scripts/runtime_report.py --json
+```
+
+Install planners (dry-run only — no downloads):
+
+```bash
+python core/comfyui/install_nodes.py --dry-run
+python core/comfyui/install_models.py --dry-run
+python core/a1111/install.py --dry-run
+```
+
+See [runtime-platform.md](runtime-platform.md).
 
 ### 3. Mount Google Drive
 

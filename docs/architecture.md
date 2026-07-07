@@ -22,7 +22,8 @@ This document describes the modular architecture of AI Studio Colab. The design 
 ┌────────────────────────────▼────────────────────────────────────┐
 │                        Core Layer                                │
 │  core/comfyui/  ·  core/automatic1111/  ·  core/scripts/        │
-│  core/shared_models/  ·  core/shared_nodes/  ·  core/storage/    │
+│  core/runtime/  ·  core/shared_models/  ·  core/shared_nodes/     │
+│  core/storage/                                                   │
 └────────────────────────────┬────────────────────────────────────┘
                              │
 ┌────────────────────────────▼────────────────────────────────────┐
@@ -69,9 +70,10 @@ Engine installations and shared infrastructure.
 | `core/shared_models/` | Symlinks or junctions pointing to `assets/` model directories |
 | `core/shared_nodes/` | Custom node repos shared across engines where applicable |
 | `core/storage/` | Runtime cache, temp files, and upload staging |
-| `core/scripts/` | Bootstrap, validation, and batch utility scripts |
+| `core/scripts/` | Bootstrap, validation, runtime report, batch utilities |
+| `core/runtime/` | Registry loader, health model, runtime manager, session state |
 
-Bootstrap scripts (`bootstrap_repo.py`, `validate_environment.py`, `validate_paths.py`, `validate_manifests.py`, `list_workflows.py`, `sync_outputs.py`) are callable from the control panel notebook. They use standard library Python only and perform no destructive operations.
+Bootstrap scripts are callable from the control panel notebook. The **runtime platform** (`core/runtime/`) provides structured health reporting and future orchestration hooks. See [runtime-platform.md](runtime-platform.md).
 
 Both ComfyUI and A1111 read models from `assets/` or Drive-backed paths via `configs/paths/colab_paths.json` rather than maintaining duplicate weight copies.
 
@@ -183,6 +185,9 @@ Future capabilities plug in at defined boundaries:
 | New pipeline | `workflows/pipelines/` |
 | New production project | `use_cases/<name>/` |
 | Automation / batching | Phase 7 — `core/scripts/`, `colab/utilities/` |
+| Runtime orchestration | `core/runtime/`, `core/scripts/runtime_report.py` |
+| Additional engines | `configs/engines/` (future), `core/a1111/`, inference hooks in `RuntimeManager` |
+| Container / bare-metal deploy | Docker / Windows / Linux hooks via `extension_points()` (future) |
 
 ## What Does Not Belong Here
 

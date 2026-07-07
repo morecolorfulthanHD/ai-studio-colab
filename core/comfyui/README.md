@@ -24,7 +24,7 @@ FORCE_REINSTALL=1 bash core/comfyui/install.sh
 
 ### What it does not do
 
-- Install custom nodes (use notebook Node Manager or future `install_nodes.sh`)
+- Install custom nodes (use `install_nodes.py` planner or notebook Node Manager)
 - Download model weights
 - Remove existing installs unless `FORCE_REINSTALL=1`
 
@@ -48,12 +48,28 @@ The notebook's Cell 9 (`install_comfyui`) provides an in-notebook installer with
 
 Both approaches target the same runtime path (`/content/ComfyUI`) and shared models directory.
 
+## Install Planners (dry-run)
+
+| Script | Purpose |
+|--------|---------|
+| `install_nodes.py` | Plan custom node clones from `node_registry.json` |
+| `install_models.py` | Plan model placement from `model_registry.json` |
+
+```bash
+python core/comfyui/install_nodes.py --dry-run
+python core/comfyui/install_models.py --dry-run
+```
+
+Execution deferred to Epic 2 Package 2. Plans are consumed by `RuntimeManager.plan_comfyui_install()`.
+
 ## Planned Files
 
 | Item | Purpose | Status |
 |------|---------|--------|
 | `install.sh` | Clone ComfyUI, deps, model symlink | Done |
-| `install_nodes.sh` | Install nodes from `configs/nodes/node_registry.json` | Planned |
+| `install_nodes.py` | Node install plan (dry-run) | Done |
+| `install_models.py` | Model install plan (dry-run) | Done |
+| `install_nodes.sh` | Execute node install plan | Planned |
 | `launch.sh` | Start ComfyUI server | Planned |
 
 The `ComfyUI/` runtime directory is gitignored and created at install time.
@@ -63,6 +79,7 @@ The `ComfyUI/` runtime directory is gitignored and created at install time.
 After install, verify nodes and models:
 
 ```bash
+python core/scripts/runtime_report.py
 python core/scripts/check_nodes.py
 python core/scripts/verify_models.py
 ```

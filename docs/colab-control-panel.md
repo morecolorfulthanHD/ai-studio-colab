@@ -50,6 +50,7 @@ The control panel will become a self-updating AI Studio orchestrator:
 | Install missing models/nodes | Planned | driven by registries + notebook managers |
 | Expose workflow menus | Planned | `list_workflows.py` + `workflow_registry.json` |
 | Sync outputs | Available | `sync_outputs.py` |
+| Runtime health | Cell 3c | `runtime_report.py` |
 | Backup / restore workflows | Planned | Drive path `drive_workflows` |
 
 ## Bootstrap Scripts (callable from notebook)
@@ -72,6 +73,10 @@ After ComfyUI install:
 !python core/scripts/verify_models.py
 !python core/scripts/sync_outputs.py --dry-run
 ```
+
+## Runtime Platform (Cell 3c)
+
+Cell 3c runs `runtime_report.py` for structured health across notebook, repo, Drive, engines, registries, and GPU.
 
 All scripts use standard library Python only. They are safe to run repeatedly and do not download models or install software.
 

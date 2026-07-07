@@ -23,6 +23,7 @@ python core/scripts/verify_models.py
 | `validate_manifests.py` | Invalid or incomplete JSON under `configs/` |
 | `check_nodes.py` | One or more registered custom nodes missing from `custom_nodes/` |
 | `verify_models.py` | Only when `--require-active-only` and an `active` model is missing |
+| `runtime_report.py` | Exit 1 when overall health status is `fail` |
 
 ## Installation Issues
 

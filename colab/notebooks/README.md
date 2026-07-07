@@ -28,7 +28,24 @@ Run **Cell 3b** after Drive mount and path setup (Cells 2–3):
 # validate_manifests.py, list_workflows.py
 ```
 
-After ComfyUI install, run manually:
+## Runtime Platform Health (Cell 3c)
+
+After Cell 3b, run **Cell 3c** for unified platform health:
+
+```python
+# Cell 3c runs runtime_report.py automatically
+```
+
+Or manually:
+
+```bash
+python core/scripts/runtime_report.py
+python core/scripts/runtime_report.py --summary
+```
+
+## Post-Install Validation
+
+After ComfyUI install:
 
 ```python
 !python {REPO_ROOT}/core/scripts/check_nodes.py
