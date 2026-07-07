@@ -10,6 +10,7 @@ from typing import Any
 from .registry_loader import RegistryBundle, RegistryLoader, find_repo_root
 from .runtime_health import HealthReport, build_health_report
 from .runtime_state import RuntimeState
+from .asset_manager import AssetManager
 
 
 class RuntimeManager:
@@ -55,11 +56,17 @@ class RuntimeManager:
                 "nodes": len(bundle.nodes),
                 "workflows": len(bundle.workflows),
                 "presets": len(bundle.presets),
+                "assets": len(bundle.assets),
                 "manifests": len(bundle.manifests),
             },
             "paths": {key: str(bundle.path(key)) for key in bundle.paths},
             "state": self._state.to_dict(),
         }
+
+    def asset_summary(self, workflow_id: str | None = None) -> dict[str, Any]:
+        bundle = self.load_registries()
+        manager = AssetManager(bundle=bundle)
+        return manager.to_dict(workflow_id=workflow_id)
 
     def health_report(self, reload: bool = False) -> HealthReport:
         bundle = self.load_registries(reload=reload)

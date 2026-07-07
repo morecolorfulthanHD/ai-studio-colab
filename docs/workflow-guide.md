@@ -18,7 +18,7 @@ Every workflow directory will eventually contain:
 | **Sample images** | Reference outputs stored in workflow directory or `output/` |
 | **Known limitations** | Edge cases, quality caveats, hardware requirements |
 
-Workflow JSON files and their README documentation live in the same directory. The canonical index of planned and active workflows is `configs/workflows/workflow_registry.json`.
+Workflow JSON files and their README documentation live in the same directory. The canonical index of planned and active workflows is `configs/workflows/workflow_registry.json`. Cross-cutting asset dependencies are tracked in `configs/assets/asset_registry.json` — see [asset-registry.md](../docs/asset-registry.md).
 
 List on-disk workflow JSON files:
 

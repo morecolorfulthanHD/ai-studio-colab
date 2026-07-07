@@ -27,6 +27,7 @@ Cross-engine utility scripts for bootstrap, validation, and batch processing.
 | Script | Purpose | Installs? |
 |--------|---------|-----------|
 | `runtime_report.py` | Unified health report (human, `--summary`, `--json`) | No |
+| `validate_assets.py` | Asset registry validation (`--workflow`, `--type`, `--json`) | No |
 
 See [core/runtime/README.md](../runtime/README.md) and [docs/runtime-platform.md](../../docs/runtime-platform.md).
 

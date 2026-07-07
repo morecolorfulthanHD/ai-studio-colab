@@ -29,7 +29,7 @@ This document describes the modular architecture of AI Studio Colab. The design 
 ┌────────────────────────────▼────────────────────────────────────┐
 │                     Configuration Layer                          │
 │  configs/models/  ·  configs/nodes/  ·  configs/paths/           │
-│  configs/presets/  ·  configs/workflows/                         │
+│  configs/presets/  ·  configs/workflows/  ·  configs/assets/      │
 └────────────────────────────┬────────────────────────────────────┘
                              │
 ┌────────────────────────────▼────────────────────────────────────┐
@@ -71,7 +71,7 @@ Engine installations and shared infrastructure.
 | `core/shared_nodes/` | Custom node repos shared across engines where applicable |
 | `core/storage/` | Runtime cache, temp files, and upload staging |
 | `core/scripts/` | Bootstrap, validation, runtime report, batch utilities |
-| `core/runtime/` | Registry loader, health model, runtime manager, session state |
+| `core/runtime/` | Registry loader, health model, runtime manager, asset manager, session state |
 
 Bootstrap scripts are callable from the control panel notebook. The **runtime platform** (`core/runtime/`) provides structured health reporting and future orchestration hooks. See [runtime-platform.md](runtime-platform.md).
 
@@ -88,6 +88,9 @@ Centralized, version-controlled settings that workflows reference by key.
 | `configs/paths/colab_paths.json` | Colab runtime and Google Drive path mappings |
 | `configs/presets/default_generation_presets.json` | Named parameter sets (sampler, steps, CFG, resolution) |
 | `configs/workflows/workflow_registry.json` | Workflow index with status, dependencies, and paths |
+| `configs/assets/asset_registry.json` | Unified cross-cutting asset inventory |
+
+See [asset-registry.md](asset-registry.md) for how asset, model, and workflow registries relate.
 
 ### Asset Layer (`assets/`)
 

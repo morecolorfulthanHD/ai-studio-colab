@@ -29,6 +29,7 @@ REQUIRED_CONFIG_FILES = (
     "configs/nodes/node_registry.json",
     "configs/presets/default_generation_presets.json",
     "configs/workflows/workflow_registry.json",
+    "configs/assets/asset_registry.json",
 )
 
 CANONICAL_NOTEBOOK = "colab/notebooks/AI_Studio_Control_Panel_Colab.ipynb"

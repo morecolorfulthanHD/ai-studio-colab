@@ -56,11 +56,11 @@ These scripts validate structure and manifests. They do not install software or 
 
 ### 2b. Runtime Platform Health
 
-From **Cell 3c — Runtime Platform Health** or manually:
+From **Cell 3c** or manually:
 
 ```bash
-python core/scripts/runtime_report.py
 python core/scripts/runtime_report.py --summary
+python core/scripts/validate_assets.py --summary
 python core/scripts/runtime_report.py --json
 ```
 

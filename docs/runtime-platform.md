@@ -21,6 +21,7 @@ core/scripts/runtime_report.py
         ▼
 core/runtime/runtime_manager.py
         ├── registry_loader.py   ◄── configs/**/*.json
+        ├── asset_manager.py     ◄── configs/assets/asset_registry.json
         ├── runtime_health.py
         └── runtime_state.py
         │
@@ -34,7 +35,7 @@ core/runtime/runtime_manager.py
 | Phase | What Happens | Status |
 |-------|--------------|--------|
 | 1. Bootstrap | Clone repo, mount Drive, validate structure | Epic 1 ✓ |
-| 2. Health check | `runtime_report.py` / Cell 3c | Epic 2 Pkg 1 ✓ |
+| 2. Health check | `runtime_report.py` + `validate_assets.py` / Cell 3c | Epic 2 Pkg 1–2 ✓ |
 | 3. Plan installs | Install planners emit dry-run steps | Epic 2 Pkg 1 ✓ |
 | 4. Execute installs | Planners execute plans (future) | Deferred |
 | 5. Launch engines | ComfyUI / A1111 via notebook or launch scripts | Partial |
@@ -43,7 +44,7 @@ core/runtime/runtime_manager.py
 ## Registry Flow
 
 1. `RegistryLoader` discovers every `*.json` file under `configs/`
-2. Known registries are exposed as typed lists (`models`, `nodes`, `workflows`, `presets`)
+2. Known registries are exposed as typed lists (`models`, `nodes`, `workflows`, `presets`, `assets`)
 3. Unknown future manifests remain in `bundle.manifests` without code changes
 4. Paths resolve through `configs/paths/colab_paths.json` — no hardcoded `/content/` in runtime code
 
@@ -78,6 +79,7 @@ Components checked:
 - Workflow registry (registered vs on-disk JSON)
 - Node registry (installed vs missing)
 - Model registry (present vs planned)
+- **Asset registry** (unified inventory — present / missing / planned)
 - GPU (`nvidia-smi`)
 
 ### Unified report (`runtime_report.py`)
@@ -86,6 +88,7 @@ Components checked:
 python core/scripts/runtime_report.py           # human-readable
 python core/scripts/runtime_report.py --summary # one line
 python core/scripts/runtime_report.py --json    # full structured JSON
+python core/scripts/validate_assets.py --summary
 ```
 
 ### Notebook integration

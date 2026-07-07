@@ -2,7 +2,7 @@
 
 A general-purpose, version-controlled AI Studio for high-end image generation, environment generation, character consistency, and video generation.
 
-**Current phase:** Epic 2 Package 1 — runtime platform foundation (`core/runtime/`, health reporting, install planners).
+**Current phase:** Epic 2 Package 2 — unified asset registry foundation.
 
 ## What This Is
 
@@ -80,7 +80,8 @@ ai-studio-colab/
 │   ├── models/model_registry.json
 │   ├── nodes/node_registry.json
 │   ├── presets/default_generation_presets.json
-│   └── workflows/workflow_registry.json
+│   ├── workflows/workflow_registry.json
+│   └── assets/asset_registry.json
 ├── assets/                       # Model weight storage (gitignored binaries)
 ├── workflows/                    # Composable workflow definitions
 ├── use_cases/                    # Project validation datasets
@@ -115,6 +116,7 @@ python core/scripts/validate_manifests.py
 | `core/scripts/runtime_report.py` | Unified runtime health report (human + JSON) |
 | `core/scripts/check_nodes.py` | Report installed vs. missing custom nodes |
 | `core/scripts/verify_models.py` | Report present vs. missing model files |
+| `core/scripts/validate_assets.py` | Asset registry validation |
 | `core/scripts/sync_outputs.py` | Copy latest ComfyUI output to Drive |
 
 ## Documentation
@@ -122,6 +124,7 @@ python core/scripts/validate_manifests.py
 | Document | Description |
 |----------|-------------|
 | [colab-control-panel.md](docs/colab-control-panel.md) | Canonical notebook and orchestration design |
+| [asset-registry.md](docs/asset-registry.md) | Unified asset inventory and registry relationships |
 | [runtime-platform.md](docs/runtime-platform.md) | Runtime lifecycle, registry flow, health model |
 | [architecture.md](docs/architecture.md) | System design and module boundaries |
 | [installation.md](docs/installation.md) | Setup and update procedures |
@@ -131,8 +134,8 @@ python core/scripts/validate_manifests.py
 
 ## Immediate Next Steps
 
-1. Run Cell 3c (`runtime_report.py`) in Colab after bootstrap validation.
-2. Epic 2 Package 2: execute install plans (nodes, models) from registry planners.
+1. Run Cell 3c (`runtime_report.py` + `validate_assets.py`) in Colab.
+2. Epic 2 Package 3: execute install plans (nodes, models) from registry planners.
 3. Create first workflow JSON: `workflows/base/txt2img/workflow.json`.
 4. Wire notebook Cell 9 to runtime manager install execution.
 5. Mark `sd15_checkpoint` as `active` after first successful generation.

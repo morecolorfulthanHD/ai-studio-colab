@@ -55,6 +55,26 @@ MANIFEST_RULES: dict[str, dict] = {
         "entry_keys": {"id", "category", "path", "status", "required_models", "required_nodes", "notes"},
         "list_key": "workflows",
     },
+    "assets/asset_registry.json": {
+        "required_keys": {"version", "assets"},
+        "entry_keys": {
+            "id",
+            "name",
+            "asset_type",
+            "category",
+            "scope",
+            "engine",
+            "intended_path",
+            "required_for",
+            "status",
+            "source_type",
+            "source_url",
+            "license_notes",
+            "notes",
+        },
+        "list_key": "assets",
+        "optional_entry_keys": {"runtime_path"},
+    },
 }
 
 

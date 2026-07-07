@@ -19,9 +19,11 @@ from core.runtime.registry_loader import find_repo_root
 def build_report(manager: RuntimeManager) -> dict:
     health = manager.health_report()
     status = manager.get_runtime_status()
+    assets = manager.asset_summary()
     return {
         "runtime_status": status,
         "health": health.to_dict(),
+        "assets": assets,
         "extension_points": manager.extension_points(),
     }
 
@@ -42,6 +44,7 @@ def to_human(report: dict) -> str:
         lines.append(f"  [{check['status'].upper():7}] {check['component']}: {check['message']}")
 
     summary = report["runtime_status"]["registry_summary"]
+    asset_summary = report.get("assets", {}).get("summary", {})
     lines.extend(
         [
             "",
@@ -51,20 +54,39 @@ def to_human(report: dict) -> str:
             f"  Nodes:     {summary['nodes']}",
             f"  Workflows: {summary['workflows']}",
             f"  Presets:   {summary['presets']}",
+            f"  Assets:    {summary.get('assets', 0)}",
             f"  Manifests: {summary['manifests']}",
         ]
     )
+    if asset_summary:
+        lines.extend(
+            [
+                "",
+                "Asset Summary",
+                "-" * 40,
+                f"  Present: {asset_summary.get('present', 0)}",
+                f"  Missing: {asset_summary.get('missing', 0)}",
+                f"  Planned: {asset_summary.get('planned', 0)}",
+            ]
+        )
     return "\n".join(lines)
 
 
 def to_summary(report: dict) -> str:
     health = report["health"]
     reg = report["runtime_status"]["registry_summary"]
+    asset = report.get("assets", {}).get("summary", {})
+    asset_part = ""
+    if asset:
+        asset_part = (
+            f" | Assets: {asset.get('present', 0)} present"
+            f"/{asset.get('total', 0)} total"
+        )
     return (
         f"Health: {health['overall_status'].upper()} | "
         f"Env: {report['runtime_status']['environment']} | "
         f"Models: {reg['models']} | Nodes: {reg['nodes']} | "
-        f"Workflows: {reg['workflows']} (on disk via health details)"
+        f"Workflows: {reg['workflows']}{asset_part}"
     )
 
 

@@ -2,7 +2,40 @@
 
 Phased development plan for AI Studio Colab. Each phase produces tested, documented, reusable building blocks before the next phase begins.
 
-**Current status:** Epic 2 Package 1 — runtime platform foundation (`core/runtime/`, structured health, install planners).
+**Current status:** Epic 2 Package 2 — unified asset registry foundation.
+
+---
+
+## Epic 2 — Runtime Platform
+
+### Package 1 — Runtime Foundation ✓
+
+- [x] Runtime manager, health model, registry loader
+- [x] Install planners (dry-run), `runtime_report.py`, Cell 3c
+
+### Package 2 — Unified Asset Registry (in progress)
+
+**Goal:** Cross-cutting asset inventory layer for models, workflows, references, anchors, and maps.
+
+| Deliverable | Location | Status |
+|-------------|----------|--------|
+| Asset registry manifest | `configs/assets/asset_registry.json` | Done |
+| Asset manager | `core/runtime/asset_manager.py` | Done |
+| Asset validation CLI | `core/scripts/validate_assets.py` | Done |
+| Runtime integration | health + `runtime_report.py` | Done |
+| Asset registry docs | `docs/asset-registry.md` | Done |
+| Notebook asset check | Cell 3c `--summary` | Done |
+
+**Exit criteria:**
+- `validate_assets.py` reports by type, status, workflow
+- `runtime_report.py` includes asset summary
+- Health check includes `assets` component
+
+### Package 3 — Install Execution (planned)
+
+- Execute install plans from registry planners
+- Wire runtime manager into notebook Cell 9
+- First workflow JSON (`base/txt2img`)
 
 ---
 
@@ -21,7 +54,6 @@ Phased development plan for AI Studio Colab. Each phase produces tested, documen
 - [x] Config manifests (`configs/paths/`, `configs/models/`, etc.)
 - [x] Bootstrap scripts (`core/scripts/`)
 - [x] Control panel documentation (`docs/colab-control-panel.md`)
-- [x] Relocate `AI_Studio_Control_Panel_Colab.ipynb` to `colab/notebooks/`
 
 ---
 
@@ -30,36 +62,6 @@ Phased development plan for AI Studio Colab. Each phase produces tested, documen
 - [x] Notebook bootstrap cells (Cell 3b)
 - [x] ComfyUI `install.sh`
 - [x] `check_nodes.py`, `verify_models.py`
-
----
-
-## Epic 2 — Runtime Platform
-
-### Package 1 — Runtime Foundation (in progress)
-
-**Goal:** Transform the repository into a registry-driven runtime platform with structured health reporting.
-
-| Deliverable | Location | Status |
-|-------------|----------|--------|
-| Runtime manager | `core/runtime/runtime_manager.py` | Done |
-| Registry loader | `core/runtime/registry_loader.py` | Done |
-| Health model | `core/runtime/runtime_health.py` | Done |
-| Runtime state | `core/runtime/runtime_state.py` | Done |
-| Runtime report CLI | `core/scripts/runtime_report.py` | Done |
-| Install planners (dry-run) | `install_nodes.py`, `install_models.py`, `a1111/install.py` | Done |
-| Notebook Cell 3c | `colab/notebooks/` | Done |
-| Runtime platform docs | `docs/runtime-platform.md` | Done |
-
-**Exit criteria:**
-- `runtime_report.py` answers platform health with structured JSON
-- Install planners emit execution plans without downloading
-- Notebook Cell 3c displays runtime summary
-
-### Package 2 — Install Execution (planned)
-
-- Execute install plans from registry planners
-- Wire runtime manager into notebook Cell 9
-- First workflow JSON (`base/txt2img`)
 
 ---
 

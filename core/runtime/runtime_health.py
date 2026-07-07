@@ -293,6 +293,43 @@ def check_gpu() -> HealthCheck:
     )
 
 
+def check_asset_registry(bundle: RegistryBundle) -> HealthCheck:
+    from .asset_manager import AssetManager
+
+    manager = AssetManager(bundle=bundle)
+    summary = manager.summary()
+    if summary.required_missing:
+        status = HealthStatus.FAIL
+        message = (
+            f"{summary.present} present, {summary.missing} missing, "
+            f"{summary.planned} planned; {len(summary.required_missing)} required missing."
+        )
+    elif summary.missing:
+        status = HealthStatus.WARN
+        message = (
+            f"{summary.present} present, {summary.missing} missing, {summary.planned} planned."
+        )
+    elif summary.present:
+        status = HealthStatus.OK
+        message = (
+            f"{summary.present} present, {summary.planned} planned of {summary.total} assets."
+        )
+    else:
+        status = HealthStatus.PLANNED
+        message = f"{summary.total} assets registered; none present on disk yet."
+
+    return HealthCheck(
+        "assets",
+        status,
+        message,
+        {
+            "summary": summary.to_dict(),
+            "by_type": summary.by_type,
+            "required_missing": summary.required_missing,
+        },
+    )
+
+
 def build_health_report(bundle: RegistryBundle) -> HealthReport:
     checks = [
         check_notebook(bundle),
@@ -303,6 +340,7 @@ def build_health_report(bundle: RegistryBundle) -> HealthReport:
         check_workflow_registry(bundle),
         check_node_registry(bundle),
         check_model_registry(bundle),
+        check_asset_registry(bundle),
         check_gpu(),
     ]
     generated_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
