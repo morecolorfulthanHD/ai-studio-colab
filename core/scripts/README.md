@@ -13,7 +13,8 @@ Cross-engine utility scripts for bootstrap, validation, and batch processing.
 | `validate_paths.py` | Validate Colab/Drive/repo paths from manifest | No |
 | `validate_manifests.py` | Validate JSON schemas under `configs/` | No |
 | `list_workflows.py` | List workflow JSON files by category | No |
-| `sync_outputs.py` | Copy latest ComfyUI output to Drive (`--dry-run`) | No |
+| `sync_outputs.py` | Copy single newest ComfyUI output to Drive (`--dry-run`; not bulk sync) | No |
+| `dogfood_core_runtime.py` | Sprint 1 dogfooding checks (PASS/WARN/FAIL summary) | No |
 
 ## Runtime Verification (Phase 1b)
 
@@ -48,7 +49,10 @@ python core/scripts/validate_capabilities.py --summary
 python core/scripts/check_nodes.py
 python core/scripts/verify_models.py
 python core/scripts/sync_outputs.py --dry-run
+python core/scripts/dogfood_core_runtime.py
 ```
+
+See [docs/dogfooding/core-runtime-txt2img-checklist.md](../../docs/dogfooding/core-runtime-txt2img-checklist.md) for Colab validation steps.
 
 ### Notebook integration
 

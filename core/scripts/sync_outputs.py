@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Copy the latest ComfyUI output file to persistent Google Drive storage.
 
-By default copies only the single newest file (not a bulk sync).
+Safe to run after generation. Copies only the single newest file in the
+ComfyUI output directory — not a bulk sync of the entire folder.
+
+Use --dry-run to preview source/destination without writing files.
 """
 
 from __future__ import annotations
@@ -42,7 +45,10 @@ def latest_file(directory: Path) -> Path | None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Copy latest ComfyUI output to Drive (single file)."
+        description=(
+            "Copy the single newest ComfyUI output file to Drive. "
+            "Not a bulk sync. Safe after generation; use --dry-run to preview."
+        )
     )
     parser.add_argument("--repo-root", type=Path, default=None)
     parser.add_argument(

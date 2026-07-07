@@ -158,8 +158,12 @@ In ComfyUI:
 
 ```bash
 python core/scripts/list_workflows.py
+python core/scripts/dogfood_core_runtime.py
 python core/scripts/sync_outputs.py --dry-run
 ```
+
+For end-to-end Colab validation (bootstrap → install → txt2img → output copy), follow
+[dogfooding/core-runtime-txt2img-checklist.md](dogfooding/core-runtime-txt2img-checklist.md).
 
 ## Launching
 

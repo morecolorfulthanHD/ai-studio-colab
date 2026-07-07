@@ -119,7 +119,15 @@ python core/scripts/validate_manifests.py
 | `core/scripts/verify_models.py` | Report present vs. missing model files |
 | `core/scripts/validate_assets.py` | Asset registry validation |
 | `core/scripts/validate_capabilities.py` | Capability readiness validation |
-| `core/scripts/sync_outputs.py` | Copy latest ComfyUI output to Drive |
+| `core/scripts/sync_outputs.py` | Copy latest ComfyUI output to Drive (`--dry-run`) |
+| `core/scripts/dogfood_core_runtime.py` | Read-only dogfooding checks (PASS/WARN/FAIL) |
+
+## Dogfooding (Sprint 1)
+
+Validate core runtime + base txt2img in Colab before adding advanced workflows:
+
+- Checklist: [docs/dogfooding/core-runtime-txt2img-checklist.md](docs/dogfooding/core-runtime-txt2img-checklist.md)
+- Support script: `python core/scripts/dogfood_core_runtime.py`
 
 ## Documentation
 
@@ -134,6 +142,7 @@ python core/scripts/validate_manifests.py
 | [workflow-guide.md](docs/workflow-guide.md) | Workflow categories and composition |
 | [roadmap.md](docs/roadmap.md) | Phased development plan |
 | [troubleshooting.md](docs/troubleshooting.md) | Common issues and diagnostics |
+| [dogfooding/core-runtime-txt2img-checklist.md](docs/dogfooding/core-runtime-txt2img-checklist.md) | Colab validation checklist (Sprint 1) |
 
 ## Immediate Next Steps
 

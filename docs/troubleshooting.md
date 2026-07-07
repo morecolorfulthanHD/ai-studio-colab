@@ -2,6 +2,18 @@
 
 Common issues and diagnostics for AI Studio Colab.
 
+## Dogfooding Support
+
+For Sprint 1 Colab validation, run the read-only dogfooding script:
+
+```bash
+python core/scripts/dogfood_core_runtime.py
+```
+
+See [dogfooding/core-runtime-txt2img-checklist.md](dogfooding/core-runtime-txt2img-checklist.md) for the full pass/fail checklist.
+
+`WARN` results are expected locally (no Colab GPU, ComfyUI, or SD1.5). `FAIL` indicates repository/schema problems.
+
 ## Bootstrap Scripts
 
 Run these in order to diagnose setup issues:
@@ -71,13 +83,13 @@ python core/comfyui/install_models.py --dry-run
 
 ## Output Sync
 
-Copy only the latest ComfyUI output to Drive:
+`sync_outputs.py` copies **only the single newest file** from ComfyUI output — not a bulk folder sync. Safe to run after generation.
 
 ```bash
 # Preview without copying
 python core/scripts/sync_outputs.py --dry-run
 
-# Copy latest file
+# Copy latest file only
 python core/scripts/sync_outputs.py
 ```
 
