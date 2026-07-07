@@ -28,6 +28,7 @@ Cross-engine utility scripts for bootstrap, validation, and batch processing.
 |--------|---------|-----------|
 | `runtime_report.py` | Unified health report (human, `--summary`, `--json`) | No |
 | `validate_assets.py` | Asset registry validation (`--workflow`, `--type`, `--json`) | No |
+| `validate_capabilities.py` | Capability readiness validation (`--capability`, `--json`) | No |
 
 See [core/runtime/README.md](../runtime/README.md) and [docs/runtime-platform.md](../../docs/runtime-platform.md).
 
@@ -42,6 +43,8 @@ python core/scripts/validate_manifests.py
 python core/scripts/list_workflows.py
 python core/scripts/runtime_report.py
 python core/scripts/runtime_report.py --json
+python core/scripts/validate_assets.py --summary
+python core/scripts/validate_capabilities.py --summary
 python core/scripts/check_nodes.py
 python core/scripts/verify_models.py
 python core/scripts/sync_outputs.py --dry-run
@@ -50,7 +53,7 @@ python core/scripts/sync_outputs.py --dry-run
 ### Notebook integration
 
 - **Cell 3b** — Repository bootstrap validation (after Drive mount)
-- **Cell 3c** — Runtime platform health (`runtime_report.py`)
+- **Cell 3c** — Runtime platform health (`runtime_report.py` + asset/capability summaries)
 
 Post-install: `check_nodes.py`, `verify_models.py`. See [docs/colab-control-panel.md](../../docs/colab-control-panel.md).
 

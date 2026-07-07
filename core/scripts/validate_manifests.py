@@ -75,6 +75,26 @@ MANIFEST_RULES: dict[str, dict] = {
         "list_key": "assets",
         "optional_entry_keys": {"runtime_path"},
     },
+    "capabilities/capability_registry.json": {
+        "required_keys": {"version", "capabilities"},
+        "entry_keys": {
+            "id",
+            "name",
+            "description",
+            "category",
+            "maturity",
+            "status",
+            "supported_engines",
+            "required_models",
+            "required_nodes",
+            "required_assets",
+            "required_workflows",
+            "dependencies",
+            "validation_rules",
+            "notes",
+        },
+        "list_key": "capabilities",
+    },
 }
 
 

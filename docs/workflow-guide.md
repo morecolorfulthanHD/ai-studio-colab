@@ -18,7 +18,7 @@ Every workflow directory will eventually contain:
 | **Sample images** | Reference outputs stored in workflow directory or `output/` |
 | **Known limitations** | Edge cases, quality caveats, hardware requirements |
 
-Workflow JSON files and their README documentation live in the same directory. The canonical index of planned and active workflows is `configs/workflows/workflow_registry.json`. Cross-cutting asset dependencies are tracked in `configs/assets/asset_registry.json` — see [asset-registry.md](../docs/asset-registry.md).
+Workflow JSON files and their README documentation live in the same directory. The canonical index of planned and active workflows is `configs/workflows/workflow_registry.json`. Cross-cutting asset dependencies are tracked in `configs/assets/asset_registry.json` and user-facing functionality readiness is tracked in `configs/capabilities/capability_registry.json` — see [asset-registry.md](../docs/asset-registry.md) and [capability-platform.md](capability-platform.md).
 
 List on-disk workflow JSON files:
 
@@ -127,6 +127,14 @@ pipelines/portrait_generation ──► animation/image_sequence
 3. **Configs, not hardcodes** — Workflows reference `configs/presets/` keys for parameters; never embed model filenames in workflow JSON.
 4. **Document the chain** — Pipeline README files must list every sub-workflow invoked and the data passed between them.
 5. **Use cases consume, don't fork** — Project-specific prompts and references go in `use_cases/`; the workflow JSON stays in `workflows/`.
+
+## Capabilities vs Workflows
+
+- A **workflow** is an implementation artifact (`workflow.json`) for a specific graph/pipeline.
+- A **capability** is a user-facing function (e.g. txt2img, depth extraction) that may be implemented by one or more workflows.
+- Capability readiness is computed from required models/nodes/assets/workflows, not from one file existing.
+
+In short: workflows *implement* capabilities; capabilities *describe what the platform can currently do*.
 
 ## Workflow File Conventions
 

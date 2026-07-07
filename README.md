@@ -2,7 +2,7 @@
 
 A general-purpose, version-controlled AI Studio for high-end image generation, environment generation, character consistency, and video generation.
 
-**Current phase:** Epic 2 Package 2 — unified asset registry foundation.
+**Current phase:** Epic 3 Package 1 — capability platform foundation.
 
 ## What This Is
 
@@ -81,7 +81,8 @@ ai-studio-colab/
 │   ├── nodes/node_registry.json
 │   ├── presets/default_generation_presets.json
 │   ├── workflows/workflow_registry.json
-│   └── assets/asset_registry.json
+│   ├── assets/asset_registry.json
+│   └── capabilities/capability_registry.json
 ├── assets/                       # Model weight storage (gitignored binaries)
 ├── workflows/                    # Composable workflow definitions
 ├── use_cases/                    # Project validation datasets
@@ -117,6 +118,7 @@ python core/scripts/validate_manifests.py
 | `core/scripts/check_nodes.py` | Report installed vs. missing custom nodes |
 | `core/scripts/verify_models.py` | Report present vs. missing model files |
 | `core/scripts/validate_assets.py` | Asset registry validation |
+| `core/scripts/validate_capabilities.py` | Capability readiness validation |
 | `core/scripts/sync_outputs.py` | Copy latest ComfyUI output to Drive |
 
 ## Documentation
@@ -125,6 +127,7 @@ python core/scripts/validate_manifests.py
 |----------|-------------|
 | [colab-control-panel.md](docs/colab-control-panel.md) | Canonical notebook and orchestration design |
 | [asset-registry.md](docs/asset-registry.md) | Unified asset inventory and registry relationships |
+| [capability-platform.md](docs/capability-platform.md) | Capability abstraction and readiness evaluation |
 | [runtime-platform.md](docs/runtime-platform.md) | Runtime lifecycle, registry flow, health model |
 | [architecture.md](docs/architecture.md) | System design and module boundaries |
 | [installation.md](docs/installation.md) | Setup and update procedures |
@@ -134,11 +137,11 @@ python core/scripts/validate_manifests.py
 
 ## Immediate Next Steps
 
-1. Run Cell 3c (`runtime_report.py` + `validate_assets.py`) in Colab.
-2. Epic 2 Package 3: execute install plans (nodes, models) from registry planners.
-3. Create first workflow JSON: `workflows/base/txt2img/workflow.json`.
-4. Wire notebook Cell 9 to runtime manager install execution.
-5. Mark `sd15_checkpoint` as `active` after first successful generation.
+1. Run Cell 3c (`runtime_report.py` + `validate_assets.py` + `validate_capabilities.py`) in Colab.
+2. Epic 3 Package 2: wire capability-driven workflow selection in the notebook.
+3. Execute install plans (nodes, models) from registry planners.
+4. Create first workflow JSON: `workflows/base/txt2img/workflow.json`.
+5. Mark capability statuses as workflows move from planned to ready.
 
 ## Development Philosophy
 

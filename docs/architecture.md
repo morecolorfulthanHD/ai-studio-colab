@@ -30,6 +30,7 @@ This document describes the modular architecture of AI Studio Colab. The design 
 │                     Configuration Layer                          │
 │  configs/models/  ·  configs/nodes/  ·  configs/paths/           │
 │  configs/presets/  ·  configs/workflows/  ·  configs/assets/      │
+│  configs/capabilities/                                            │
 └────────────────────────────┬────────────────────────────────────┘
                              │
 ┌────────────────────────────▼────────────────────────────────────┐
@@ -71,7 +72,7 @@ Engine installations and shared infrastructure.
 | `core/shared_nodes/` | Custom node repos shared across engines where applicable |
 | `core/storage/` | Runtime cache, temp files, and upload staging |
 | `core/scripts/` | Bootstrap, validation, runtime report, batch utilities |
-| `core/runtime/` | Registry loader, health model, runtime manager, asset manager, session state |
+| `core/runtime/` | Registry loader, health model, runtime manager, asset/capability managers, session state |
 
 Bootstrap scripts are callable from the control panel notebook. The **runtime platform** (`core/runtime/`) provides structured health reporting and future orchestration hooks. See [runtime-platform.md](runtime-platform.md).
 
@@ -89,8 +90,9 @@ Centralized, version-controlled settings that workflows reference by key.
 | `configs/presets/default_generation_presets.json` | Named parameter sets (sampler, steps, CFG, resolution) |
 | `configs/workflows/workflow_registry.json` | Workflow index with status, dependencies, and paths |
 | `configs/assets/asset_registry.json` | Unified cross-cutting asset inventory |
+| `configs/capabilities/capability_registry.json` | User-facing functionality abstraction and readiness requirements |
 
-See [asset-registry.md](asset-registry.md) for how asset, model, and workflow registries relate.
+See [asset-registry.md](asset-registry.md) and [capability-platform.md](capability-platform.md) for registry relationships.
 
 ### Asset Layer (`assets/`)
 
@@ -189,6 +191,7 @@ Future capabilities plug in at defined boundaries:
 | New production project | `use_cases/<name>/` |
 | Automation / batching | Phase 7 — `core/scripts/`, `colab/utilities/` |
 | Runtime orchestration | `core/runtime/`, `core/scripts/runtime_report.py` |
+| Capability layer | `core/runtime/capability_manager.py`, `core/scripts/validate_capabilities.py` |
 | Additional engines | `configs/engines/` (future), `core/a1111/`, inference hooks in `RuntimeManager` |
 | Container / bare-metal deploy | Docker / Windows / Linux hooks via `extension_points()` (future) |
 

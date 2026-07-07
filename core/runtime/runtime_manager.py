@@ -11,6 +11,7 @@ from .registry_loader import RegistryBundle, RegistryLoader, find_repo_root
 from .runtime_health import HealthReport, build_health_report
 from .runtime_state import RuntimeState
 from .asset_manager import AssetManager
+from .capability_manager import CapabilityManager
 
 
 class RuntimeManager:
@@ -57,6 +58,7 @@ class RuntimeManager:
                 "workflows": len(bundle.workflows),
                 "presets": len(bundle.presets),
                 "assets": len(bundle.assets),
+                "capabilities": len(bundle.capabilities),
                 "manifests": len(bundle.manifests),
             },
             "paths": {key: str(bundle.path(key)) for key in bundle.paths},
@@ -67,6 +69,15 @@ class RuntimeManager:
         bundle = self.load_registries()
         manager = AssetManager(bundle=bundle)
         return manager.to_dict(workflow_id=workflow_id)
+
+    def capability_summary(self, capability_id: str | None = None) -> dict[str, Any]:
+        bundle = self.load_registries()
+        manager = CapabilityManager(bundle=bundle)
+        data = manager.to_dict()
+        if capability_id:
+            selected = [c for c in data["capabilities"] if c["id"] == capability_id]
+            data["capabilities"] = selected
+        return data
 
     def health_report(self, reload: bool = False) -> HealthReport:
         bundle = self.load_registries(reload=reload)
@@ -109,7 +120,8 @@ class RuntimeManager:
         return {
             "model_families": ["sd15", "sdxl", "flux"],
             "engines": ["comfyui", "a1111"],
-            "future_engines": ["inference_server", "docker", "windows_local", "linux_server"],
+            "future_engines": ["forge", "fooocus", "invokeai", "kohya"],
+            "deployments": ["local_inference", "docker", "cloud_inference", "windows_local", "linux_server"],
             "registry_driven": True,
             "notes": "Add manifests under configs/; extend RegistryBundle fields as needed.",
         }

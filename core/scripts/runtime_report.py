@@ -20,10 +20,12 @@ def build_report(manager: RuntimeManager) -> dict:
     health = manager.health_report()
     status = manager.get_runtime_status()
     assets = manager.asset_summary()
+    capabilities = manager.capability_summary()
     return {
         "runtime_status": status,
         "health": health.to_dict(),
         "assets": assets,
+        "capabilities": capabilities,
         "extension_points": manager.extension_points(),
     }
 
@@ -45,6 +47,7 @@ def to_human(report: dict) -> str:
 
     summary = report["runtime_status"]["registry_summary"]
     asset_summary = report.get("assets", {}).get("summary", {})
+    capability_summary = report.get("capabilities", {}).get("summary", {})
     lines.extend(
         [
             "",
@@ -55,6 +58,7 @@ def to_human(report: dict) -> str:
             f"  Workflows: {summary['workflows']}",
             f"  Presets:   {summary['presets']}",
             f"  Assets:    {summary.get('assets', 0)}",
+            f"  Capabilities: {summary.get('capabilities', 0)}",
             f"  Manifests: {summary['manifests']}",
         ]
     )
@@ -69,6 +73,18 @@ def to_human(report: dict) -> str:
                 f"  Planned: {asset_summary.get('planned', 0)}",
             ]
         )
+    if capability_summary:
+        lines.extend(
+            [
+                "",
+                "Capability Summary",
+                "-" * 40,
+                f"  Ready:       {capability_summary.get('ready', 0)}",
+                f"  Partial:     {capability_summary.get('partial', 0)}",
+                f"  Unavailable: {capability_summary.get('unavailable', 0)}",
+                f"  Blocked:     {capability_summary.get('blocked', 0)}",
+            ]
+        )
     return "\n".join(lines)
 
 
@@ -76,17 +92,24 @@ def to_summary(report: dict) -> str:
     health = report["health"]
     reg = report["runtime_status"]["registry_summary"]
     asset = report.get("assets", {}).get("summary", {})
+    cap = report.get("capabilities", {}).get("summary", {})
     asset_part = ""
     if asset:
         asset_part = (
             f" | Assets: {asset.get('present', 0)} present"
             f"/{asset.get('total', 0)} total"
         )
+    capability_part = ""
+    if cap:
+        capability_part = (
+            f" | Caps: {cap.get('ready', 0)} ready"
+            f"/{cap.get('total', 0)} total"
+        )
     return (
         f"Health: {health['overall_status'].upper()} | "
         f"Env: {report['runtime_status']['environment']} | "
         f"Models: {reg['models']} | Nodes: {reg['nodes']} | "
-        f"Workflows: {reg['workflows']}{asset_part}"
+        f"Workflows: {reg['workflows']}{asset_part}{capability_part}"
     )
 
 

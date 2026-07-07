@@ -32,6 +32,7 @@ class RegistryBundle:
     presets: list[dict[str, Any]]
     workflows: list[dict[str, Any]]
     assets: list[dict[str, Any]]
+    capabilities: list[dict[str, Any]]
     manifests: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def path(self, key: str) -> Path:
@@ -78,6 +79,7 @@ class RegistryLoader:
         presets_data = manifests.get("configs/presets/default_generation_presets.json", {})
         workflows_data = manifests.get("configs/workflows/workflow_registry.json", {})
         assets_data = manifests.get("configs/assets/asset_registry.json", {})
+        capabilities_data = manifests.get("configs/capabilities/capability_registry.json", {})
 
         return RegistryBundle(
             repo_root=self.repo_root,
@@ -88,6 +90,7 @@ class RegistryLoader:
             presets=_as_list(presets_data.get("presets"), "presets"),
             workflows=_as_list(workflows_data.get("workflows"), "workflows"),
             assets=_as_list(assets_data.get("assets"), "assets"),
+            capabilities=_as_list(capabilities_data.get("capabilities"), "capabilities"),
             manifests=manifests,
         )
 

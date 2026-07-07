@@ -330,6 +330,34 @@ def check_asset_registry(bundle: RegistryBundle) -> HealthCheck:
     )
 
 
+def check_capabilities(bundle: RegistryBundle) -> HealthCheck:
+    from .capability_manager import CapabilityManager
+
+    manager = CapabilityManager(bundle=bundle)
+    summary = manager.summary()
+    if summary.blocked:
+        status = HealthStatus.FAIL
+    elif summary.unavailable:
+        status = HealthStatus.WARN
+    elif summary.partial:
+        status = HealthStatus.WARN
+    elif summary.ready:
+        status = HealthStatus.OK
+    else:
+        status = HealthStatus.PLANNED
+
+    message = (
+        f"{summary.ready} ready, {summary.partial} partial, "
+        f"{summary.unavailable} unavailable, {summary.blocked} blocked."
+    )
+    return HealthCheck(
+        "capabilities",
+        status,
+        message,
+        {"summary": summary.to_dict(), "dependency_graph": manager.dependency_graph()},
+    )
+
+
 def build_health_report(bundle: RegistryBundle) -> HealthReport:
     checks = [
         check_notebook(bundle),
@@ -341,6 +369,7 @@ def build_health_report(bundle: RegistryBundle) -> HealthReport:
         check_node_registry(bundle),
         check_model_registry(bundle),
         check_asset_registry(bundle),
+        check_capabilities(bundle),
         check_gpu(),
     ]
     generated_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()

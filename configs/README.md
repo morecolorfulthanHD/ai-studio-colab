@@ -10,14 +10,16 @@ Centralized, version-controlled settings referenced by workflows and install scr
 | [presets/](presets/) | `default_generation_presets.json` — generation parameter sets |
 | [workflows/](workflows/) | `workflow_registry.json` — workflow index and dependencies |
 | [assets/](assets/) | `asset_registry.json` — unified cross-cutting asset inventory |
+| [capabilities/](capabilities/) | `capability_registry.json` — user-facing functionality abstraction layer |
 
 Workflows reference config keys, never hardcoded filenames or absolute paths.
 
-Registry relationships: [asset-registry.md](../docs/asset-registry.md).
+Registry relationships: [asset-registry.md](../docs/asset-registry.md) and [capability-platform.md](../docs/capability-platform.md).
 
 Validate all manifests and assets:
 
 ```bash
 python core/scripts/validate_manifests.py
 python core/scripts/validate_assets.py --summary
+python core/scripts/validate_capabilities.py --summary
 ```
