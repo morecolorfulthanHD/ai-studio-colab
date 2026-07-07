@@ -1,18 +1,7 @@
 #!/usr/bin/env bash
-# AI Studio Colab — ComfyUI install script (Colab-safe, idempotent)
+# AI Studio Colab — ComfyUI install/validation script.
 #
-# Installs ComfyUI to /content/ComfyUI and symlinks Drive-backed shared models.
-# Does not install custom nodes or download model weights.
-#
-# Usage:
-#   bash core/comfyui/install.sh
-#   FORCE_REINSTALL=1 bash core/comfyui/install.sh   # remove and re-clone ComfyUI
-#
-# Environment overrides:
-#   COMFYUI_DIR      default: /content/ComfyUI
-#   SHARED_MODELS    default: /content/drive/MyDrive/AI_Studio/models/shared
-#   COMFYUI_REPO     default: https://github.com/Comfy-Org/ComfyUI.git
-#   PYTHON           default: python3
+# Safe by default: dry-run only unless --execute is provided.
 
 set -euo pipefail
 
@@ -20,7 +9,8 @@ COMFYUI_DIR="${COMFYUI_DIR:-/content/ComfyUI}"
 SHARED_MODELS="${SHARED_MODELS:-/content/drive/MyDrive/AI_Studio/models/shared}"
 COMFYUI_REPO="${COMFYUI_REPO:-https://github.com/Comfy-Org/ComfyUI.git}"
 PYTHON="${PYTHON:-python3}"
-FORCE_REINSTALL="${FORCE_REINSTALL:-0}"
+FORCE_REINSTALL=0
+EXECUTE=0
 
 log() {
   printf '[comfyui-install] %s\n' "$*"
@@ -31,16 +21,36 @@ die() {
   exit 1
 }
 
+usage() {
+  cat <<EOF
+Usage:
+  bash core/comfyui/install.sh [--dry-run] [--execute] [--force-reinstall]
+
+Modes:
+  --dry-run         Print planned actions only (default)
+  --execute         Apply changes (clone/pull, pip install, symlink)
+  --force-reinstall Remove existing COMFYUI_DIR before clone (only with --execute)
+EOF
+}
+
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"
+}
+
+run_step() {
+  if [[ "${EXECUTE}" == "1" ]]; then
+    log "EXECUTE: $*"
+    "$@"
+  else
+    log "DRY-RUN: $*"
+  fi
 }
 
 link_shared_models() {
   local models_link="${COMFYUI_DIR}/models"
 
   if [[ ! -d "${SHARED_MODELS}" ]]; then
-    log "Creating shared models directory: ${SHARED_MODELS}"
-    mkdir -p "${SHARED_MODELS}"
+    run_step mkdir -p "${SHARED_MODELS}"
   fi
 
   if [[ -L "${models_link}" ]]; then
@@ -55,24 +65,27 @@ link_shared_models() {
     log "Replacing incorrect models symlink: ${models_link}"
     rm -f "${models_link}"
   elif [[ -e "${models_link}" ]]; then
-    die "Refusing to replace non-symlink path: ${models_link} (set FORCE_REINSTALL=1 to reinstall ComfyUI)"
+    die "Refusing to replace non-symlink path: ${models_link} (use --force-reinstall with --execute if you intend replacement)"
   fi
 
-  ln -sfn "${SHARED_MODELS}" "${models_link}"
+  run_step ln -sfn "${SHARED_MODELS}" "${models_link}"
   log "Linked models: ${models_link} -> ${SHARED_MODELS}"
 }
 
 install_comfyui_repo() {
   if [[ "${FORCE_REINSTALL}" == "1" ]]; then
     if [[ -e "${COMFYUI_DIR}" || -L "${COMFYUI_DIR}" ]]; then
-      log "FORCE_REINSTALL=1 — removing existing ComfyUI directory: ${COMFYUI_DIR}"
-      rm -rf "${COMFYUI_DIR}"
+      run_step rm -rf "${COMFYUI_DIR}"
     fi
   fi
 
   if [[ -d "${COMFYUI_DIR}/.git" ]]; then
-    log "ComfyUI already cloned at ${COMFYUI_DIR} — pulling latest changes"
-    git -C "${COMFYUI_DIR}" pull --ff-only || log "WARN: git pull failed; continuing with existing clone"
+    if [[ "${EXECUTE}" == "1" ]]; then
+      log "ComfyUI already cloned at ${COMFYUI_DIR} — pulling latest changes"
+      git -C "${COMFYUI_DIR}" pull --ff-only
+    else
+      log "DRY-RUN: would pull latest changes in ${COMFYUI_DIR}"
+    fi
     return 0
   fi
 
@@ -80,20 +93,57 @@ install_comfyui_repo() {
     die "Path exists but is not a ComfyUI git repo: ${COMFYUI_DIR} (use FORCE_REINSTALL=1 to replace)"
   fi
 
-  log "Cloning ComfyUI from ${COMFYUI_REPO}"
-  git clone --depth 1 "${COMFYUI_REPO}" "${COMFYUI_DIR}"
+  run_step git clone --depth 1 "${COMFYUI_REPO}" "${COMFYUI_DIR}"
 }
 
 install_python_requirements() {
   local requirements="${COMFYUI_DIR}/requirements.txt"
-  [[ -f "${requirements}" ]] || die "requirements.txt not found: ${requirements}"
+  if [[ ! -f "${requirements}" ]]; then
+    if [[ "${EXECUTE}" == "1" ]]; then
+      die "requirements.txt not found: ${requirements}"
+    fi
+    log "DRY-RUN: requirements path not present yet (${requirements})"
+    return 0
+  fi
+  run_step "${PYTHON}" -m pip install -q -r "${requirements}"
+}
 
-  log "Installing Python requirements"
-  "${PYTHON}" -m pip install -q -r "${requirements}"
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dry-run)
+        EXECUTE=0
+        ;;
+      --execute)
+        EXECUTE=1
+        ;;
+      --force-reinstall)
+        FORCE_REINSTALL=1
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        die "Unknown argument: $1"
+        ;;
+    esac
+    shift
+  done
+
+  if [[ "${FORCE_REINSTALL}" == "1" && "${EXECUTE}" != "1" ]]; then
+    die "--force-reinstall requires --execute"
+  fi
 }
 
 main() {
-  log "Starting ComfyUI install"
+  parse_args "$@"
+  log "Starting ComfyUI install/validation"
+  if [[ "${EXECUTE}" == "1" ]]; then
+    log "  mode=execute"
+  else
+    log "  mode=dry-run"
+  fi
   log "  COMFYUI_DIR=${COMFYUI_DIR}"
   log "  SHARED_MODELS=${SHARED_MODELS}"
 
@@ -104,10 +154,10 @@ main() {
   install_python_requirements
   link_shared_models
 
-  log "ComfyUI install complete"
+  log "ComfyUI install/validation complete"
   log "  Runtime: ${COMFYUI_DIR}"
   log "  Models:  ${SHARED_MODELS} (symlinked)"
-  log "Next: install custom nodes via notebook or future install_nodes.sh"
+  log "Next: install or validate custom nodes via install_nodes.py"
 }
 
 main "$@"

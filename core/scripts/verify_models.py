@@ -123,7 +123,8 @@ def main() -> int:
     print(f"Drive models: {drive_models}\n")
 
     present = 0
-    missing = 0
+    missing_required = 0
+    missing_optional = 0
     planned = 0
     fail = False
 
@@ -133,37 +134,39 @@ def main() -> int:
         check_paths = resolve_check_paths(entry, repo_root, drive_models)
         check_status, found_path = check_entry(check_paths)
 
+        is_required = name == "sd15_checkpoint" or "base_txt2img" in entry.get("required_for", [])
+
         if check_status == "present":
             present += 1
             marker = "PRESENT"
         else:
-            if registry_status == "active":
-                missing += 1
+            if is_required:
+                missing_required += 1
                 marker = "MISSING"
                 fail = True
+            elif registry_status == "active":
+                missing_optional += 1
+                marker = "MISSING"
             else:
                 planned += 1
                 marker = "PLANNED"
                 if registry_status == "missing":
                     marker = "MISSING"
 
-        print(f"  [{marker:7}] {name} (registry: {registry_status})")
+        print(f"  [{marker:7}] {name} (registry: {registry_status}, required: {is_required})")
         if found_path:
             print(f"            checked: {found_path}")
         if check_paths:
             for label, path in check_paths:
                 print(f"            {label}: {path}")
 
-    print(
-        f"\nSummary: {present} present, {missing} missing (active), "
-        f"{planned} planned/not required"
-    )
+    print(f"\nSummary: {present} present, {missing_required} missing required, {missing_optional} missing optional active, {planned} planned/not required")
 
     if args.require_active_only:
         if fail:
-            print("\nRESULT: FAIL — one or more active models are missing.", file=sys.stderr)
+            print("\nRESULT: FAIL — one or more required models are missing.", file=sys.stderr)
             return 1
-        print("\nRESULT: OK — all active models present.")
+        print("\nRESULT: OK — required models present.")
         return 0
 
     print("\nRESULT: OK — model verification complete (informational).")

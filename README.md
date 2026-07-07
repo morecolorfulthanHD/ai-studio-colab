@@ -2,7 +2,7 @@
 
 A general-purpose, version-controlled AI Studio for high-end image generation, environment generation, character consistency, and video generation.
 
-**Current phase:** Epic 3 Package 1 — capability platform foundation.
+**Current phase:** Production Package 1 — runtime execution + base txt2img.
 
 ## What This Is
 
@@ -137,11 +137,20 @@ python core/scripts/validate_manifests.py
 
 ## Immediate Next Steps
 
-1. Run Cell 3c (`runtime_report.py` + `validate_assets.py` + `validate_capabilities.py`) in Colab.
-2. Epic 3 Package 2: wire capability-driven workflow selection in the notebook.
-3. Execute install plans (nodes, models) from registry planners.
-4. Create first workflow JSON: `workflows/base/txt2img/workflow.json`.
-5. Mark capability statuses as workflows move from planned to ready.
+1. Run Cell 3c in Colab to validate runtime, nodes, models, and capability readiness.
+2. Run `bash core/comfyui/install.sh --execute` when runtime install is needed.
+3. Run `python core/comfyui/install_nodes.py --execute` to install default stable nodes.
+4. Import `workflows/base/txt2img/workflow.json` into ComfyUI and generate a baseline image.
+5. Keep model downloads/manual placement explicit (no automated downloads in this package).
+
+## Base Generation Workflow
+
+First production workflow:
+
+- Path: `workflows/base/txt2img/workflow.json`
+- Engine: ComfyUI core nodes only (no custom-node dependency)
+- Defaults: SD 1.5 checkpoint (`sd15.safetensors`), prompt and negative prompt included
+- Output: saved image via `SaveImage`
 
 ## Development Philosophy
 

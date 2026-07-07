@@ -21,11 +21,36 @@ def build_report(manager: RuntimeManager) -> dict:
     status = manager.get_runtime_status()
     assets = manager.asset_summary()
     capabilities = manager.capability_summary()
+    checks = {c["component"]: c for c in health.to_dict()["checks"]}
+    txt2img_workflow = next(
+        (w for w in manager.load_registries().workflows if w.get("id") == "base_txt2img"),
+        None,
+    )
+    txt2img_capability = next(
+        (c for c in capabilities.get("capabilities", []) if c.get("id") == "txt2img"),
+        None,
+    )
     return {
         "runtime_status": status,
         "health": health.to_dict(),
         "assets": assets,
         "capabilities": capabilities,
+        "runtime_execution": {
+            "comfyui": checks.get("comfyui", {}),
+            "nodes": checks.get("node_registry", {}),
+            "models": checks.get("model_registry", {}),
+        },
+        "txt2img": {
+            "workflow_present": bool(txt2img_workflow),
+            "workflow_status": txt2img_workflow.get("status", "unknown") if txt2img_workflow else "missing",
+            "workflow_path": txt2img_workflow.get("path", "workflows/base/txt2img/workflow.json")
+            if txt2img_workflow
+            else "workflows/base/txt2img/workflow.json",
+            "capability_status": txt2img_capability.get("computed_status", "unknown")
+            if txt2img_capability
+            else "unknown",
+            "capability_reasons": txt2img_capability.get("reasons", []) if txt2img_capability else [],
+        },
         "extension_points": manager.extension_points(),
     }
 
@@ -85,6 +110,19 @@ def to_human(report: dict) -> str:
                 f"  Blocked:     {capability_summary.get('blocked', 0)}",
             ]
         )
+    txt2img = report.get("txt2img", {})
+    if txt2img:
+        lines.extend(
+            [
+                "",
+                "txt2img Runtime Status",
+                "-" * 40,
+                f"  Workflow:   {txt2img.get('workflow_status', 'unknown')} ({txt2img.get('workflow_path', '')})",
+                f"  Capability: {txt2img.get('capability_status', 'unknown')}",
+            ]
+        )
+        for reason in txt2img.get("capability_reasons", []):
+            lines.append(f"  Reason:     {reason}")
     return "\n".join(lines)
 
 
@@ -105,11 +143,17 @@ def to_summary(report: dict) -> str:
             f" | Caps: {cap.get('ready', 0)} ready"
             f"/{cap.get('total', 0)} total"
         )
+    runtime_exec = report.get("runtime_execution", {})
+    comfyui_state = runtime_exec.get("comfyui", {}).get("status", "unknown").upper()
+    node_state = runtime_exec.get("nodes", {}).get("status", "unknown").upper()
+    model_state = runtime_exec.get("models", {}).get("status", "unknown").upper()
+    txt2img_state = report.get("txt2img", {}).get("capability_status", "unknown")
     return (
         f"Health: {health['overall_status'].upper()} | "
         f"Env: {report['runtime_status']['environment']} | "
+        f"ComfyUI: {comfyui_state} | Nodes: {node_state} | ModelCheck: {model_state} | "
         f"Models: {reg['models']} | Nodes: {reg['nodes']} | "
-        f"Workflows: {reg['workflows']}{asset_part}{capability_part}"
+        f"Workflows: {reg['workflows']} | txt2img: {txt2img_state}{asset_part}{capability_part}"
     )
 
 

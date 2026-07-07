@@ -7,7 +7,7 @@
       "description": "Generate images from text prompts.",
       "category": "generation",
       "maturity": "stable",
-      "status": "planned",
+      "status": "partial",
       "supported_engines": ["comfyui", "a1111"],
       "required_models": ["sd15_checkpoint"],
       "required_nodes": [],
@@ -19,7 +19,7 @@
         "all_required_models_registered",
         "all_required_assets_present_or_planned"
       ],
-      "notes": "Core baseline capability."
+      "notes": "Base workflow is implemented; readiness still depends on SD1.5 model validation in runtime."
     },
     {
       "id": "img2img",

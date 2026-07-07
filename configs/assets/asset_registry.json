@@ -220,11 +220,11 @@
       "intended_path": "workflows/base/txt2img/workflow.json",
       "runtime_path": "/content/drive/MyDrive/AI_Studio/workflows/base_txt2img/workflow.json",
       "required_for": ["base_txt2img"],
-      "status": "planned",
+      "status": "active",
       "source_type": "repository",
       "source_url": "",
       "license_notes": "Project license",
-      "notes": "Git-managed workflow JSON. Runtime path for Drive backup."
+      "notes": "Git-managed workflow JSON implemented in repo. Runtime path is for Drive backup."
     },
     {
       "id": "workflow_openpose_portrait",

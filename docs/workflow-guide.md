@@ -183,6 +183,6 @@ use_cases/zara_morrison/test_outputs/
 
 ## Status
 
-Workflow JSON files are not yet implemented. The registry at `configs/workflows/workflow_registry.json` lists all planned workflows. Implementation begins with `base_txt2img` in Phase 1 continuation.
+`base_txt2img` is now implemented at `workflows/base/txt2img/workflow.json` and serves as the first production baseline. Remaining workflows in `configs/workflows/workflow_registry.json` are still planned.
 
 Launch and select workflows via [`colab/notebooks/AI_Studio_Control_Panel_Colab.ipynb`](../colab/notebooks/AI_Studio_Control_Panel_Colab.ipynb) once workflow menus are wired in the control panel.

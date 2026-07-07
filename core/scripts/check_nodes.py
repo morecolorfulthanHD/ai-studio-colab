@@ -82,7 +82,8 @@ def main() -> int:
         print("      Install ComfyUI before expecting nodes.\n")
 
     installed = 0
-    missing = 0
+    missing_required = 0
+    missing_optional = 0
 
     for entry in registry:
         name = entry["name"]
@@ -90,23 +91,36 @@ def main() -> int:
         node_path = custom_nodes_dir / folder
         state = inspect_node(node_path)
         install_mode = entry.get("install_mode", "planned")
+        required = "all" in entry.get("required_for", []) or install_mode == "required"
 
         if state in {"installed", "present"}:
             installed += 1
             marker = "INSTALLED" if state == "installed" else "PRESENT"
         else:
-            missing += 1
+            if required:
+                missing_required += 1
+            else:
+                missing_optional += 1
             marker = "MISSING"
 
         print(f"  [{marker:9}] {name}")
         print(f"             path: {node_path}")
         print(f"             install_mode: {install_mode}")
+        print(f"             required: {required}")
 
-    print(f"\nSummary: {installed} installed/present, {missing} missing (of {len(registry)} registered)")
+    print(
+        f"\nSummary: {installed} installed/present, "
+        f"{missing_required} missing required, "
+        f"{missing_optional} missing optional (of {len(registry)} registered)"
+    )
 
-    if missing > 0:
-        print("\nRESULT: INCOMPLETE — one or more nodes are missing.", file=sys.stderr)
+    if missing_required > 0:
+        print("\nRESULT: INCOMPLETE — one or more required nodes are missing.", file=sys.stderr)
         return 1
+
+    if missing_optional > 0:
+        print("\nRESULT: WARN — optional nodes are missing.")
+        return 0
 
     print("\nRESULT: OK — all registered nodes found.")
     return 0

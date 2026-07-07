@@ -5,10 +5,10 @@
       "id": "base_txt2img",
       "category": "base",
       "path": "workflows/base/txt2img/workflow.json",
-      "status": "planned",
+      "status": "active",
       "required_models": ["sd15_checkpoint"],
       "required_nodes": [],
-      "notes": "Fundamental text-to-image workflow. Phase 1 entry point."
+      "notes": "Fundamental text-to-image workflow implemented with core ComfyUI nodes."
     },
     {
       "id": "base_img2img",

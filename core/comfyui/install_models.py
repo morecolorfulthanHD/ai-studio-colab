@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plan model placement/downloads from model_registry.json (no downloads yet)."""
+"""Plan or validate model placement from model_registry.json (no downloads)."""
 
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ class InstallStep:
     registry_status: str
     status: str
     notes: str = ""
+    required: bool = False
 
 
 def _exists(path: Path) -> bool:
@@ -43,6 +44,7 @@ def build_model_install_plan(bundle: RegistryBundle) -> list[InstallStep]:
     for entry in bundle.models:
         name = entry["name"]
         registry_status = entry.get("status", "planned")
+        required = name == "sd15_checkpoint" or "base_txt2img" in entry.get("required_for", [])
         intended = bundle.repo_root / entry.get("intended_path", "")
         runtime = Path(entry["runtime_path"]) if entry.get("runtime_path") else None
 
@@ -62,6 +64,7 @@ def build_model_install_plan(bundle: RegistryBundle) -> list[InstallStep]:
                     registry_status=registry_status,
                     status="present",
                     notes="All configured paths satisfied.",
+                    required=required,
                 )
             )
         elif any_present:
@@ -73,41 +76,72 @@ def build_model_install_plan(bundle: RegistryBundle) -> list[InstallStep]:
                     registry_status=registry_status,
                     status="partial",
                     notes="Present in some paths; verify consistency.",
+                    required=required,
                 )
             )
         else:
             primary = runtime or intended
             steps.append(
                 InstallStep(
-                    action="download_or_copy",
+                    action="validate_missing",
                     name=name,
                     target_path=str(primary),
                     registry_status=registry_status,
                     status="missing",
-                    notes=entry.get("notes", "Download logic deferred to future package."),
+                    notes=entry.get("notes", "Missing model. Downloads intentionally disabled in this package."),
+                    required=required,
                 )
             )
 
     return steps
 
 
-def print_plan(steps: list[InstallStep]) -> None:
+def print_plan(steps: list[InstallStep], dry_run: bool) -> None:
     print("AI Studio — Model Install Plan")
     print("=" * 40)
-    print("Mode: dry-run / plan-only (downloads not implemented)\n")
+    print(f"Mode: {'dry-run' if dry_run else 'execute validation'} (downloads disabled)\n")
     for step in steps:
         print(f"  [{step.action:18}] {step.name} ({step.status})")
         print(f"    target: {step.target_path}")
         print(f"    registry_status: {step.registry_status}")
+        print(f"    required: {step.required}")
         if step.notes:
             print(f"    notes:  {step.notes}")
     print(f"\nTotal steps: {len(steps)}")
+
+
+def execute_validation(steps: list[InstallStep], dry_run: bool) -> tuple[int, int, int]:
+    present = 0
+    warnings = 0
+    failures = 0
+    print("\nModel validation")
+    print("=" * 40)
+    for step in steps:
+        if step.status == "present":
+            present += 1
+            print(f"[OK] {step.name}")
+            continue
+        if step.status == "partial":
+            warnings += 1
+            print(f"[WARN] {step.name} partial presence")
+            continue
+
+        if step.required:
+            failures += 1
+            print(f"[FAIL] {step.name} missing (required for base generation)")
+        else:
+            warnings += 1
+            print(f"[WARN] {step.name} missing (planned/advanced)")
+        if dry_run:
+            print("       dry-run: download/copy intentionally skipped")
+    return present, warnings, failures
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Plan model installs from registry.")
     parser.add_argument("--repo-root", type=Path, default=None)
     parser.add_argument("--dry-run", action="store_true", help="Print plan only (default).")
+    parser.add_argument("--execute", action="store_true", help="Execute validation pass (no downloads).")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
@@ -119,10 +153,20 @@ def main() -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
+    dry_run = not args.execute or args.dry_run
+
     if args.json:
         print(json.dumps([asdict(s) for s in steps], indent=2))
     else:
-        print_plan(steps)
+        print_plan(steps, dry_run=dry_run)
+        present, warnings, failures = execute_validation(steps, dry_run=dry_run)
+        print("\nModel summary")
+        print("=" * 40)
+        print(f"Present:  {present}")
+        print(f"Warnings: {warnings}")
+        print(f"Failures: {failures}")
+        if failures > 0 and not dry_run:
+            return 1
 
     return 0
 

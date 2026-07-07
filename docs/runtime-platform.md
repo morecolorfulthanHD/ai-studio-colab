@@ -38,7 +38,7 @@ core/runtime/runtime_manager.py
 | 1. Bootstrap | Clone repo, mount Drive, validate structure | Epic 1 ✓ |
 | 2. Health check | `runtime_report.py` + `validate_assets.py` + `validate_capabilities.py` / Cell 3c | Epic 2 Pkg 1–3 ✓ |
 | 3. Plan installs | Install planners emit dry-run steps | Epic 2 Pkg 1 ✓ |
-| 4. Execute installs | Planners execute plans (future) | Deferred |
+| 4. Execute installs | ComfyUI + node execution scripts available with explicit `--execute` | Production Pkg 1 ✓ |
 | 5. Launch engines | ComfyUI / A1111 via notebook or launch scripts | Partial |
 | 6. Run workflows | Load workflow JSON, execute pipeline | Deferred |
 
@@ -110,15 +110,15 @@ Future packages will persist state to Drive under `AI_Studio/settings/` or simil
 
 ## Install Planning (No Execution Yet)
 
-Install scripts parse registries and print **execution plans** with `--dry-run` (default):
+Install scripts parse registries and print **execution plans** with `--dry-run` (default). Node execution is now available with explicit `--execute`:
 
 | Script | Plans |
 |--------|-------|
-| `core/comfyui/install_nodes.py` | `git_clone`, `pip_requirements`, `skip` |
-| `core/comfyui/install_models.py` | `download_or_copy`, `skip`, `verify` |
+| `core/comfyui/install_nodes.py` | `git_clone`, `pip_requirements`, `skip` (+ execute mode) |
+| `core/comfyui/install_models.py` | `validate_missing`, `skip`, `verify` (no downloads) |
 | `core/a1111/install.py` | `git_clone`, `symlink`, `pip_bootstrap` |
 
-Future installers will execute these plans step-by-step with logging and rollback hooks.
+Model downloads remain intentionally deferred.
 
 ## Future Orchestration
 

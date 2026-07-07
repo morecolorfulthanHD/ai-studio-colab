@@ -2,7 +2,7 @@
 
 Phased development plan for AI Studio Colab. Each phase produces tested, documented, reusable building blocks before the next phase begins.
 
-**Current status:** Epic 2 Package 2 — unified asset registry foundation.
+**Current status:** Production Package 1 — runtime execution + base txt2img.
 
 ---
 
@@ -31,11 +31,11 @@ Phased development plan for AI Studio Colab. Each phase produces tested, documen
 - `runtime_report.py` includes asset summary
 - Health check includes `assets` component
 
-### Package 3 — Install Execution (planned)
+### Package 3 — Install Execution ✓
 
-- Execute install plans from registry planners
-- Wire runtime manager into notebook Cell 9
-- First workflow JSON (`base/txt2img`)
+- [x] Execute-safe ComfyUI/node scripts with explicit `--execute`
+- [x] Notebook runtime block includes validation + install dry-runs
+- [x] First workflow JSON (`base/txt2img`)
 
 ---
 

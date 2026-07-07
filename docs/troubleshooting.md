@@ -13,6 +13,8 @@ python core/scripts/validate_paths.py
 python core/scripts/validate_manifests.py
 python core/scripts/check_nodes.py
 python core/scripts/verify_models.py
+python core/comfyui/install_nodes.py --dry-run
+python core/comfyui/install_models.py --dry-run
 ```
 
 | Script | Exit code 1 means |
@@ -24,6 +26,7 @@ python core/scripts/verify_models.py
 | `check_nodes.py` | One or more registered custom nodes missing from `custom_nodes/` |
 | `verify_models.py` | Only when `--require-active-only` and an `active` model is missing |
 | `runtime_report.py` | Exit 1 when overall health status is `fail` |
+| `install_models.py --execute` | Required base model validation failed |
 
 ## Installation Issues
 
@@ -35,6 +38,8 @@ python core/scripts/verify_models.py
 | Out of disk space | Large model downloads | Use Drive mount; prune runtime cache |
 | `bootstrap_repo.py` fails | Repo not cloned fully | Re-clone; ensure all top-level dirs present |
 | `validate_paths.py` warns on Colab paths | First run before install | Normal — install ComfyUI via notebook first |
+| `install_nodes.py` reports clone failure | Repo unavailable or network issue | Re-run with `--execute`; optional node failures are reported |
+| `verify_models.py` reports required missing model | SD 1.5 not found at expected path | Place `sd15.safetensors` in Drive shared checkpoint path |
 
 ## Control Panel / Notebook Issues
 
@@ -44,6 +49,7 @@ python core/scripts/verify_models.py
 | GPU not detected | CPU runtime selected | Runtime → Change runtime type → GPU |
 | Wrong notebook | Duplicate launcher used | Use only `colab/notebooks/AI_Studio_Control_Panel_Colab.ipynb` |
 | Scripts not found | Wrong working directory | `cd` to repository root before running scripts |
+| Workflow not loading | Missing workflow JSON | Confirm `workflows/base/txt2img/workflow.json` exists and is valid JSON |
 
 ## Generation Issues
 
