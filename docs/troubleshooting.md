@@ -53,15 +53,23 @@ python core/comfyui/install_models.py --dry-run
 | `install_nodes.py` reports clone failure | Repo unavailable or network issue | Re-run with `--execute`; optional node failures are reported |
 | `verify_models.py` reports required missing model | SD 1.5 not found at expected path | Place `sd15.safetensors` in Drive shared checkpoint path |
 
+## Notebook Source of Truth
+
+| Symptom | Likely Cause | Resolution |
+|---------|--------------|------------|
+| Stale notebook cells | Opened old Drive copy instead of GitHub | Use the [GitHub Colab link](https://colab.research.google.com/github/morecolorfulthanHD/ai-studio-colab/blob/main/colab/notebooks/AI_Studio_Control_Panel_Colab.ipynb) |
+| Repo code outdated | Skipped Repository Sync | Run Repository Sync before Cell 3b |
+| Scripts not found after sync | Sync failed silently | Check Repository Sync output; confirm `/content/ai-studio-colab` exists |
+
 ## Control Panel / Notebook Issues
 
 | Symptom | Likely Cause | Resolution |
 |---------|--------------|------------|
 | Drive not mounted | Skipped mount cell | Run Drive mount cell in control panel |
 | GPU not detected | CPU runtime selected | Runtime → Change runtime type → GPU |
-| Wrong notebook | Duplicate launcher used | Use only `colab/notebooks/AI_Studio_Control_Panel_Colab.ipynb` |
-| Scripts not found | Wrong working directory | `cd` to repository root before running scripts |
-| Workflow not loading | Missing workflow JSON | Confirm `workflows/base/txt2img/workflow.json` exists and is valid JSON |
+| Wrong notebook | Duplicate launcher or stale Drive copy | Open canonical notebook from GitHub (see [colab-control-panel.md](colab-control-panel.md)) |
+| Scripts not found | Repository Sync not run | Run Repository Sync cell; confirm `/content/ai-studio-colab` |
+| Workflow not loading | Missing workflow JSON | Confirm `workflows/base/txt2img/workflow.json` exists in cloned repo |
 
 ## Generation Issues
 

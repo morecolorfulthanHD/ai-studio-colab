@@ -43,10 +43,10 @@ A modular platform combining ComfyUI, Automatic1111, ControlNet, AnimateDiff, SV
 
 | Component | Role | Persistence |
 |-----------|------|-------------|
-| **GitHub** | Version-controlled source of truth for code, configs, workflows, docs | Permanent |
+| **GitHub** | **Canonical source of truth** — notebook, scripts, configs, workflows, docs | Permanent |
 | **Cursor** | Local development and editing | — |
 | **Google Colab** | Disposable GPU runtime for generation | Session only |
-| **Google Drive** | Models, outputs, workflow backups | Permanent |
+| **Google Drive** | Persistent models, outputs, datasets, references, checkpoints | Permanent |
 | **ComfyUI** | Primary node-based workflow engine | Runtime install at `/content/ComfyUI` |
 | **A1111** | Secondary WebUI for select pipelines | Runtime install at `/content/A1111` |
 | **Workflows** | Reusable ComfyUI JSON assets in `workflows/` | Git-managed |
@@ -54,9 +54,15 @@ A modular platform combining ComfyUI, Automatic1111, ControlNet, AnimateDiff, SV
 
 ## Canonical Control Panel
 
-Launch AI Studio via the single official notebook:
+The **canonical notebook lives in this GitHub repository** — not on Google Drive.
 
 **[`colab/notebooks/AI_Studio_Control_Panel_Colab.ipynb`](colab/notebooks/AI_Studio_Control_Panel_Colab.ipynb)**
+
+Open it directly in Colab from GitHub:
+
+**https://colab.research.google.com/github/morecolorfulthanHD/ai-studio-colab/blob/main/colab/notebooks/AI_Studio_Control_Panel_Colab.ipynb**
+
+Google Drive is persistent storage for models and outputs only. A notebook file saved on Drive, if any, is a convenience copy or launcher — not the source of truth. The **Repository Sync** cell clones or pulls the latest repo from GitHub into `/content/ai-studio-colab` each session.
 
 Do not create duplicate launcher notebooks. See [docs/colab-control-panel.md](docs/colab-control-panel.md).
 
@@ -92,9 +98,9 @@ ai-studio-colab/
 
 ## Quick Start (Colab)
 
-1. Open [`colab/notebooks/AI_Studio_Control_Panel_Colab.ipynb`](colab/notebooks/AI_Studio_Control_Panel_Colab.ipynb) in Google Colab.
+1. Open the canonical notebook from GitHub in Colab (link above) or browse to `colab/notebooks/AI_Studio_Control_Panel_Colab.ipynb` on GitHub → **Open in Colab**.
 2. Select a GPU runtime.
-3. Clone or sync this repository into the runtime.
+3. Run **Repository Sync** (clones `https://github.com/morecolorfulthanHD/ai-studio-colab.git` into `/content/ai-studio-colab` on first run; `git pull` on later runs).
 4. Run bootstrap validation:
 
 ```bash

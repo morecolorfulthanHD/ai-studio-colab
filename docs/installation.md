@@ -8,30 +8,53 @@ Setup and launch procedures for AI Studio Colab.
 
 - Google Colab with GPU runtime (T4 minimum; A100 recommended for video workflows)
 - Google Drive for persistent model and output storage
-- A clone of this repository (GitHub, private mirror, or manual copy)
 - Sufficient Drive/disk space for model weights (see `configs/models/model_registry.json`)
+
+No manual repository clone is required — the notebook **Repository Sync** cell handles clone/pull from GitHub.
+
+## Source of Truth
+
+| Location | Role |
+|----------|------|
+| **GitHub** | Canonical source for notebook, scripts, configs, workflows, and docs |
+| **Google Drive** | Persistent storage for models, outputs, datasets, references, checkpoints |
+| **Colab runtime** | Disposable workspace — repo cloned to `/content/ai-studio-colab` each session |
+
+Google Drive is **not** the canonical notebook source. Do not treat a Drive-saved `.ipynb` as the authoritative copy.
 
 ## Canonical Entry Point
 
-Open the control panel notebook in Google Colab:
+Open the control panel notebook **from GitHub** in Google Colab:
 
 **[`colab/notebooks/AI_Studio_Control_Panel_Colab.ipynb`](../colab/notebooks/AI_Studio_Control_Panel_Colab.ipynb)**
 
+Direct Colab link:
+
+**https://colab.research.google.com/github/morecolorfulthanHD/ai-studio-colab/blob/main/colab/notebooks/AI_Studio_Control_Panel_Colab.ipynb**
+
 This is the only launcher. Do not create duplicate notebooks. See [colab-control-panel.md](colab-control-panel.md).
+
+### Optional: Old Drive Copy Fallback
+
+If you previously saved the notebook on Drive, it may still open as a convenience launcher. **Repository Sync** will pull the latest repo code from GitHub, but the notebook cells themselves come from whichever file you opened. Periodically switch to the GitHub Colab link above so you run the current canonical notebook.
 
 ## Installation Flow
 
-### 1. Clone the Repository
+### 1. Sync the Repository (Colab)
 
-In Colab or locally:
+Run the notebook **Repository Sync** cell (after Cells 1–3). It automatically:
+
+- **Clones** `https://github.com/morecolorfulthanHD/ai-studio-colab.git` into `/content/ai-studio-colab` if missing
+- **Pulls** the latest changes if the repo already exists
+
+For local development:
 
 ```bash
-# Example — adjust URL for your remote
-git clone <your-repo-url> /content/ai-studio-colab
-cd /content/ai-studio-colab
+git clone https://github.com/morecolorfulthanHD/ai-studio-colab.git
+cd ai-studio-colab
 ```
 
-The repository is the **source of truth** for workflows, configs, scripts, and documentation.
+GitHub is the **source of truth** for the notebook, workflows, configs, scripts, and documentation.
 
 ### 2. Run Bootstrap Validation
 

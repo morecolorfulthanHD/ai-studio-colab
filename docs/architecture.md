@@ -54,11 +54,11 @@ Entry points for running the studio, primarily Google Colab notebooks and helper
 
 | Path | Purpose |
 |------|---------|
-| `colab/notebooks/` | Canonical control panel and workflow notebooks |
+| `colab/notebooks/` | Canonical control panel notebook (Git-managed) |
 | `colab/launch/` | Environment bootstrap and service startup scripts |
 | `colab/utilities/` | Colab-specific helpers (Drive mount, GPU checks, path setup) |
 
-The canonical launcher is [`colab/notebooks/AI_Studio_Control_Panel_Colab.ipynb`](../colab/notebooks/AI_Studio_Control_Panel_Colab.ipynb). This is the **only** control panel notebook — do not duplicate it. See [colab-control-panel.md](colab-control-panel.md).
+The canonical launcher is [`colab/notebooks/AI_Studio_Control_Panel_Colab.ipynb`](../colab/notebooks/AI_Studio_Control_Panel_Colab.ipynb). It lives in **GitHub**, not on Google Drive. Open it in Colab from the repository; the notebook's **Repository Sync** cell clones or pulls the latest code into `/content/ai-studio-colab` each session. This is the **only** control panel notebook — do not duplicate it. See [colab-control-panel.md](colab-control-panel.md).
 
 ### Core Layer (`core/`)
 
@@ -152,12 +152,14 @@ Node versions are pinned in config files to ensure reproducibility across enviro
 
 | Storage | Role | Lifetime |
 |---------|------|----------|
-| **Git repository** | Source of truth for workflows, configs, scripts, docs | Permanent |
-| **Google Drive** (`/content/drive/MyDrive/AI_Studio`) | Persistent models, outputs, workflow backups | Permanent |
-| **Colab runtime** (`/content/ComfyUI`, `/content/A1111`) | Installed engines and session cache | Disposable per session |
+| **GitHub (Git repository)** | **Canonical source of truth** — notebook, scripts, configs, workflows, docs | Permanent |
+| **Google Drive** (`/content/drive/MyDrive/AI_Studio`) | Persistent models, outputs, datasets, references, checkpoints | Permanent |
+| **Colab runtime** (`/content/ai-studio-colab`, `/content/ComfyUI`, `/content/A1111`) | Cloned repo and installed engines; session cache | Disposable per session |
 | **Repo `output/`** | Local/dev generated artifacts | Gitignored |
 
-The control panel notebook orchestrates the boundary between disposable runtime and persistent Drive storage.
+**GitHub vs. Drive:** GitHub owns all version-controlled platform code and the canonical notebook. Google Drive is **not** the notebook source of truth. Drive holds large persistent assets that do not belong in Git. A notebook file on Drive, if used, is only a convenience copy or launcher.
+
+The control panel notebook orchestrates the boundary between disposable Colab runtime and persistent Drive storage.
 
 ## Data Flow
 

@@ -1,36 +1,50 @@
 # Colab Control Panel
 
-The canonical launcher for AI Studio Colab is a single Google Colab notebook:
+The canonical launcher for AI Studio Colab is a single notebook **in this GitHub repository**:
 
 **`colab/notebooks/AI_Studio_Control_Panel_Colab.ipynb`**
 
+Open it in Colab from GitHub (not from a Drive copy):
+
+**https://colab.research.google.com/github/morecolorfulthanHD/ai-studio-colab/blob/main/colab/notebooks/AI_Studio_Control_Panel_Colab.ipynb**
+
 This notebook is the official control panel. Do not duplicate it. Future improvements should enhance this notebook rather than replace it.
+
+## GitHub vs. Google Drive
+
+| Location | Canonical? | Purpose |
+|----------|------------|---------|
+| **GitHub** (`morecolorfulthanHD/ai-studio-colab`) | **Yes** | Notebook, scripts, configs, workflows, docs |
+| **Google Drive** (`/content/drive/MyDrive/AI_Studio`) | No | Models, outputs, datasets, references, checkpoints |
+| **Colab runtime** (`/content/ai-studio-colab`) | No | Disposable clone pulled from GitHub each session |
+
+Google Drive is **not** the notebook source of truth. A `.ipynb` saved on Drive, if any, is only a convenience copy or launcher.
 
 ## Role in the Architecture
 
 ```
-GitHub (source of truth)          Google Drive (persistent storage)
+GitHub (canonical source of truth)     Google Drive (persistent storage)
         │                                    │
-        │  clone / pull                      │  models, outputs, backups
+        │  clone / pull (Repository Sync)    │  models, outputs, datasets
         ▼                                    ▼
 ┌───────────────────────────────────────────────────────────────┐
-│         AI_Studio_Control_Panel_Colab.ipynb                   │
-│  mount Drive · verify GPU · validate paths · sync repo        │
-│  launch ComfyUI · launch A1111 · workflow menus               │
+│         AI_Studio_Control_Panel_Colab.ipynb  (from GitHub)    │
+│  mount Drive · verify GPU · sync repo · validate · launch     │
 └───────────────────────────┬───────────────────────────────────┘
                             │
             ┌───────────────┼───────────────┐
             ▼               ▼               ▼
-      /content/ComfyUI  /content/A1111   core/scripts/
-      (runtime)         (runtime)        (validation helpers)
+  /content/ai-studio-colab  /content/ComfyUI  /content/A1111
+  (cloned repo)             (runtime)         (runtime)
 ```
 
 | Layer | Location | Persistence |
 |-------|----------|-------------|
-| **Repository** | Cloned to `/content/` or local disk | Git-managed configs, workflows, scripts, docs |
-| **Colab runtime** | `/content/ComfyUI`, `/content/A1111` | Ephemeral — reinstalled each session |
-| **Google Drive** | `/content/drive/MyDrive/AI_Studio` | Persistent models, outputs, workflow backups |
-| **Bootstrap scripts** | `core/scripts/` | Called from notebook cells for validation |
+| **GitHub repository** | Canonical notebook, configs, workflows, scripts, docs | Permanent |
+| **Colab runtime clone** | `/content/ai-studio-colab` (from Repository Sync) | Ephemeral per session |
+| **Colab engines** | `/content/ComfyUI`, `/content/A1111` | Ephemeral — reinstalled each session |
+| **Google Drive** | `/content/drive/MyDrive/AI_Studio` | Persistent models, outputs, datasets |
+| **Bootstrap scripts** | `core/scripts/` (in cloned repo) | Called from notebook cells |
 
 ## What the Notebook Should Eventually Do
 
@@ -42,7 +56,7 @@ The control panel will become a self-updating AI Studio orchestrator:
 | Verify GPU | In notebook (Cell 1) | `validate_environment.py` |
 | Verify paths | Cell 3b | `validate_paths.py` |
 | Repo bootstrap validation | Cell 3b | `bootstrap_repo.py`, `validate_manifests.py`, `list_workflows.py` |
-| Sync / pull repo | Planned | `bootstrap_repo.py` (git hook documented) |
+| Sync / pull repo | **Repository Sync cell** | clones/pulls from `github.com/morecolorfulthanHD/ai-studio-colab` |
 | Launch ComfyUI | In notebook (Cell 10) | `core/comfyui/install.sh` (Cell 9 integration planned) |
 | Launch A1111 | In notebook (Cell 10) | `colab/launch/` (future) |
 | Validate models | Available | `verify_models.py` |
@@ -55,7 +69,7 @@ The control panel will become a self-updating AI Studio orchestrator:
 
 ## Bootstrap Scripts (callable from notebook)
 
-Cell 3b runs these automatically after Drive mount:
+Run **Repository Sync** first (clones/pulls repo from GitHub), then Cell 3b:
 
 ```python
 # Cell 3b — Repository Bootstrap & Validation
@@ -92,7 +106,25 @@ The notebook reads path and registry data from `configs/`:
 | `configs/presets/default_generation_presets.json` | Starter generation parameters |
 | `configs/workflows/workflow_registry.json` | Planned workflow index |
 
-The repository is the **source of truth** for workflows, configs, scripts, and documentation. Drive holds runtime artifacts that are too large or session-specific for Git.
+The **GitHub repository** is the source of truth for the notebook, workflows, configs, scripts, and documentation. Google Drive holds persistent runtime assets (models, outputs) that are too large for Git.
+
+## Opening the Canonical Notebook in Colab
+
+1. Browse to the notebook on GitHub: `colab/notebooks/AI_Studio_Control_Panel_Colab.ipynb`
+2. Click **Open in Colab**, or use the direct link:
+
+   **https://colab.research.google.com/github/morecolorfulthanHD/ai-studio-colab/blob/main/colab/notebooks/AI_Studio_Control_Panel_Colab.ipynb**
+
+3. Run **Repository Sync** — it clones or pulls into `/content/ai-studio-colab`
+4. Continue with Cells 3b and 3c
+
+## Old Drive Copy Fallback
+
+If you open an older notebook saved on Drive:
+
+- **Repository Sync** still pulls the latest repo **code** from GitHub
+- The notebook **cells** you are running come from the Drive file, which may be stale
+- Switch to the GitHub Colab link above periodically, or stop using the Drive copy
 
 ## Design Rules
 
@@ -110,8 +142,11 @@ Per `configs/paths/colab_paths.json`:
 /content/drive/MyDrive/AI_Studio/
 ├── models/shared/     # persistent model weights
 ├── outputs/           # synced generation outputs
-└── workflows/         # workflow backups (future)
+├── datasets/          # reference datasets (optional)
+└── references/        # reference images (optional)
 ```
+
+Drive does **not** host the canonical notebook. The `drive_workflows` path in `colab_paths.json` is reserved for optional local backups only.
 
 ## Related Documentation
 
