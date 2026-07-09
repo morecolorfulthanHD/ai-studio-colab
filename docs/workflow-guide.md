@@ -187,11 +187,21 @@ use_cases/zara_morrison/test_outputs/
 
 ### Validating base txt2img in Colab
 
+**Fast path:** `control_panel()` → **1. Launch** → `minimal`
+
 Before adding ControlNet, IPAdapter, or animation workflows, validate the base path end-to-end:
 
 1. Follow [dogfooding/core-runtime-txt2img-checklist.md](dogfooding/core-runtime-txt2img-checklist.md)
-2. Run `python core/scripts/dogfood_core_runtime.py` for a quick PASS/WARN/FAIL summary
+2. Launch with `control_panel()` option 1 (`safe` / `minimal` / `full`)
 3. Import `workflows/base/txt2img/workflow.json` in ComfyUI and queue a baseline prompt
 4. Copy the latest output with `python core/scripts/sync_outputs.py` (use `--dry-run` first)
+
+**Workflow path in Colab:**
+
+`/content/ai-studio-colab/workflows/base/txt2img/workflow.json`
+
+**Required checkpoint:**
+
+`/content/drive/MyDrive/AI_Studio/models/shared/checkpoints/sd15.safetensors`
 
 Launch and select workflows via [`colab/notebooks/AI_Studio_Control_Panel_Colab.ipynb`](../colab/notebooks/AI_Studio_Control_Panel_Colab.ipynb) once workflow menus are wired in the control panel.

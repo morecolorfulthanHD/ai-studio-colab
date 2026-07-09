@@ -185,6 +185,55 @@ python core/scripts/dogfood_core_runtime.py
 python core/scripts/sync_outputs.py --dry-run
 ```
 
+## Single-Button Launch (Control Panel)
+
+After Repository Sync and bootstrap cells, run `control_panel()` and choose **1. Launch**.
+
+| Mode | What it does |
+|------|----------------|
+| **safe** | `install.sh --execute`, SD1.5 check, launch ComfyUI |
+| **minimal** | safe + base txt2img workflow path and import instructions |
+| **full** | minimal + `install_nodes.py --execute` for registered stable nodes |
+
+Launch uses repo scripts (not duplicated notebook logic):
+
+```bash
+bash core/comfyui/install.sh --execute
+python core/comfyui/install_nodes.py --execute   # full mode only
+python core/scripts/verify_models.py
+python core/scripts/runtime_report.py --summary
+python core/scripts/dogfood_core_runtime.py
+```
+
+### SD1.5 Checkpoint (Required for txt2img)
+
+Expected path (manual placement — no auto-download):
+
+```text
+/content/drive/MyDrive/AI_Studio/models/shared/checkpoints/sd15.safetensors
+```
+
+Verify:
+
+```bash
+python core/scripts/verify_models.py --require-sd15
+```
+
+### Base txt2img Workflow
+
+```text
+/content/ai-studio-colab/workflows/base/txt2img/workflow.json
+```
+
+After ComfyUI launches: open the URL → import workflow → confirm `sd15.safetensors` → queue prompt → check `/content/ComfyUI/output`.
+
+### Output Sync
+
+```bash
+python core/scripts/sync_outputs.py --dry-run
+python core/scripts/sync_outputs.py
+```
+
 For end-to-end Colab validation (bootstrap → install → txt2img → output copy), follow
 [dogfooding/core-runtime-txt2img-checklist.md](dogfooding/core-runtime-txt2img-checklist.md).
 

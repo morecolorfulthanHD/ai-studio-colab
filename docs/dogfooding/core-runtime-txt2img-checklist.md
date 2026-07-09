@@ -2,7 +2,15 @@
 
 Validate Production Package 1 end-to-end in Google Colab before adding OpenPose, ControlNet extraction, IPAdapter, ReActor, SVD, or AnimateDiff.
 
-**Latest validated commit target:** `51df04f` — Add core runtime execution and base txt2img workflow
+**Latest validated commit target:** `ae103fa` — Document GitHub canonical notebook architecture
+
+## Quick Path (Production Package 2)
+
+1. Open notebook from GitHub in Colab
+2. Run Cells 1–3c (including **Repository Sync**)
+3. Run `control_panel()` → **1. Launch** → `minimal`
+4. Open ComfyUI URL, import base txt2img workflow, generate image
+5. Run `sync_outputs.py`
 
 ## Quick Support Script
 
@@ -44,11 +52,11 @@ This runs read-only checks and prints `PASS` / `WARN` / `FAIL` per item. It does
 
 Run in order:
 
-1. **Cell 3b** — Repository Bootstrap & Validation
-2. **Cell 3c** — Runtime Platform Health (report + asset/capability/node/model dry-runs)
-3. ComfyUI install cell (notebook Cell 9 or `bash core/comfyui/install.sh --execute`)
-4. Node install (`python core/comfyui/install_nodes.py --execute`) if nodes missing
-5. ComfyUI launch cell
+1. **Cells 1–3** — Environment, Drive mount, paths
+2. **Repository Sync** — clone/pull from GitHub
+3. **Cell 3b** — Repository Bootstrap & Validation
+4. **Cell 3c** — Runtime Platform Health
+5. **`control_panel()` → 1. Launch → `minimal`** — single-button install + ComfyUI launch
 6. Manual workflow import + queue prompt
 
 Optional consolidated check:
@@ -101,13 +109,7 @@ Expected in Colab **after** install + model + successful generation:
 
 ## 6. ComfyUI Install Validation
 
-Dry-run first:
-
-```bash
-bash core/comfyui/install.sh
-```
-
-Execute when ready:
+Via **control_panel() → Launch** or manually:
 
 ```bash
 bash core/comfyui/install.sh --execute

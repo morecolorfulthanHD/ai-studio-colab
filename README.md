@@ -100,16 +100,32 @@ ai-studio-colab/
 
 1. Open the canonical notebook from GitHub in Colab (link above) or browse to `colab/notebooks/AI_Studio_Control_Panel_Colab.ipynb` on GitHub → **Open in Colab**.
 2. Select a GPU runtime.
-3. Run **Repository Sync** (clones `https://github.com/morecolorfulthanHD/ai-studio-colab.git` into `/content/ai-studio-colab` on first run; `git pull` on later runs).
-4. Run bootstrap validation:
+3. Run cells through **Repository Sync** and bootstrap (Cells 1–3c).
+4. Run `control_panel()` and choose **1. Launch** — pick `safe`, `minimal`, or `full`.
+5. Follow on-screen ComfyUI URL and base txt2img workflow guidance.
+
+### Launch Modes
+
+| Mode | ComfyUI | Custom Nodes | SD1.5 Check | txt2img Guidance |
+|------|---------|--------------|-------------|------------------|
+| **safe** | install + launch | skipped | yes (warn if missing) | no |
+| **minimal** | install + launch | skipped | yes (warn if missing) | yes |
+| **full** | install + launch | install registered stable nodes | yes (warn if missing) | yes |
+
+Expected SD1.5 path:
+
+`/content/drive/MyDrive/AI_Studio/models/shared/checkpoints/sd15.safetensors`
+
+Base txt2img workflow:
+
+`/content/ai-studio-colab/workflows/base/txt2img/workflow.json`
+
+After generating an image:
 
 ```bash
-python core/scripts/bootstrap_repo.py
-python core/scripts/validate_environment.py
-python core/scripts/validate_manifests.py
+python core/scripts/sync_outputs.py --dry-run
+python core/scripts/sync_outputs.py
 ```
-
-5. Follow the notebook cells for Drive mount, ComfyUI launch, and generation.
 
 ## Bootstrap Scripts
 
@@ -152,11 +168,11 @@ Validate core runtime + base txt2img in Colab before adding advanced workflows:
 
 ## Immediate Next Steps
 
-1. Run Cell 3c in Colab to validate runtime, nodes, models, and capability readiness.
-2. Run `bash core/comfyui/install.sh --execute` when runtime install is needed.
-3. Run `python core/comfyui/install_nodes.py --execute` to install default stable nodes.
-4. Import `workflows/base/txt2img/workflow.json` into ComfyUI and generate a baseline image.
-5. Keep model downloads/manual placement explicit (no automated downloads in this package).
+1. Run `control_panel()` → **1. Launch** → choose `minimal` for first image readiness.
+2. Confirm SD1.5 at `/content/drive/MyDrive/AI_Studio/models/shared/checkpoints/sd15.safetensors`.
+3. Import `workflows/base/txt2img/workflow.json` in ComfyUI and queue a baseline prompt.
+4. Copy latest output with `python core/scripts/sync_outputs.py`.
+5. Re-run `python core/scripts/runtime_report.py --summary` to confirm txt2img capability status.
 
 ## Base Generation Workflow
 

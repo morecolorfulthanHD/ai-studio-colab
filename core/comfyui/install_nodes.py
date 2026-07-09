@@ -205,15 +205,26 @@ def main() -> int:
 
     if args.json:
         print(json.dumps([asdict(s) for s in steps], indent=2))
-    else:
-        print_plan(steps, dry_run=dry_run)
-        installed, skipped, failed = execute_plan(steps, dry_run=dry_run)
-        print("\nNode install summary")
-        print("=" * 40)
-        print(f"Installed actions: {installed}")
-        print(f"Skipped actions:   {skipped}")
-        print(f"Failed actions:    {failed}")
+        return 0
 
+    print_plan(steps, dry_run=dry_run)
+    try:
+        installed, skipped, failed = execute_plan(steps, dry_run=dry_run)
+    except RuntimeError as exc:
+        print(f"\nERROR: {exc}", file=sys.stderr)
+        return 1
+
+    print("\nNode install summary")
+    print("=" * 40)
+    print(f"Installed actions: {installed}")
+    print(f"Skipped actions:   {skipped}")
+    print(f"Failed actions:    {failed}")
+
+    if failed > 0:
+        print("\nRESULT: WARN — one or more optional node steps failed.", file=sys.stderr)
+        return 0
+
+    print("\nRESULT: OK — node install/validation complete.")
     return 0
 
 

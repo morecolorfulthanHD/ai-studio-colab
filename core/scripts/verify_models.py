@@ -105,6 +105,11 @@ def main() -> int:
         action="store_true",
         help="Exit non-zero only when an 'active' model is missing.",
     )
+    parser.add_argument(
+        "--require-sd15",
+        action="store_true",
+        help="Exit non-zero when SD1.5 checkpoint (sd15.safetensors) is missing.",
+    )
     args = parser.parse_args()
 
     print("AI Studio Colab — Model Verification")
@@ -167,6 +172,28 @@ def main() -> int:
             print("\nRESULT: FAIL — one or more required models are missing.", file=sys.stderr)
             return 1
         print("\nRESULT: OK — required models present.")
+        return 0
+
+    if args.require_sd15:
+        sd15_entry = next((e for e in registry if e["name"] == "sd15_checkpoint"), None)
+        if not sd15_entry:
+            print("\nRESULT: FAIL — sd15_checkpoint not found in model registry.", file=sys.stderr)
+            return 1
+        sd15_paths = resolve_check_paths(sd15_entry, repo_root, drive_models)
+        sd15_status, sd15_path = check_entry(sd15_paths)
+        expected = Path(
+            "/content/drive/MyDrive/AI_Studio/models/shared/checkpoints/sd15.safetensors"
+        )
+        if sd15_status != "present":
+            print("\nRESULT: FAIL — SD1.5 checkpoint missing.", file=sys.stderr)
+            print(f"  Expected path: {expected}", file=sys.stderr)
+            print(
+                "  Place sd15.safetensors at this path before txt2img can run. "
+                "No automatic download is performed.",
+                file=sys.stderr,
+            )
+            return 1
+        print(f"\nRESULT: OK — SD1.5 checkpoint present at {sd15_path}")
         return 0
 
     print("\nRESULT: OK — model verification complete (informational).")

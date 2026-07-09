@@ -54,18 +54,53 @@ The control panel will become a self-updating AI Studio orchestrator:
 |------------|--------|--------|
 | Mount Google Drive | In notebook (Cell 2) | — |
 | Verify GPU | In notebook (Cell 1) | `validate_environment.py` |
-| Verify paths | Cell 3b | `validate_paths.py` |
+| Sync / pull repo | **Repository Sync cell** | clones/pulls from GitHub |
 | Repo bootstrap validation | Cell 3b | `bootstrap_repo.py`, `validate_manifests.py`, `list_workflows.py` |
-| Sync / pull repo | **Repository Sync cell** | clones/pulls from `github.com/morecolorfulthanHD/ai-studio-colab` |
-| Launch ComfyUI | In notebook (Cell 10) | `core/comfyui/install.sh` (Cell 9 integration planned) |
-| Launch A1111 | In notebook (Cell 10) | `colab/launch/` (future) |
-| Validate models | Available | `verify_models.py` |
-| Validate nodes | Available | `check_nodes.py` |
-| Install missing models/nodes | Planned | driven by registries + notebook managers |
+| **Single-button Launch** | **control_panel() option 1** | `studio_launch()` → repo scripts |
+| Launch ComfyUI | control_panel() Launch | `install.sh --execute`, `launch_comfyui()` |
+| Install custom nodes | full Launch mode | `install_nodes.py --execute` |
+| Validate models (SD1.5) | Launch flow | `verify_models.py` |
+| Validate nodes | full Launch / Cell 3c | `check_nodes.py` |
+| Sync outputs | Launch guidance + Cell 3c | `sync_outputs.py` |
+| Runtime health | Cell 3c + post-launch | `runtime_report.py`, `dogfood_core_runtime.py` |
+| Launch A1111 | Legacy Cell 9 installer | not part of Launch option 1 |
 | Expose workflow menus | Planned | `list_workflows.py` + `workflow_registry.json` |
-| Sync outputs | Available | `sync_outputs.py` |
-| Runtime health | Cell 3c | `runtime_report.py` |
 | Backup / restore workflows | Planned | Drive path `drive_workflows` |
+
+## Single-Button Launch (Option 1)
+
+Run `control_panel()` and choose **1. Launch**. Select a mode:
+
+| Mode | ComfyUI | Nodes | SD1.5 | txt2img guidance |
+|------|---------|-------|-------|------------------|
+| **safe** | `install.sh --execute` + launch | skip | check (warn) | no |
+| **minimal** | `install.sh --execute` + launch | skip | check (warn) | yes |
+| **full** | `install.sh --execute` + launch | `install_nodes.py --execute` | check (warn) | yes |
+
+The launch flow calls repo scripts rather than duplicating install logic:
+
+```text
+dogfood_core_runtime.py (pre)
+install.sh --execute
+install_nodes.py --execute        # full only
+verify_models.py
+launch_comfyui()
+runtime_report.py --summary
+dogfood_core_runtime.py (post)
+```
+
+After launch (minimal/full), the notebook prints:
+
+- ComfyUI URL
+- Base txt2img workflow path: `/content/ai-studio-colab/workflows/base/txt2img/workflow.json`
+- Import/run instructions
+- `sync_outputs.py` commands
+
+SD1.5 expected path:
+
+`/content/drive/MyDrive/AI_Studio/models/shared/checkpoints/sd15.safetensors`
+
+No automatic model download is performed.
 
 ## Bootstrap Scripts (callable from notebook)
 

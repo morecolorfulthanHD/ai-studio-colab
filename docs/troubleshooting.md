@@ -53,6 +53,17 @@ python core/comfyui/install_models.py --dry-run
 | `install_nodes.py` reports clone failure | Repo unavailable or network issue | Re-run with `--execute`; optional node failures are reported |
 | `verify_models.py` reports required missing model | SD 1.5 not found at expected path | Place `sd15.safetensors` in Drive shared checkpoint path |
 
+## Launch Flow Issues
+
+| Symptom | Likely Cause | Resolution |
+|---------|--------------|------------|
+| Launch fails at ComfyUI install | Drive not mounted | Run Cell 2 (Drive mount) before Launch |
+| `install.sh` fails | Drive path missing | Mount Drive; confirm `/content/drive/MyDrive` exists |
+| SD1.5 missing after launch | Checkpoint not on Drive | Place `sd15.safetensors` at expected path (no auto-download) |
+| txt2img capability `partial` | SD1.5 or runtime prerequisite missing | Expected until SD1.5 present and generation succeeds |
+| Full mode node install fails | Required node clone error | Check network; re-run `install_nodes.py --execute` |
+| ComfyUI URL not shown | Port timeout | Check `/content/drive/MyDrive/AI_Studio/logs/comfyui.log` |
+
 ## Notebook Source of Truth
 
 | Symptom | Likely Cause | Resolution |

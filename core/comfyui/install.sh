@@ -136,6 +136,11 @@ parse_args() {
   fi
 }
 
+drive_mydrive="/content/drive/MyDrive"
+if [[ ! -d "${drive_mydrive}" ]]; then
+  die "Google Drive is not mounted (${drive_mydrive} missing). Run the Drive mount cell before ComfyUI install."
+fi
+
 main() {
   parse_args "$@"
   log "Starting ComfyUI install/validation"
