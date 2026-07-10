@@ -13,7 +13,7 @@ bash core/comfyui/install.sh
 # Execute install/update
 bash core/comfyui/install.sh --execute
 
-# Execute with destructive reinstall
+# Archive existing runtime and clone fresh
 bash core/comfyui/install.sh --execute --force-reinstall
 ```
 
@@ -21,15 +21,49 @@ bash core/comfyui/install.sh --execute --force-reinstall
 
 | Step | Action |
 |------|--------|
-| 1 | Validate or clone ComfyUI to `/content/ComfyUI` |
-| 2 | Validate or install Python requirements via `pip` |
-| 3 | Validate or create `/content/ComfyUI/models` symlink to Drive shared models |
+| 1 | Classify `/content/ComfyUI` runtime state |
+| 2 | Recover safely from empty or partial installs when evidence is strong |
+| 3 | Clone or update ComfyUI from the official repository |
+| 4 | Validate or install Python requirements via `pip` |
+| 5 | Configure persistent Drive models via `extra_model_paths.yaml` |
+
+### Runtime directory classifications
+
+| Classification | Meaning | Automatic recovery |
+|----------------|---------|--------------------|
+| `missing` | Runtime path does not exist | Clone fresh |
+| `valid_git_repo` | Valid ComfyUI git checkout with recognized origin and core structure | Pull latest changes |
+| `empty_directory` | Directory exists but has no meaningful entries | Remove empty dir, clone fresh |
+| `partial_comfyui_install` | Strong ComfyUI-like evidence without `.git` | Archive to timestamped backup, clone fresh |
+| `unknown_non_git_directory` | Unrelated or ambiguous contents | Stop safely; manual action required |
+
+Partial-install detection requires strong evidence such as combinations of `main.py`, `requirements.txt`, `comfy/`, `web/`, `nodes.py`, `folder_paths.py`, `models/`, and related runtime folders. A directory is **not** classified as partial merely because its name is `ComfyUI`.
+
+Git repositories are classified as `valid_git_repo` only when the `origin` remote matches `COMFYUI_REPO` or `Comfy-Org/ComfyUI` and distinctive ComfyUI paths such as `comfy/`, `nodes.py`, or `folder_paths.py` are present. Unrecognized git repositories are never pulled automatically.
+
+### Archive locations
+
+When recovery archives an existing runtime, it is renamed — never permanently deleted:
+
+```text
+/content/ComfyUI.broken.<UTC timestamp>
+/content/ComfyUI.archived.<UTC timestamp>
+```
+
+If a timestamped archive path already exists, the installer adds a numeric suffix (`.1`, `.2`, …) and never overwrites an existing archive.
+
+Inspect or remove old archives manually:
+
+```bash
+ls -ld /content/ComfyUI.broken.* /content/ComfyUI.archived.*
+```
 
 ### What it does not do
 
 - Download model weights
 - Delete Drive models
-- Remove existing installs unless `--force-reinstall` is explicitly provided
+- Permanently delete unknown runtime directories
+- Remove unrelated user-managed directories without `--force-reinstall --execute`
 
 ### Environment overrides
 
@@ -39,6 +73,8 @@ bash core/comfyui/install.sh --execute --force-reinstall
 | `SHARED_MODELS` | `/content/drive/MyDrive/AI_Studio/models/shared` |
 | `COMFYUI_REPO` | `https://github.com/Comfy-Org/ComfyUI.git` |
 | `PYTHON` | `python3` |
+| `EXTRA_MODEL_PATHS_FILE` | `/content/ComfyUI/extra_model_paths.yaml` |
+
 ## Node + Model scripts
 
 | Script | Default behavior | Execute mode |
@@ -77,7 +113,7 @@ Model downloads are intentionally deferred to a later package.
 
 | Item | Purpose | Status |
 |------|---------|--------|
-| `install.sh` | Clone ComfyUI, deps, model symlink | Done |
+| `install.sh` | Clone ComfyUI, deps, extra model paths | Done |
 | `install_nodes.py` | Node install plan + execute mode | Done |
 | `install_models.py` | Model validation plan + execute mode | Done |
 | `launch.sh` | Start ComfyUI server | Planned |
@@ -96,4 +132,4 @@ python core/scripts/verify_models.py
 
 ## Model Path Wiring
 
-ComfyUI reads checkpoints, LoRAs, VAEs, and ControlNets from the Drive-backed shared models folder via the `models` symlink. Repo `assets/` paths are used for local development; Colab runtime uses `configs/paths/colab_paths.json` → `drive_models`.
+ComfyUI reads checkpoints, LoRAs, VAEs, and ControlNets from the Drive-backed shared models folder via `extra_model_paths.yaml`. The native `/content/ComfyUI/models` directory remains local to the runtime. Repo `assets/` paths are used for local development; Colab runtime uses `configs/paths/colab_paths.json` → `drive_models`.

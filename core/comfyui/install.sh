@@ -16,6 +16,11 @@ PYTHON="${PYTHON:-python3}"
 EXTRA_MODEL_PATHS_FILE="${EXTRA_MODEL_PATHS_FILE:-${COMFYUI_DIR}/extra_model_paths.yaml}"
 FORCE_REINSTALL=0
 EXECUTE=0
+COMFYUI_RUNTIME_STATE=""
+COMFYUI_RUNTIME_EVIDENCE=""
+COMFYUI_LAST_ARCHIVE_PATH=""
+COMFYUI_PARTIAL_MARKER_COUNT=0
+COMFYUI_CORE_PARTIAL_MARKER_COUNT=0
 
 SHARED_MODEL_SUBDIRS=(
   checkpoints
@@ -64,11 +69,13 @@ Usage:
 Modes:
   --dry-run         Print planned actions only (default)
   --execute         Apply changes (clone/pull, pip install, extra_model_paths.yaml)
-  --force-reinstall Remove existing COMFYUI_DIR before clone (only with --execute)
+  --force-reinstall Archive existing COMFYUI_DIR, then clone fresh (only with --execute)
 
 Notes:
   Persistent Drive models are configured via ${EXTRA_MODEL_PATHS_FILE}.
   The native ${COMFYUI_DIR}/models directory is preserved.
+  Partial or empty runtime directories may be recovered automatically.
+  Unknown runtime directories are never deleted without manual intervention.
 EOF
 }
 
@@ -156,32 +163,325 @@ validate_drive_layout() {
   ensure_shared_model_subdirs
 }
 
-describe_comfyui_state() {
+utc_timestamp() {
+  date -u +%Y%m%dT%H%M%SZ
+}
+
+allocate_unique_path() {
+  local candidate="$1"
+  if [[ ! -e "${candidate}" && ! -L "${candidate}" ]]; then
+    printf '%s' "${candidate}"
+    return 0
+  fi
+  local suffix=1
+  while [[ -e "${candidate}.${suffix}" || -L "${candidate}.${suffix}" ]]; do
+    suffix=$((suffix + 1))
+  done
+  printf '%s' "${candidate}.${suffix}"
+}
+
+runtime_directory_has_entries() {
+  local dir="$1"
+  find "${dir}" -mindepth 1 -print -quit 2>/dev/null | grep -q .
+}
+
+collect_partial_comfyui_markers() {
+  local dir="$1"
+  local marker
+  local -a markers=(
+    main.py
+    requirements.txt
+    comfy
+    web
+    nodes.py
+    folder_paths.py
+    models
+    custom_nodes
+    input
+    output
+    temp
+  )
+  local -a found=()
+
+  for marker in "${markers[@]}"; do
+    if [[ -e "${dir}/${marker}" ]]; then
+      found+=("${marker}")
+    fi
+  done
+
+  if ((${#found[@]} > 0)); then
+    local joined=""
+    local item
+    for item in "${found[@]}"; do
+      if [[ -n "${joined}" ]]; then
+        joined+=", ${item}"
+      else
+        joined="${item}"
+      fi
+    done
+    COMFYUI_RUNTIME_EVIDENCE="${joined}"
+  else
+    COMFYUI_RUNTIME_EVIDENCE=""
+  fi
+
+  COMFYUI_PARTIAL_MARKER_COUNT="${#found[@]}"
+}
+
+count_core_partial_markers() {
+  local dir="$1"
+  local count=0
+  local marker
+
+  for marker in main.py requirements.txt comfy nodes.py folder_paths.py; do
+    if [[ -e "${dir}/${marker}" ]]; then
+      count=$((count + 1))
+    fi
+  done
+
+  COMFYUI_CORE_PARTIAL_MARKER_COUNT="${count}"
+}
+
+normalize_git_remote_url() {
+  local url="$1"
+  url="${url%.git}"
+  url="${url%/}"
+  case "${url}" in
+    git@*:*)
+      url="${url#git@}"
+      url="${url/:/\/}"
+      ;;
+    ssh://*)
+      url="${url#ssh://}"
+      ;;
+    https://*)
+      url="${url#https://}"
+      ;;
+    http://*)
+      url="${url#http://}"
+      ;;
+    file://*)
+      url="${url#file://}"
+      ;;
+  esac
+  printf '%s' "${url,,}"
+}
+
+git_repo_origin_url() {
+  local dir="$1"
+  git -C "${dir}" remote get-url origin 2>/dev/null || true
+}
+
+is_recognized_comfyui_origin() {
+  local origin="$1"
+  local normalized_origin normalized_expected
+
+  if [[ -z "${origin}" ]]; then
+    return 1
+  fi
+
+  normalized_origin="$(normalize_git_remote_url "${origin}")"
+  normalized_expected="$(normalize_git_remote_url "${COMFYUI_REPO}")"
+
+  if [[ "${normalized_origin}" == "${normalized_expected}" ]]; then
+    return 0
+  fi
+
+  if [[ "${normalized_origin}" == *comfy-org/comfyui* ]]; then
+    return 0
+  fi
+
+  return 1
+}
+
+has_comfyui_repo_structure() {
+  local dir="$1"
+  [[ -e "${dir}/comfy" || -f "${dir}/nodes.py" || -f "${dir}/folder_paths.py" ]]
+}
+
+classify_comfyui_runtime() {
+  local dir="$1"
+  local origin
+
+  COMFYUI_RUNTIME_STATE=""
+  COMFYUI_RUNTIME_EVIDENCE=""
+
+  if [[ ! -e "${dir}" && ! -L "${dir}" ]]; then
+    COMFYUI_RUNTIME_STATE="missing"
+    return 0
+  fi
+
+  if [[ -L "${dir}" ]]; then
+    COMFYUI_RUNTIME_EVIDENCE="symlink -> $(readlink "${dir}" 2>/dev/null || echo unknown)"
+    COMFYUI_RUNTIME_STATE="unknown_non_git_directory"
+    return 0
+  fi
+
+  if [[ ! -d "${dir}" ]]; then
+    COMFYUI_RUNTIME_EVIDENCE="non-directory path"
+    COMFYUI_RUNTIME_STATE="unknown_non_git_directory"
+    return 0
+  fi
+
+  if [[ -d "${dir}/.git" ]]; then
+    if [[ ! -f "${dir}/main.py" || ! -f "${dir}/requirements.txt" ]]; then
+      COMFYUI_RUNTIME_EVIDENCE="git directory missing main.py and/or requirements.txt"
+      COMFYUI_RUNTIME_STATE="unknown_non_git_directory"
+      return 0
+    fi
+
+    origin="$(git_repo_origin_url "${dir}")"
+    if [[ -z "${origin}" ]]; then
+      COMFYUI_RUNTIME_EVIDENCE="git repository with no origin remote"
+      COMFYUI_RUNTIME_STATE="unknown_non_git_directory"
+      return 0
+    fi
+
+    if ! is_recognized_comfyui_origin "${origin}"; then
+      COMFYUI_RUNTIME_EVIDENCE="unrecognized git origin: ${origin}"
+      COMFYUI_RUNTIME_STATE="unknown_non_git_directory"
+      return 0
+    fi
+
+    if ! has_comfyui_repo_structure "${dir}"; then
+      COMFYUI_RUNTIME_EVIDENCE="recognized ComfyUI origin (${origin}) but missing distinctive ComfyUI paths (comfy/, nodes.py, folder_paths.py)"
+      COMFYUI_RUNTIME_STATE="unknown_non_git_directory"
+      return 0
+    fi
+
+    COMFYUI_RUNTIME_STATE="valid_git_repo"
+    return 0
+  fi
+
+  if ! runtime_directory_has_entries "${dir}"; then
+    COMFYUI_RUNTIME_STATE="empty_directory"
+    return 0
+  fi
+
+  collect_partial_comfyui_markers "${dir}"
+
+  if [[ -f "${dir}/main.py" && -f "${dir}/requirements.txt" ]]; then
+    COMFYUI_RUNTIME_STATE="partial_comfyui_install"
+    return 0
+  fi
+
+  count_core_partial_markers "${dir}"
+
+  if (( COMFYUI_PARTIAL_MARKER_COUNT >= 3 && COMFYUI_CORE_PARTIAL_MARKER_COUNT >= 2 )); then
+    COMFYUI_RUNTIME_STATE="partial_comfyui_install"
+    return 0
+  fi
+
+  if (( COMFYUI_PARTIAL_MARKER_COUNT >= 4 )); then
+    COMFYUI_RUNTIME_STATE="partial_comfyui_install"
+    return 0
+  fi
+
+  COMFYUI_RUNTIME_STATE="unknown_non_git_directory"
+}
+
+print_directory_inventory() {
+  local dir="$1"
+  local entry
+
+  log "Directory inventory for ${dir}:"
+  if ! runtime_directory_has_entries "${dir}"; then
+    log "  (empty directory)"
+    return 0
+  fi
+
+  while IFS= read -r entry; do
+    [[ -n "${entry}" ]] && log "  ${entry}"
+  done < <(find "${dir}" -mindepth 1 -maxdepth 2 -printf '%y %P\n' 2>/dev/null | head -n 25)
+
+  if find "${dir}" -mindepth 2 -print -quit 2>/dev/null | grep -q .; then
+    log "  ... additional nested entries omitted ..."
+  fi
+}
+
+refuse_unknown_runtime_directory() {
+  log "Automatic recovery refused: runtime directory is not a valid ComfyUI git repository."
+  if [[ -n "${COMFYUI_RUNTIME_EVIDENCE}" ]]; then
+    log "Classification evidence: ${COMFYUI_RUNTIME_EVIDENCE}"
+  fi
+  print_directory_inventory "${COMFYUI_DIR}"
+  die "Unknown runtime directory at ${COMFYUI_DIR}. Resolve manually or rerun with --force-reinstall --execute to archive and reinstall. Unrecognized git repositories are never pulled. Drive models are never deleted."
+}
+
+archive_runtime_directory() {
+  local label="$1"
+  local reason="$2"
+  local parent base archive_base archive_path
+
+  parent="$(dirname "${COMFYUI_DIR}")"
+  base="$(basename "${COMFYUI_DIR}")"
+  archive_base="${parent}/${base}.${label}.$(utc_timestamp)"
+  archive_path="$(allocate_unique_path "${archive_base}")"
+  COMFYUI_LAST_ARCHIVE_PATH="${archive_path}"
+
+  log "Recovery: ${reason}"
+  log "Recovery: archive destination ${archive_path}"
+
+  if [[ "${EXECUTE}" == "1" ]]; then
+    run_step mv "${COMFYUI_DIR}" "${archive_path}"
+    log "Recovery: archived ${COMFYUI_DIR} -> ${archive_path}"
+  else
+    log "DRY-RUN: would archive ${COMFYUI_DIR} -> ${archive_path}"
+  fi
+}
+
+remove_empty_runtime_directory() {
+  if [[ "${EXECUTE}" == "1" ]]; then
+    run_step rmdir "${COMFYUI_DIR}"
+    log "Recovery: removed empty runtime directory ${COMFYUI_DIR}"
+  else
+    log "DRY-RUN: would remove empty runtime directory ${COMFYUI_DIR}"
+  fi
+}
+
+clone_comfyui_repo() {
+  if [[ "${EXECUTE}" == "1" ]]; then
+    run_step git clone --depth 1 "${COMFYUI_REPO}" "${COMFYUI_DIR}"
+    log "Recovery: fresh ComfyUI clone installed at ${COMFYUI_DIR}"
+  else
+    log "DRY-RUN: would clone ${COMFYUI_REPO} -> ${COMFYUI_DIR}"
+  fi
+}
+
+inspect_comfyui_runtime() {
   phase "Inspect ComfyUI runtime path"
 
-  if [[ ! -e "${COMFYUI_DIR}" && ! -L "${COMFYUI_DIR}" ]]; then
-    log "ComfyUI state: missing (${COMFYUI_DIR})"
-    return 0
-  fi
+  classify_comfyui_runtime "${COMFYUI_DIR}"
+  log "ComfyUI runtime classification: ${COMFYUI_RUNTIME_STATE}"
 
-  if [[ -d "${COMFYUI_DIR}/.git" ]]; then
-    log "ComfyUI state: valid git repo (${COMFYUI_DIR})"
-    if [[ "${EXECUTE}" == "1" ]]; then
-      log "git remote: $(git -C "${COMFYUI_DIR}" remote get-url origin 2>/dev/null || echo unknown)"
-      log "git HEAD:   $(git -C "${COMFYUI_DIR}" rev-parse --short HEAD 2>/dev/null || echo unknown)"
-    fi
-    return 0
-  fi
-
-  if [[ -d "${COMFYUI_DIR}" ]]; then
-    die "ComfyUI state: invalid non-git directory at ${COMFYUI_DIR}. Use --force-reinstall --execute to replace."
-  fi
-
-  if [[ -L "${COMFYUI_DIR}" ]]; then
-    die "ComfyUI state: symlink at ${COMFYUI_DIR} (expected git clone directory). Use --force-reinstall --execute to replace."
-  fi
-
-  die "ComfyUI state: unknown existing path at ${COMFYUI_DIR}"
+  case "${COMFYUI_RUNTIME_STATE}" in
+    missing)
+      log "Runtime path missing (${COMFYUI_DIR}); fresh clone planned."
+      ;;
+    valid_git_repo)
+      log "Valid ComfyUI git repository detected at ${COMFYUI_DIR}"
+      if [[ "${EXECUTE}" == "1" ]]; then
+        log "git remote: $(git -C "${COMFYUI_DIR}" remote get-url origin 2>/dev/null || echo unknown)"
+        log "git HEAD:   $(git -C "${COMFYUI_DIR}" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+      fi
+      if [[ -n "${COMFYUI_RUNTIME_EVIDENCE}" ]]; then
+        log "Note: ${COMFYUI_RUNTIME_EVIDENCE}"
+      fi
+      ;;
+    empty_directory)
+      log "Runtime directory exists but is empty; safe automatic recovery planned."
+      ;;
+    partial_comfyui_install)
+      log "Partial or interrupted ComfyUI installation detected."
+      log "Partial install markers: ${COMFYUI_RUNTIME_EVIDENCE:-unknown}"
+      log "Automatic recovery will archive the partial runtime and clone fresh."
+      ;;
+    unknown_non_git_directory)
+      log "Runtime directory does not match a safe automatic recovery profile."
+      if [[ -n "${COMFYUI_RUNTIME_EVIDENCE}" ]]; then
+        log "Classification evidence: ${COMFYUI_RUNTIME_EVIDENCE}"
+      fi
+      ;;
+  esac
 }
 
 describe_native_models_directory() {
@@ -351,26 +651,49 @@ install_comfyui_repo() {
 
   if [[ "${FORCE_REINSTALL}" == "1" ]]; then
     if [[ -e "${COMFYUI_DIR}" || -L "${COMFYUI_DIR}" ]]; then
-      log "Force reinstall requested — removing ${COMFYUI_DIR}"
-      run_step rm -rf "${COMFYUI_DIR}"
+      archive_runtime_directory \
+        "archived" \
+        "force reinstall requested; existing runtime will be archived (not deleted)"
+      clone_comfyui_repo
+      log "Recovery: force reinstall complete; Drive models were not modified."
+      return 0
     fi
-  fi
-
-  if [[ -d "${COMFYUI_DIR}/.git" ]]; then
-    if [[ "${EXECUTE}" == "1" ]]; then
-      log "ComfyUI already cloned at ${COMFYUI_DIR} — pulling latest changes"
-      git -C "${COMFYUI_DIR}" pull --ff-only
-    else
-      log "DRY-RUN: would pull latest changes in ${COMFYUI_DIR}"
-    fi
+    clone_comfyui_repo
     return 0
   fi
 
-  if [[ -e "${COMFYUI_DIR}" || -L "${COMFYUI_DIR}" ]]; then
-    die "Path exists but is not a ComfyUI git repo: ${COMFYUI_DIR}. Use --force-reinstall --execute to replace."
-  fi
-
-  run_step git clone --depth 1 "${COMFYUI_REPO}" "${COMFYUI_DIR}"
+  case "${COMFYUI_RUNTIME_STATE}" in
+    missing)
+      clone_comfyui_repo
+      ;;
+    valid_git_repo)
+      if [[ "${EXECUTE}" == "1" ]]; then
+        log "ComfyUI already cloned at ${COMFYUI_DIR} — pulling latest changes"
+        git -C "${COMFYUI_DIR}" pull --ff-only
+      else
+        log "DRY-RUN: would pull latest changes in ${COMFYUI_DIR}"
+      fi
+      ;;
+    empty_directory)
+      remove_empty_runtime_directory
+      clone_comfyui_repo
+      log "Recovery: empty runtime replaced with fresh ComfyUI clone; Drive models were not modified."
+      ;;
+    partial_comfyui_install)
+      archive_runtime_directory \
+        "broken" \
+        "partial ComfyUI installation detected (markers: ${COMFYUI_RUNTIME_EVIDENCE:-unknown})"
+      clone_comfyui_repo
+      log "Recovery: partial runtime archived to ${COMFYUI_LAST_ARCHIVE_PATH}"
+      log "Recovery: clean runtime installed at ${COMFYUI_DIR}; Drive models were not modified."
+      ;;
+    unknown_non_git_directory)
+      refuse_unknown_runtime_directory
+      ;;
+    *)
+      die "Unexpected ComfyUI runtime classification: ${COMFYUI_RUNTIME_STATE}"
+      ;;
+  esac
 }
 
 install_python_requirements() {
@@ -436,7 +759,7 @@ main() {
 
   validate_tools
   validate_drive_layout
-  describe_comfyui_state
+  inspect_comfyui_runtime
   install_comfyui_repo
   install_python_requirements
   manage_extra_model_paths

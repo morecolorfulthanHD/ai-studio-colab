@@ -60,7 +60,7 @@ python core/comfyui/install_models.py --dry-run
 | Launch fails at ComfyUI install | Drive not mounted | Run Cell 2 (Drive mount) before Launch |
 | `install.sh` fails with exit 1 | Drive path missing or extra_model_paths conflict | Read full stdout/stderr in notebook output; look for `[comfyui-install] ERROR` / `FATAL` lines |
 | `install.sh` reports Drive not mounted | Skipped Cell 2 | Mount Drive; confirm `/content/drive/MyDrive` exists |
-| `install.sh` reports invalid ComfyUI path | Leftover `/content/ComfyUI` directory | Use `bash core/comfyui/install.sh --execute --force-reinstall` if intentional reset |
+| `install.sh` reports invalid ComfyUI path | Leftover non-git `/content/ComfyUI` directory | Partial installs recover automatically; unknown directories require manual cleanup or `--force-reinstall --execute` |
 | `install.sh` extra_model_paths user-managed conflict | Existing `extra_model_paths.yaml` without AI Studio markers | Merge the `ai_studio_drive` block manually; installer will not overwrite unrelated user config |
 | `install.sh` requirements.txt missing | ComfyUI clone incomplete | Re-run with `--force-reinstall --execute` after reviewing install log |
 | SD1.5 missing after launch | Checkpoint not on Drive | Place `sd15.safetensors` at expected path (no auto-download) |
@@ -104,6 +104,45 @@ Expected Drive model root:
 Mapped subdirectories include: `checkpoints`, `controlnet`, `loras`, `vae`, `embeddings`, `upscale_models`, `clip`, `ipadapter`.
 
 The installer does **not** replace or delete `/content/ComfyUI/models`. A fresh ComfyUI clone with a native `models/` directory is expected and supported.
+
+## ComfyUI Runtime Directory Recovery
+
+The installer classifies `/content/ComfyUI` before making changes:
+
+| Classification | Meaning | Automatic action |
+|----------------|---------|------------------|
+| `missing` | Runtime path does not exist | Clone fresh |
+| `valid_git_repo` | Valid ComfyUI git checkout with recognized origin | Pull latest changes |
+| `empty_directory` | Directory exists but is empty | Remove empty dir, clone fresh |
+| `partial_comfyui_install` | Strong ComfyUI-like evidence without `.git` | Archive, then clone fresh |
+| `unknown_non_git_directory` | Unrelated or ambiguous contents | Stop safely with inventory |
+
+Partial-install recovery requires strong evidence such as `main.py`, `requirements.txt`, `comfy/`, `nodes.py`, `folder_paths.py`, and related runtime folders. A directory is not treated as partial merely because it is named `ComfyUI`.
+
+Git repositories are treated as valid only when the `origin` remote matches `COMFYUI_REPO` or `Comfy-Org/ComfyUI` and distinctive ComfyUI paths are present. Unrecognized git repositories, including unrelated repos that happen to contain `main.py` and `requirements.txt`, are refused and never pulled automatically.
+
+When recovery archives a runtime, it is renamed — never permanently deleted:
+
+```text
+/content/ComfyUI.broken.<UTC timestamp>
+/content/ComfyUI.archived.<UTC timestamp>
+```
+
+Inspect archives:
+
+```bash
+ls -ld /content/ComfyUI.broken.* /content/ComfyUI.archived.*
+```
+
+Remove an old archive manually only after confirming it is no longer needed:
+
+```bash
+rm -rf /content/ComfyUI.broken.20260710T161500Z
+```
+
+For unrelated or user-managed runtime directories, the installer prints a concise inventory and refuses automatic deletion. Use `--force-reinstall --execute` only when you intentionally want the existing runtime archived and replaced.
+
+Recovery never deletes Drive model content.
 
 ## Notebook Source of Truth
 
