@@ -58,11 +58,52 @@ python core/comfyui/install_models.py --dry-run
 | Symptom | Likely Cause | Resolution |
 |---------|--------------|------------|
 | Launch fails at ComfyUI install | Drive not mounted | Run Cell 2 (Drive mount) before Launch |
-| `install.sh` fails | Drive path missing | Mount Drive; confirm `/content/drive/MyDrive` exists |
+| `install.sh` fails with exit 1 | Drive path missing or extra_model_paths conflict | Read full stdout/stderr in notebook output; look for `[comfyui-install] ERROR` / `FATAL` lines |
+| `install.sh` reports Drive not mounted | Skipped Cell 2 | Mount Drive; confirm `/content/drive/MyDrive` exists |
+| `install.sh` reports invalid ComfyUI path | Leftover `/content/ComfyUI` directory | Use `bash core/comfyui/install.sh --execute --force-reinstall` if intentional reset |
+| `install.sh` extra_model_paths user-managed conflict | Existing `extra_model_paths.yaml` without AI Studio markers | Merge the `ai_studio_drive` block manually; installer will not overwrite unrelated user config |
+| `install.sh` requirements.txt missing | ComfyUI clone incomplete | Re-run with `--force-reinstall --execute` after reviewing install log |
 | SD1.5 missing after launch | Checkpoint not on Drive | Place `sd15.safetensors` at expected path (no auto-download) |
 | txt2img capability `partial` | SD1.5 or runtime prerequisite missing | Expected until SD1.5 present and generation succeeds |
 | Full mode node install fails | Required node clone error | Check network; re-run `install_nodes.py --execute` |
 | ComfyUI URL not shown | Port timeout | Check `/content/drive/MyDrive/AI_Studio/logs/comfyui.log` |
+
+## ComfyUI Model Paths
+
+AI Studio preserves ComfyUI's native local models directory:
+
+```text
+/content/ComfyUI/models
+```
+
+Persistent Google Drive models are exposed through ComfyUI's supported configuration file:
+
+```text
+/content/ComfyUI/extra_model_paths.yaml
+```
+
+The installer creates or updates only a clearly delimited **AI Studio-managed block**:
+
+```text
+# BEGIN AI_STUDIO_MANAGED
+# END AI_STUDIO_MANAGED
+```
+
+Inspect after launch:
+
+```bash
+cat /content/ComfyUI/extra_model_paths.yaml
+```
+
+Expected Drive model root:
+
+```text
+/content/drive/MyDrive/AI_Studio/models/shared
+```
+
+Mapped subdirectories include: `checkpoints`, `controlnet`, `loras`, `vae`, `embeddings`, `upscale_models`, `clip`, `ipadapter`.
+
+The installer does **not** replace or delete `/content/ComfyUI/models`. A fresh ComfyUI clone with a native `models/` directory is expected and supported.
 
 ## Notebook Source of Truth
 
