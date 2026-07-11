@@ -10,6 +10,17 @@ import argparse
 import os
 import sys
 from pathlib import Path
+import importlib.util
+
+_activate_path = Path(__file__).resolve().parent / "cli_activate.py"
+_spec = importlib.util.spec_from_file_location("ai_studio_cli_activate", _activate_path)
+_activate = importlib.util.module_from_spec(_spec)
+assert _spec is not None and _spec.loader is not None
+_spec.loader.exec_module(_activate)
+_activate.activate(__file__)
+
+from core.runtime.registry_loader import find_repo_root
+
 
 REQUIRED_TOP_LEVEL_DIRS = (
     "docs",
@@ -34,21 +45,6 @@ REQUIRED_CONFIG_FILES = (
 )
 
 CANONICAL_NOTEBOOK = "colab/notebooks/AI_Studio_Control_Panel_Colab.ipynb"
-
-
-def find_repo_root(start: Path | None = None) -> Path:
-    """Walk upward from *start* (or cwd) to locate the repository root."""
-    current = (start or Path.cwd()).resolve()
-    markers = {".git", "workflows", "configs"}
-
-    for path in (current, *current.parents):
-        if (path / "README.md").is_file() and any((path / m).exists() for m in markers):
-            return path
-
-    raise FileNotFoundError(
-        "Could not locate AI Studio Colab repository root. "
-        "Run this script from inside the cloned repository."
-    )
 
 
 def validate_structure(repo_root: Path) -> tuple[list[str], list[str]]:
@@ -122,7 +118,7 @@ def main() -> int:
     print("=" * 40)
 
     try:
-        repo_root = args.repo_root.resolve() if args.repo_root else find_repo_root()
+        repo_root = args.repo_root.resolve() if args.repo_root else find_repo_root(script_file=Path(__file__))
     except FileNotFoundError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1

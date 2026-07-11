@@ -7,6 +7,17 @@ import argparse
 import json
 import sys
 from pathlib import Path
+import importlib.util
+
+_activate_path = Path(__file__).resolve().parent / "cli_activate.py"
+_spec = importlib.util.spec_from_file_location("ai_studio_cli_activate", _activate_path)
+_activate = importlib.util.module_from_spec(_spec)
+assert _spec is not None and _spec.loader is not None
+_spec.loader.exec_module(_activate)
+_activate.activate(__file__)
+
+from core.runtime.registry_loader import find_repo_root
+
 
 
 MANIFEST_RULES: dict[str, dict] = {
@@ -99,14 +110,6 @@ MANIFEST_RULES: dict[str, dict] = {
 }
 
 
-def find_repo_root(start: Path | None = None) -> Path:
-    current = (start or Path.cwd()).resolve()
-    for path in (current, *current.parents):
-        if (path / "README.md").is_file() and (path / "configs").is_dir():
-            return path
-    raise FileNotFoundError("Could not locate repository root.")
-
-
 def validate_manifest(rel_path: str, data: object) -> list[str]:
     rules = MANIFEST_RULES.get(rel_path)
     if rules is None:
@@ -162,7 +165,7 @@ def main() -> int:
     print("=" * 40)
 
     try:
-        repo_root = args.repo_root.resolve() if args.repo_root else find_repo_root()
+        repo_root = args.repo_root.resolve() if args.repo_root else find_repo_root(script_file=Path(__file__))
     except FileNotFoundError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1

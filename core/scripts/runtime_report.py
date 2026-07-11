@@ -7,10 +7,15 @@ import argparse
 import json
 import sys
 from pathlib import Path
+import importlib.util
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
+_activate_path = Path(__file__).resolve().parent / "cli_activate.py"
+_spec = importlib.util.spec_from_file_location("ai_studio_cli_activate", _activate_path)
+_activate = importlib.util.module_from_spec(_spec)
+assert _spec is not None and _spec.loader is not None
+_spec.loader.exec_module(_activate)
+_activate.activate(__file__)
+
 
 from core.runtime.runtime_manager import RuntimeManager
 from core.runtime.registry_loader import find_repo_root
@@ -196,7 +201,7 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        repo_root = args.repo_root.resolve() if args.repo_root else find_repo_root()
+        repo_root = args.repo_root.resolve() if args.repo_root else find_repo_root(script_file=Path(__file__))
         manager = RuntimeManager(repo_root)
         report = build_report(manager)
     except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:

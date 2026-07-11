@@ -136,6 +136,11 @@ Model downloads remain intentionally deferred.
 - **Readiness** answers whether a capability can run now (runtime, workflow, required assets, required nodes).
 - **Evidence** answers whether a successful generation has already been observed (local output and optional Drive sync).
 - Base `txt2img` can be `READY` with evidence `NOT YET VERIFIED` on a fresh runtime before the first image is generated.
+- Drive evidence requires an exact byte-size match. When `sync_outputs.py` writes a collision-safe timestamped filename, `verify_generation.py` recognizes that derivative as synchronized evidence when sizes match.
+
+### CLI repository resolution
+
+User-facing scripts under `core/scripts/` resolve the repository root from the invoked script path (`core/runtime/repo_paths.py`), so absolute-path commands work without changing the notebook working directory first.
 
 ### Required vs optional node health
 

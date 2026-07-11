@@ -13,7 +13,7 @@ Cross-engine utility scripts for bootstrap, validation, and batch processing.
 | `validate_paths.py` | Validate Colab/Drive/repo paths from manifest | No |
 | `validate_manifests.py` | Validate JSON schemas under `configs/` | No |
 | `list_workflows.py` | List workflow JSON files by category | No |
-| `sync_outputs.py` | Copy single newest ComfyUI output to Drive (`--dry-run`; not bulk sync; cwd-independent) | No |
+| `sync_outputs.py` | Copy single newest ComfyUI output to Drive (`--dry-run`, `--fail-on-existing`; collision-safe rename; cwd-independent) | No |
 | `dogfood_core_runtime.py` | Sprint 1 dogfooding checks (PASS/WARN/FAIL summary) | No |
 | `verify_generation.py` | Read-only local/Drive generation evidence (`--summary`, `--json`) | No |
 
@@ -54,16 +54,18 @@ python core/scripts/dogfood_core_runtime.py
 python core/scripts/verify_generation.py --summary
 ```
 
-`verify_generation.py` reports generation evidence separately from capability readiness. A capability can be `READY` while evidence is `NOT YET VERIFIED` until the first successful output exists.
+`verify_generation.py` reports generation evidence separately from capability readiness. A capability can be `READY` while evidence is `NOT YET VERIFIED` until the first successful output exists. After collision-safe synchronization, evidence recognizes timestamped Drive copies when the byte size matches the local file exactly.
 
-`sync_outputs.py` resolves the repository root from its own script location, so it works from any current working directory:
+All user-facing scripts under `core/scripts/` resolve the repository root from the invoked script path (via `cli_activate.py` / `core/runtime/repo_paths.py`), so absolute-path invocation works from any working directory:
 
 ```bash
 python /content/ai-studio-colab/core/scripts/sync_outputs.py --dry-run
 python /content/ai-studio-colab/core/scripts/sync_outputs.py
+python /content/ai-studio-colab/core/scripts/runtime_report.py --summary
+python /content/ai-studio-colab/core/scripts/verify_generation.py --summary
 ```
 
-It selects only the newest eligible generated image/video file and ignores zero-byte placeholders such as `_output_images_will_be_put_here`.
+`sync_outputs.py` selects only the newest eligible generated image/video file and ignores zero-byte placeholders such as `_output_images_will_be_put_here`. When the Drive destination filename already exists, the script writes a collision-safe UTC-timestamped name instead of overwriting.
 
 See [docs/dogfooding/core-runtime-txt2img-checklist.md](../../docs/dogfooding/core-runtime-txt2img-checklist.md) for Colab validation steps.
 

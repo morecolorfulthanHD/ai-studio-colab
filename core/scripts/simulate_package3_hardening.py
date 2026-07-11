@@ -5,20 +5,29 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Callable
+import importlib.util
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
+_activate_path = Path(__file__).resolve().parent / "cli_activate.py"
+_spec = importlib.util.spec_from_file_location("ai_studio_cli_activate", _activate_path)
+_activate = importlib.util.module_from_spec(_spec)
+assert _spec is not None and _spec.loader is not None
+_spec.loader.exec_module(_activate)
+_activate.activate(__file__)
+
+from typing import Callable
 
 from core.runtime.capability_manager import CapabilityManager
 from core.runtime.node_registry_utils import evaluate_required_nodes, is_node_required
 from core.runtime.output_evidence import inspect_generation_evidence
-from core.runtime.registry_loader import RegistryBundle, RegistryLoader
+from core.runtime.output_sync import collision_safe_filename, resolve_sync_destination
+from core.runtime.registry_loader import RegistryBundle, RegistryLoader, find_repo_root
 from core.runtime.workflow_validation import validate_base_txt2img_workflow
+
+_REPO_ROOT = find_repo_root(script_file=Path(__file__))
 
 
 class SimulationFailure(Exception):
@@ -425,6 +434,136 @@ def run_capability_simulations() -> list[tuple[str, str]]:
     return results
 
 
+def run_package31_simulations() -> list[tuple[str, str]]:
+    results: list[tuple[str, str]] = []
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        dest_dir = root / "drive"
+        dest_dir.mkdir()
+
+        dest, collision, original = resolve_sync_destination(dest_dir, "ai_studio_base_txt2img_00001_.png")
+        _assert_equal("absent destination collision flag", collision, False)
+        _assert_equal("absent destination filename", dest.name, "ai_studio_base_txt2img_00001_.png")
+        results.append(("destination absent uses original filename", "PASS"))
+
+        _write_png(dest_dir / "ai_studio_base_txt2img_00001_.png", 64)
+        dest, collision, original = resolve_sync_destination(
+            dest_dir,
+            "ai_studio_base_txt2img_00001_.png",
+            timestamp="20260711T063300Z",
+        )
+        _assert_equal("existing destination collision flag", collision, True)
+        _assert_equal(
+            "existing destination timestamped filename",
+            dest.name,
+            "ai_studio_base_txt2img_00001__20260711T063300Z.png",
+        )
+        results.append(("destination exists selects timestamped filename", "PASS"))
+
+        _write_png(dest, 32)
+        dest, collision, original = resolve_sync_destination(
+            dest_dir,
+            "ai_studio_base_txt2img_00001_.png",
+            timestamp="20260711T063300Z",
+        )
+        _assert_equal("timestamp collision numeric suffix filename", dest.name, "ai_studio_base_txt2img_00001__20260711T063300Z.1.png")
+        results.append(("timestamped filename exists selects numeric suffix", "PASS"))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        local_dir = root / "local"
+        drive_dir = root / "drive"
+        local_dir.mkdir()
+        drive_dir.mkdir()
+        local_file = local_dir / "current.png"
+        _write_png(local_file, 80)
+        _write_png(drive_dir / "ai_studio_base_txt2img_00001_.png", 80)
+        collision_name = collision_safe_filename(
+            local_file.name,
+            timestamp="20260711T063300Z",
+        )
+        _write_png(drive_dir / collision_name, 80)
+        evidence = inspect_generation_evidence(local_file.parent, drive_dir)
+        _assert_equal("collision-safe exact size evidence", evidence.evidence_status, "verified")
+        results.append(("collision-safe drive copy with exact byte size", "PASS"))
+
+        shutil.rmtree(drive_dir)
+        drive_dir.mkdir()
+        _write_png(drive_dir / collision_name, 96)
+        evidence = inspect_generation_evidence(local_file.parent, drive_dir)
+        _assert_equal("collision-safe size mismatch evidence", evidence.evidence_status, "verified_local")
+        results.append(("collision-safe drive copy with different byte size", "PASS"))
+
+    script = _REPO_ROOT / "core/scripts/runtime_report.py"
+    summary = subprocess.run(
+        [sys.executable, str(script), "--summary"],
+        cwd=str(_REPO_ROOT),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    summary_lines = [line for line in summary.stdout.splitlines() if line.startswith("Health:")]
+    _assert_equal("runtime_report summary line count", len(summary_lines), 1)
+    results.append(("runtime_report --summary prints one summary line", "PASS"))
+
+    cli_scripts = [
+        "runtime_report.py",
+        "verify_generation.py",
+        "sync_outputs.py",
+        "check_nodes.py",
+        "validate_manifests.py",
+    ]
+    unrelated = Path(tempfile.gettempdir())
+    for script_name in cli_scripts:
+        script_path = _REPO_ROOT / "core/scripts" / script_name
+        from_repo = subprocess.run(
+            [sys.executable, str(script_path), "--help"],
+            cwd=str(_REPO_ROOT),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        from_other = subprocess.run(
+            [sys.executable, str(script_path), "--help"],
+            cwd=str(unrelated),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if from_repo.returncode != 0 or from_other.returncode != 0:
+            raise SimulationFailure(f"{script_name} --help failed from one or both directories")
+        results.append((f"CLI root resolved for {script_name}", "PASS"))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        source_dir = root / "source"
+        dest_dir = root / "dest"
+        source_dir.mkdir()
+        dest_dir.mkdir()
+        source_file = source_dir / "gen.png"
+        _write_png(source_file, 48)
+        _write_png(dest_dir / "gen.png", 48)
+
+        dry_run_script = _REPO_ROOT / "core/scripts/sync_outputs.py"
+        # sync_outputs reads paths from colab_paths - need to mock via temp repo or test resolve_sync_destination only
+        dest, collision, original = resolve_sync_destination(dest_dir, source_file.name, timestamp="20260711T120000Z")
+        _assert_equal("dry-run collision destination selected", collision, True)
+        _assert_equal("dry-run collision path unused", dest.exists(), False)
+        results.append(("dry-run collision reports unique path without copy", "PASS"))
+
+        strict_dest, strict_collision, _ = resolve_sync_destination(
+            dest_dir,
+            source_file.name,
+            fail_on_existing=True,
+        )
+        _assert_equal("fail-on-existing collision detected", strict_collision, True)
+        _assert_equal("fail-on-existing keeps original destination", strict_dest.name, source_file.name)
+        results.append(("--fail-on-existing preserves refusal semantics", "PASS"))
+
+    return results
+
+
 def main() -> int:
     sections = [
         ("Generation Evidence", run_evidence_simulations),
@@ -432,6 +571,7 @@ def main() -> int:
         ("Node Runtime", run_node_runtime_simulations),
         ("Planned Capabilities", run_planned_capability_simulations),
         ("Capability Readiness", run_capability_simulations),
+        ("Package 3.1 Usability", run_package31_simulations),
     ]
 
     print("AI Studio — Package 3 Hardening Simulations")

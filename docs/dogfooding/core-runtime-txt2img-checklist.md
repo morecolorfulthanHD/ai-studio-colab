@@ -262,6 +262,8 @@ python /content/ai-studio-colab/core/scripts/sync_outputs.py
 
 These commands work from any Colab working directory; `%cd /content/ai-studio-colab` is not required.
 
+If the Drive destination filename already exists (common after a fresh runtime reuses ComfyUI numbering), `sync_outputs.py` writes a collision-safe UTC-timestamped filename instead of overwriting. Use `--fail-on-existing` to refuse when the original name is taken.
+
 The script ignores zero-byte placeholders such as `_output_images_will_be_put_here` and selects the newest eligible image/video output (`.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`, `.mp4`, `.webm`).
 
 Destination:

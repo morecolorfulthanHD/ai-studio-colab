@@ -10,38 +10,22 @@ Use --dry-run to preview source/destination without writing files.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import shutil
 import sys
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
+_activate_path = Path(__file__).resolve().parent / "cli_activate.py"
+_spec = importlib.util.spec_from_file_location("ai_studio_cli_activate", _activate_path)
+_activate = importlib.util.module_from_spec(_spec)
+assert _spec is not None and _spec.loader is not None
+_spec.loader.exec_module(_activate)
+_activate.activate(__file__)
 
-from core.runtime.output_evidence import (
-    ELIGIBLE_OUTPUT_SUFFIXES,
-    latest_eligible_output,
-)
-
-SCRIPT_PATH = Path(__file__).resolve()
-SCRIPT_REPO_ROOT = SCRIPT_PATH.parents[2]
-
-
-def is_repo_root(path: Path) -> bool:
-    return (path / "README.md").is_file() and (path / "configs").is_dir()
-
-
-def find_repo_root(start: Path | None = None) -> Path:
-    if is_repo_root(SCRIPT_REPO_ROOT):
-        return SCRIPT_REPO_ROOT
-
-    current = (start or Path.cwd()).resolve()
-    for path in (current, *current.parents):
-        if is_repo_root(path):
-            return path
-
-    raise FileNotFoundError("Could not locate repository root.")
+from core.runtime.output_evidence import ELIGIBLE_OUTPUT_SUFFIXES, latest_eligible_output
+from core.runtime.output_sync import resolve_sync_destination
+from core.runtime.registry_loader import find_repo_root
 
 
 def load_paths(repo_root: Path) -> tuple[Path, Path]:
@@ -65,13 +49,22 @@ def main() -> int:
         action="store_true",
         help="Show what would be copied without writing files.",
     )
+    parser.add_argument(
+        "--fail-on-existing",
+        action="store_true",
+        help="Refuse to copy when the destination filename already exists.",
+    )
     args = parser.parse_args()
 
     print("AI Studio Colab — Sync Latest Output")
     print("=" * 40)
 
     try:
-        repo_root = args.repo_root.resolve() if args.repo_root else find_repo_root()
+        repo_root = (
+            args.repo_root.resolve()
+            if args.repo_root
+            else find_repo_root(script_file=Path(__file__))
+        )
         source_dir, dest_dir = load_paths(repo_root)
     except (FileNotFoundError, KeyError, json.JSONDecodeError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
@@ -81,6 +74,7 @@ def main() -> int:
     print(f"Source directory: {source_dir}")
     print(f"Destination:      {dest_dir}")
     print(f"Dry run:          {args.dry_run}")
+    print(f"Fail on existing: {args.fail_on_existing}")
 
     if not source_dir.is_dir():
         print(f"ERROR: Source directory does not exist: {source_dir}", file=sys.stderr)
@@ -99,9 +93,27 @@ def main() -> int:
         )
         return 1
 
-    dest_path = dest_dir / latest.name
+    dest_path, collision_detected, original_dest = resolve_sync_destination(
+        dest_dir,
+        latest.name,
+        fail_on_existing=args.fail_on_existing,
+    )
+
     print(f"\nLatest file: {latest}")
-    print(f"Would copy to: {dest_path}")
+
+    if args.fail_on_existing and collision_detected and original_dest is not None:
+        print(
+            f"ERROR: Destination file already exists: {original_dest}",
+            file=sys.stderr,
+        )
+        return 1
+
+    if collision_detected and original_dest is not None:
+        print("Destination collision detected.")
+        print(f"Original destination: {original_dest}")
+        print(f"Collision-safe destination: {dest_path}")
+    else:
+        print(f"Destination: {dest_path}")
 
     if args.dry_run:
         print("\nRESULT: DRY RUN — no files copied.")
@@ -109,18 +121,17 @@ def main() -> int:
 
     try:
         dest_dir.mkdir(parents=True, exist_ok=True)
-        if dest_path.exists():
-            print(
-                f"ERROR: Destination file already exists: {dest_path}",
-                file=sys.stderr,
-            )
-            return 1
         shutil.copy2(latest, dest_path)
     except OSError as exc:
         print(f"ERROR: Copy failed: {exc}", file=sys.stderr)
         return 1
 
-    print(f"\nRESULT: OK — copied {latest.name} to {dest_path}")
+    if collision_detected:
+        print(
+            f"\nRESULT: OK — copied {latest.name} to collision-safe destination {dest_path}"
+        )
+    else:
+        print(f"\nRESULT: OK — copied {latest.name} to {dest_path}")
     return 0
 
 

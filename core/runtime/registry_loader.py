@@ -8,16 +8,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .repo_paths import locate_repo_root
 
-def find_repo_root(start: Path | None = None) -> Path:
-    current = (start or Path.cwd()).resolve()
-    for path in (current, *current.parents):
-        if (path / "README.md").is_file() and (path / "configs").is_dir():
-            return path
-    raise FileNotFoundError(
-        "Could not locate AI Studio Colab repository root. "
-        "Run from inside the cloned repository."
-    )
+
+def find_repo_root(start: Path | None = None, script_file: Path | None = None) -> Path:
+    return locate_repo_root(script_file=script_file, cwd_start=start)
 
 
 @dataclass(frozen=True)

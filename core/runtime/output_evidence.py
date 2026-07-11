@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .output_sync import find_collision_safe_drive_match, is_collision_safe_derivative
+
 ELIGIBLE_OUTPUT_SUFFIXES = {
     ".png",
     ".jpg",
@@ -163,17 +165,40 @@ def inspect_generation_evidence(
     drive_verified, drive_messages = _drive_sync_verified(local_latest, drive_candidate)
     evidence.messages.extend(drive_messages)
 
-    if drive_verified:
+    matched_drive_file = drive_candidate if drive_verified else None
+    if not drive_verified:
+        collision_match = find_collision_safe_drive_match(local_latest, drive_output_dir)
+        if collision_match is not None and collision_match.name != local_latest.name:
+            drive_verified, collision_messages = _drive_sync_verified(
+                local_latest,
+                collision_match,
+            )
+            evidence.messages.extend(collision_messages)
+            if drive_verified:
+                matched_drive_file = collision_match
+                evidence.messages.append(
+                    f"Drive synchronization verified via collision-safe filename: "
+                    f"{collision_match.name}"
+                )
+
+    if drive_verified and matched_drive_file is not None:
         evidence.drive_verified = True
-        evidence.drive_file = describe_output_file(drive_candidate)
+        evidence.drive_file = describe_output_file(matched_drive_file)
         return evidence
 
-    drive_latest = latest_eligible_output(drive_output_dir)
-    if drive_latest is not None:
+    historical_candidates = [
+        path
+        for path in drive_output_dir.iterdir()
+        if is_eligible_output(path)
+        and path.name != local_latest.name
+        and not is_collision_safe_derivative(local_latest.name, path.name)
+    ]
+    if historical_candidates:
+        drive_latest = max(historical_candidates, key=lambda path: path.stat().st_mtime)
         evidence.historical_drive_evidence = describe_output_file(drive_latest)
         evidence.messages.append(
             "Drive contains eligible output "
-            f"{drive_latest.name} but not the matching local filename "
+            f"{drive_latest.name} but not a synchronized copy of "
             f"{local_latest.name}; synchronization not verified for current local generation."
         )
     else:

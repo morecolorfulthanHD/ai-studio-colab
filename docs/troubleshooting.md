@@ -186,7 +186,7 @@ Recovery never deletes Drive model content.
 
 `sync_outputs.py` copies **only the single newest eligible generated file** from ComfyUI output — not a bulk folder sync. Safe to run after generation.
 
-The script resolves the repository root from its own location, so it works regardless of the caller's current working directory.
+The script resolves the repository root from its own location (and `sys.argv[0]`), so absolute-path invocation works from any current working directory:
 
 ```bash
 # Preview without copying (absolute path works from any cwd)
@@ -195,6 +195,21 @@ python /content/ai-studio-colab/core/scripts/sync_outputs.py --dry-run
 # Copy latest eligible file only
 python /content/ai-studio-colab/core/scripts/sync_outputs.py
 ```
+
+### Filename collisions after fresh runtimes
+
+ComfyUI may reset output numbering after a new runtime, producing the same filename as an earlier Drive copy (for example `ai_studio_base_txt2img_00001_.png`). The sync script **never overwrites** an existing Drive file.
+
+When the destination filename already exists, `sync_outputs.py` selects a collision-safe destination automatically:
+
+```text
+ai_studio_base_txt2img_00001_.png
+→ ai_studio_base_txt2img_00001__20260711T063300Z.png
+```
+
+If that timestamped name also exists, a numeric suffix is appended (`.1`, `.2`, …). Use `--fail-on-existing` to restore the previous refusal behavior.
+
+`--dry-run` prints the exact collision-safe destination that would be used without copying.
 
 Eligible outputs include common image/video extensions (`.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`, `.mp4`, `.webm`). Zero-byte placeholders such as `_output_images_will_be_put_here` are ignored. If no eligible output exists, the script exits with a clear error.
 
@@ -209,10 +224,13 @@ Base txt2img uses only native ComfyUI nodes. Optional custom-node packs such as 
 | `txt2img` readiness `READY` | ComfyUI runtime, SD1.5, and base workflow dependencies are satisfied |
 | evidence `NOT YET VERIFIED` | No eligible generated output detected yet |
 | evidence `VERIFIED` / `verified_local` | Real generated output detected locally and/or on Drive |
+| collision-safe Drive filename | `verify_generation.py` recognizes timestamped sync copies when byte size matches exactly |
+
+All user-facing CLI scripts under `core/scripts/` resolve the repository root from the script path, so absolute-path invocation works without `%cd` into the repository first.
 
 ```bash
 python core/scripts/validate_capabilities.py --capability txt2img
-python core/scripts/verify_generation.py --summary
+python /content/ai-studio-colab/core/scripts/verify_generation.py --summary
 ```
 
 ## Reproducibility Issues
