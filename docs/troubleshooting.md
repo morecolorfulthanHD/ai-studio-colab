@@ -119,6 +119,8 @@ The installer classifies `/content/ComfyUI` before making changes:
 
 Partial-install recovery requires strong evidence such as `main.py`, `requirements.txt`, `comfy/`, `nodes.py`, `folder_paths.py`, and related runtime folders. A directory is not treated as partial merely because it is named `ComfyUI`.
 
+An **orphan `custom_nodes` runtime** — only `custom_nodes/` present, no `.git`, no `main.py`, no `requirements.txt`, and no other significant top-level entries — is recovered automatically as `partial_comfyui_install`. The installer archives it to `ComfyUI.broken.<UTC timestamp>`, clones fresh, and prints where `custom_nodes` was preserved in the archive. Custom nodes are **not** restored automatically.
+
 Git repositories are treated as valid only when the `origin` remote matches `COMFYUI_REPO` or `Comfy-Org/ComfyUI` and distinctive ComfyUI paths are present. Unrecognized git repositories, including unrelated repos that happen to contain `main.py` and `requirements.txt`, are refused and never pulled automatically.
 
 When recovery archives a runtime, it is renamed — never permanently deleted:

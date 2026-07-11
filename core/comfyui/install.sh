@@ -298,6 +298,32 @@ has_comfyui_repo_structure() {
   [[ -e "${dir}/comfy" || -f "${dir}/nodes.py" || -f "${dir}/folder_paths.py" ]]
 }
 
+is_orphan_custom_nodes_runtime() {
+  local dir="$1"
+  local entry
+  local found_custom_nodes=0
+  local other_count=0
+
+  [[ -d "${dir}/custom_nodes" ]] || return 1
+  [[ ! -d "${dir}/.git" && ! -f "${dir}/main.py" && ! -f "${dir}/requirements.txt" ]] || return 1
+
+  while IFS= read -r entry; do
+    [[ -z "${entry}" ]] && continue
+    case "${entry}" in
+      custom_nodes)
+        found_custom_nodes=1
+        ;;
+      .*)
+        ;;
+      *)
+        other_count=$((other_count + 1))
+        ;;
+    esac
+  done < <(find "${dir}" -mindepth 1 -maxdepth 1 -printf '%f\n' 2>/dev/null)
+
+  [[ "${found_custom_nodes}" == "1" && "${other_count}" == "0" ]]
+}
+
 classify_comfyui_runtime() {
   local dir="$1"
   local origin
@@ -354,6 +380,12 @@ classify_comfyui_runtime() {
 
   if ! runtime_directory_has_entries "${dir}"; then
     COMFYUI_RUNTIME_STATE="empty_directory"
+    return 0
+  fi
+
+  if is_orphan_custom_nodes_runtime "${dir}"; then
+    COMFYUI_RUNTIME_EVIDENCE="orphan custom_nodes runtime (custom_nodes only)"
+    COMFYUI_RUNTIME_STATE="partial_comfyui_install"
     return 0
   fi
 
@@ -429,6 +461,13 @@ archive_runtime_directory() {
   fi
 }
 
+log_custom_nodes_archive_notice() {
+  local had_custom_nodes="$1"
+  if [[ "${had_custom_nodes}" == "1" ]]; then
+    log "Recovery: custom_nodes preserved in archive at ${COMFYUI_LAST_ARCHIVE_PATH}/custom_nodes (not restored automatically)"
+  fi
+}
+
 remove_empty_runtime_directory() {
   if [[ "${EXECUTE}" == "1" ]]; then
     run_step rmdir "${COMFYUI_DIR}"
@@ -472,6 +511,9 @@ inspect_comfyui_runtime() {
       ;;
     partial_comfyui_install)
       log "Partial or interrupted ComfyUI installation detected."
+      if [[ "${COMFYUI_RUNTIME_EVIDENCE}" == "orphan custom_nodes runtime (custom_nodes only)" ]]; then
+        log "Orphan custom_nodes runtime detected; recoverable partial install."
+      fi
       log "Partial install markers: ${COMFYUI_RUNTIME_EVIDENCE:-unknown}"
       log "Automatic recovery will archive the partial runtime and clone fresh."
       ;;
@@ -680,9 +722,14 @@ install_comfyui_repo() {
       log "Recovery: empty runtime replaced with fresh ComfyUI clone; Drive models were not modified."
       ;;
     partial_comfyui_install)
+      local custom_nodes_present=0
+      if [[ -d "${COMFYUI_DIR}/custom_nodes" ]]; then
+        custom_nodes_present=1
+      fi
       archive_runtime_directory \
         "broken" \
         "partial ComfyUI installation detected (markers: ${COMFYUI_RUNTIME_EVIDENCE:-unknown})"
+      log_custom_nodes_archive_notice "${custom_nodes_present}"
       clone_comfyui_repo
       log "Recovery: partial runtime archived to ${COMFYUI_LAST_ARCHIVE_PATH}"
       log "Recovery: clean runtime installed at ${COMFYUI_DIR}; Drive models were not modified."

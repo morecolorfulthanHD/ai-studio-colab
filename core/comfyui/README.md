@@ -39,6 +39,8 @@ bash core/comfyui/install.sh --execute --force-reinstall
 
 Partial-install detection requires strong evidence such as combinations of `main.py`, `requirements.txt`, `comfy/`, `web/`, `nodes.py`, `folder_paths.py`, `models/`, and related runtime folders. A directory is **not** classified as partial merely because its name is `ComfyUI`.
 
+An **orphan `custom_nodes` runtime** — a non-git directory containing only `custom_nodes/` with no `main.py`, `requirements.txt`, or other significant top-level entries — is also classified as `partial_comfyui_install`. Recovery archives it to `ComfyUI.broken.<UTC timestamp>` and clones fresh. Any `custom_nodes` content is preserved in the archive but is **not** restored automatically.
+
 Git repositories are classified as `valid_git_repo` only when the `origin` remote matches `COMFYUI_REPO` or `Comfy-Org/ComfyUI` and distinctive ComfyUI paths such as `comfy/`, `nodes.py`, or `folder_paths.py` are present. Unrecognized git repositories are never pulled automatically.
 
 ### Archive locations
