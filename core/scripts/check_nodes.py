@@ -110,8 +110,8 @@ def main() -> int:
 
     print(
         f"\nSummary: {installed} installed/present, "
-        f"{missing_required} missing required, "
-        f"{missing_optional} missing optional (of {len(registry)} registered)"
+        f"{missing_required} required missing, "
+        f"{missing_optional} optional missing (of {len(registry)} registered)"
     )
 
     if missing_required > 0:

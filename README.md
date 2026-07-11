@@ -143,6 +143,7 @@ python core/scripts/sync_outputs.py
 | `core/scripts/validate_capabilities.py` | Capability readiness validation |
 | `core/scripts/sync_outputs.py` | Copy latest ComfyUI output to Drive (`--dry-run`) |
 | `core/scripts/dogfood_core_runtime.py` | Read-only dogfooding checks (PASS/WARN/FAIL) |
+| `core/scripts/verify_generation.py` | Read-only generation evidence (`--summary`, `--json`) |
 
 ## Dogfooding (Sprint 1)
 
@@ -172,7 +173,7 @@ Validate core runtime + base txt2img in Colab before adding advanced workflows:
 2. Confirm SD1.5 at `/content/drive/MyDrive/AI_Studio/models/shared/checkpoints/sd15.safetensors`.
 3. Import `workflows/base/txt2img/workflow.json` in ComfyUI and queue a baseline prompt.
 4. Copy latest output with `python core/scripts/sync_outputs.py`.
-5. Re-run `python core/scripts/runtime_report.py --summary` to confirm txt2img capability status.
+5. Re-run `python core/scripts/runtime_report.py --summary` and `python core/scripts/verify_generation.py --summary` to confirm txt2img readiness and generation evidence.
 
 ## Base Generation Workflow
 

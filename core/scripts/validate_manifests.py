@@ -84,6 +84,7 @@ MANIFEST_RULES: dict[str, dict] = {
             "category",
             "maturity",
             "status",
+            "implementation_status",
             "supported_engines",
             "required_models",
             "required_nodes",

@@ -93,17 +93,20 @@ python core/scripts/runtime_report.py --summary
 python core/scripts/validate_capabilities.py --summary
 ```
 
-Expected in Colab **before** full install:
+Expected in Colab **after** install + SD1.5 present + successful generation:
 
-- Overall health may be `WARN`
-- `txt2img` capability should be `partial` (not falsely `ready`) until SD1.5 + runtime are present
+- Required nodes: OK (optional gaps reported separately)
+- `txt2img` readiness: `READY` when ComfyUI runtime, SD1.5, and base workflow dependencies are satisfied
+- `txt2img` evidence: `VERIFIED` after a real generated output exists (local and optionally on Drive)
 
-Expected in Colab **after** install + model + successful generation:
+Optional node failures such as **ComfyUI-ReActor** do not block base txt2img readiness.
 
-- ComfyUI status improves
-- txt2img remains `partial` until model validation confirms SD1.5 present
+```bash
+python core/scripts/verify_generation.py --summary
+python core/scripts/validate_capabilities.py --capability txt2img
+```
 
-**Capture:** full runtime report output and capability summary line.
+**Capture:** runtime summary line, txt2img readiness/evidence, and generation evidence summary.
 
 ---
 

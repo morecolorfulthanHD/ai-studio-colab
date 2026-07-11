@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -14,8 +15,10 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from core.runtime.output_evidence import inspect_generation_evidence
 from core.runtime.registry_loader import RegistryLoader, find_repo_root
 from core.runtime.runtime_manager import RuntimeManager
+from core.runtime.workflow_validation import validate_base_txt2img_workflow
 
 TXT2IMG_WORKFLOW = "workflows/base/txt2img/workflow.json"
 SD15_RUNTIME_PATH = "/content/drive/MyDrive/AI_Studio/models/shared/checkpoints/sd15.safetensors"
@@ -64,47 +67,52 @@ def check_runtime_report(repo_root: Path) -> DogfoodCheck:
     manager = RuntimeManager(repo_root)
     report = manager.health_report()
     overall = report.overall_status.value
+    node_check = next((c for c in report.checks if c.component == "node_registry"), None)
+    node_message = node_check.message if node_check else "unknown"
     if overall == "fail":
         return DogfoodCheck(
             "runtime_report",
             "WARN",
-            f"Runtime health is {overall.upper()} (environment-dependent).",
+            f"Runtime health is {overall.upper()} (environment-dependent). {node_message}",
             {"overall": overall},
         )
     return DogfoodCheck(
         "runtime_report",
         "PASS" if overall == "ok" else "WARN",
-        f"Runtime health: {overall.upper()}",
+        f"Runtime health: {overall.upper()}. {node_message}",
         {"overall": overall},
     )
 
 
 def check_capability_summary(repo_root: Path) -> DogfoodCheck:
     manager = RuntimeManager(repo_root)
-    data = manager.capability_summary()
+    data = manager.capability_summary("txt2img")
     txt2img = next((c for c in data.get("capabilities", []) if c.get("id") == "txt2img"), None)
     if not txt2img:
         return DogfoodCheck("capability_summary", "FAIL", "txt2img capability not found in registry.")
     status = txt2img.get("computed_status", "unknown")
-    if status == "ready" and not _sd15_present(repo_root):
+    evidence = txt2img.get("evidence_status", "not_evaluated")
+    details = {
+        "txt2img_status": status,
+        "txt2img_evidence": evidence,
+        "reasons": txt2img.get("reasons", []),
+        "runtime_checks": txt2img.get("runtime_checks", []),
+    }
+    if status == "ready":
+        message = f"txt2img readiness: READY; evidence: {evidence.upper().replace('_', ' ')}"
+        return DogfoodCheck("capability_summary", "PASS", message, details)
+    if status == "partial":
         return DogfoodCheck(
             "capability_summary",
             "WARN",
-            "txt2img marked ready but SD1.5 checkpoint not detected.",
-            {"txt2img_status": status, "reasons": txt2img.get("reasons", [])},
-        )
-    if status in {"partial", "planned"}:
-        return DogfoodCheck(
-            "capability_summary",
-            "WARN",
-            f"txt2img capability is {status} (expected before full Colab validation).",
-            {"txt2img_status": status, "reasons": txt2img.get("reasons", [])},
+            f"txt2img readiness: PARTIAL; evidence: {evidence.upper().replace('_', ' ')}",
+            details,
         )
     return DogfoodCheck(
         "capability_summary",
-        "PASS",
-        f"txt2img capability status: {status}",
-        {"txt2img_status": status},
+        "WARN",
+        f"txt2img readiness: {status.upper()}; evidence: {evidence.upper().replace('_', ' ')}",
+        details,
     )
 
 
@@ -124,6 +132,16 @@ def _sd15_present(repo_root: Path) -> bool:
     return False
 
 
+def _parse_node_summary(output: str) -> tuple[int, int]:
+    match = re.search(
+        r"(\d+) installed/present,\s*(\d+) required missing,\s*(\d+) optional missing",
+        output,
+    )
+    if not match:
+        return 0, 0
+    return int(match.group(2)), int(match.group(3))
+
+
 def check_node_status(repo_root: Path) -> DogfoodCheck:
     script = repo_root / "core/scripts/check_nodes.py"
     result = subprocess.run(
@@ -134,12 +152,21 @@ def check_node_status(repo_root: Path) -> DogfoodCheck:
         check=False,
     )
     output = (result.stdout or "") + (result.stderr or "")
-    if "missing required" in output.lower():
+    missing_required, missing_optional = _parse_node_summary(output)
+
+    if "INCOMPLETE" in output or missing_required > 0:
         return DogfoodCheck(
             "node_status",
             "WARN",
-            "One or more required custom nodes are missing.",
-            {"exit_code": result.returncode},
+            f"Required custom nodes missing ({missing_required}).",
+            {"exit_code": result.returncode, "missing_required": missing_required},
+        )
+    if missing_optional > 0:
+        return DogfoodCheck(
+            "node_status",
+            "WARN",
+            f"Required nodes OK; {missing_optional} optional node(s) missing.",
+            {"exit_code": result.returncode, "missing_optional": missing_optional},
         )
     if result.returncode != 0:
         return DogfoodCheck(
@@ -148,7 +175,7 @@ def check_node_status(repo_root: Path) -> DogfoodCheck:
             "Node check reported incomplete state.",
             {"exit_code": result.returncode},
         )
-    return DogfoodCheck("node_status", "PASS", "All registered nodes present.")
+    return DogfoodCheck("node_status", "PASS", "Required nodes OK; all registered nodes present.")
 
 
 def check_model_status(repo_root: Path) -> DogfoodCheck:
@@ -169,72 +196,56 @@ def check_model_status(repo_root: Path) -> DogfoodCheck:
 
 def check_txt2img_workflow(repo_root: Path) -> DogfoodCheck:
     workflow_path = repo_root / TXT2IMG_WORKFLOW
-    if not workflow_path.is_file():
-        return DogfoodCheck("txt2img_workflow", "FAIL", f"Missing workflow file: {TXT2IMG_WORKFLOW}")
-    try:
-        with workflow_path.open(encoding="utf-8") as fh:
-            data = json.load(fh)
-    except json.JSONDecodeError as exc:
-        return DogfoodCheck("txt2img_workflow", "FAIL", f"Invalid workflow JSON: {exc}")
-    nodes = data.get("nodes", [])
-    required_types = {
-        "CheckpointLoaderSimple",
-        "CLIPTextEncode",
-        "EmptyLatentImage",
-        "KSampler",
-        "VAEDecode",
-        "SaveImage",
-    }
-    present_types = {node.get("type") for node in nodes if isinstance(node, dict)}
-    missing_types = sorted(required_types - present_types)
-    if missing_types:
+    validation = validate_base_txt2img_workflow(workflow_path)
+    if not validation.valid:
         return DogfoodCheck(
             "txt2img_workflow",
             "FAIL",
-            f"Workflow missing required node types: {', '.join(missing_types)}",
+            validation.reasons[0] if validation.reasons else "Workflow validation failed.",
+            {"path": str(workflow_path), "reasons": validation.reasons},
         )
     return DogfoodCheck(
         "txt2img_workflow",
         "PASS",
-        f"Workflow JSON valid with {len(nodes)} nodes.",
-        {"path": str(workflow_path)},
+        f"Workflow JSON valid with {validation.node_count} nodes.",
+        {"path": str(workflow_path), "present_node_types": validation.present_node_types},
     )
 
 
-def check_comfyui_output(repo_root: Path) -> DogfoodCheck:
+def check_generation_evidence(repo_root: Path) -> DogfoodCheck:
     bundle = RegistryLoader(repo_root).load_all()
-    output_dir = bundle.path("comfyui_output")
-    comfyui_runtime = bundle.path("comfyui_runtime")
+    evidence = inspect_generation_evidence(
+        bundle.path("comfyui_output"),
+        bundle.path("drive_outputs"),
+    )
+    details = evidence.to_dict()
 
-    if not comfyui_runtime.exists():
+    if evidence.local_verified and evidence.drive_verified:
         return DogfoodCheck(
-            "comfyui_output",
-            "WARN",
-            "ComfyUI runtime not installed yet.",
-            {"runtime_path": str(comfyui_runtime)},
+            "generation_evidence",
+            "PASS",
+            "Local and Drive generation evidence verified.",
+            details,
         )
-    if not output_dir.is_dir():
+    if evidence.local_verified:
         return DogfoodCheck(
-            "comfyui_output",
+            "generation_evidence",
             "WARN",
-            "ComfyUI output directory not present yet.",
-            {"output_path": str(output_dir)},
+            "Local generation evidence verified; Drive synchronization not yet verified.",
+            details,
         )
-
-    files = [p for p in output_dir.rglob("*") if p.is_file()]
-    if not files:
+    if evidence.local_output_dir and Path(evidence.local_output_dir).is_dir():
         return DogfoodCheck(
-            "comfyui_output",
+            "generation_evidence",
             "WARN",
-            "Output directory exists but no generated files yet.",
-            {"output_path": str(output_dir)},
+            "Output directory exists but no eligible generated output found yet.",
+            details,
         )
-    latest = max(files, key=lambda p: p.stat().st_mtime)
     return DogfoodCheck(
-        "comfyui_output",
-        "PASS",
-        f"Latest output file detected: {latest.name}",
-        {"output_path": str(output_dir), "latest_file": str(latest)},
+        "generation_evidence",
+        "WARN",
+        "No generation evidence yet (expected before first successful txt2img run).",
+        details,
     )
 
 
@@ -247,7 +258,7 @@ def run_checks(repo_root: Path) -> list[DogfoodCheck]:
         check_node_status(repo_root),
         check_model_status(repo_root),
         check_txt2img_workflow(repo_root),
-        check_comfyui_output(repo_root),
+        check_generation_evidence(repo_root),
     ]
 
 

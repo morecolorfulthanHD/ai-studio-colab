@@ -131,6 +131,16 @@ Model downloads remain intentionally deferred.
 | `capability_summary()` | Computed user-facing functionality readiness |
 | `extension_points()` | Document future engines and deployments |
 
+### Readiness vs evidence
+
+- **Readiness** answers whether a capability can run now (runtime, workflow, required assets, required nodes).
+- **Evidence** answers whether a successful generation has already been observed (local output and optional Drive sync).
+- Base `txt2img` can be `READY` with evidence `NOT YET VERIFIED` on a fresh runtime before the first image is generated.
+
+### Required vs optional node health
+
+Node health distinguishes required bootstrap nodes from optional workflow packs. Missing optional nodes (for example `ComfyUI-ReActor`) produce warnings but do not block base txt2img readiness.
+
 ### Planned extension points
 
 | Category | Examples |

@@ -200,6 +200,21 @@ Eligible outputs include common image/video extensions (`.png`, `.jpg`, `.jpeg`,
 
 Source: `/content/ComfyUI/output` → Destination: `/content/drive/MyDrive/AI_Studio/outputs`
 
+## txt2img Readiness and Evidence
+
+Base txt2img uses only native ComfyUI nodes. Optional custom-node packs such as **ComfyUI-ReActor** do not block readiness.
+
+| Signal | Meaning |
+|--------|---------|
+| `txt2img` readiness `READY` | ComfyUI runtime, SD1.5, and base workflow dependencies are satisfied |
+| evidence `NOT YET VERIFIED` | No eligible generated output detected yet |
+| evidence `VERIFIED` / `verified_local` | Real generated output detected locally and/or on Drive |
+
+```bash
+python core/scripts/validate_capabilities.py --capability txt2img
+python core/scripts/verify_generation.py --summary
+```
+
 ## Reproducibility Issues
 
 | Symptom | Likely Cause | Resolution |

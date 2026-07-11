@@ -8,7 +8,10 @@ from pathlib import Path
 from typing import Any
 
 from .asset_manager import AssetManager
+from .node_registry_utils import evaluate_required_nodes
+from .output_evidence import inspect_generation_evidence
 from .registry_loader import RegistryBundle, RegistryLoader, find_repo_root
+from .workflow_validation import validate_workflow
 
 CAPABILITY_REGISTRY_PATH = "configs/capabilities/capability_registry.json"
 
@@ -32,10 +35,14 @@ class CapabilityEvaluation:
     reasons: list[str] = field(default_factory=list)
     missing_models: list[str] = field(default_factory=list)
     missing_nodes: list[str] = field(default_factory=list)
+    uninstalled_nodes: list[str] = field(default_factory=list)
     missing_assets: list[str] = field(default_factory=list)
     missing_workflows: list[str] = field(default_factory=list)
     missing_dependencies: list[str] = field(default_factory=list)
     supported_engines: list[str] = field(default_factory=list)
+    evidence_status: str = "not_evaluated"
+    evidence_details: dict[str, Any] = field(default_factory=dict)
+    runtime_checks: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -79,14 +86,92 @@ class CapabilityManager:
         self._node_ids = {n["name"] for n in self.bundle.nodes}
         self._workflow_ids = {w["id"] for w in self.bundle.workflows}
         self._eval_cache: dict[str, CapabilityEvaluation] = {}
+        self._custom_nodes_dir = self.bundle.path("comfyui_runtime") / "custom_nodes"
+
+    def _implementation_status(self, cap: dict[str, Any]) -> str:
+        return cap.get("implementation_status", "planned")
+
+    def _is_implemented(self, cap: dict[str, Any]) -> bool:
+        return self._implementation_status(cap) == "implemented"
+
+    def _evaluate_required_nodes(self, cap: dict[str, Any]) -> tuple[list[str], list[str]]:
+        node_status = evaluate_required_nodes(
+            list(cap.get("required_nodes", [])),
+            self.bundle.nodes,
+            self._custom_nodes_dir,
+        )
+        return node_status["missing_registration"], node_status["uninstalled"]
 
     def _asset_is_satisfied(self, asset_id: str) -> bool:
+        """Registration-level asset check (planned assets count as registered)."""
         asset = self._asset_map.get(asset_id)
         if not asset:
             return False
         if asset.present:
             return True
         return asset.registry_status in {"planned", "external"}
+
+    def _asset_ready(self, asset_id: str) -> bool:
+        asset = self._asset_map.get(asset_id)
+        if not asset:
+            return False
+        if asset.present:
+            return True
+        if asset.asset_type == "workflow" and asset.intended_path:
+            repo_workflow = self.repo_root / asset.intended_path
+            if repo_workflow.is_file():
+                return True
+        return asset.registry_status == "external"
+
+    def _workflow_ready(self, workflow_id: str) -> tuple[bool, str | None]:
+        workflow = next((w for w in self.bundle.workflows if w.get("id") == workflow_id), None)
+        if not workflow:
+            return False, f"Workflow registration missing: {workflow_id}"
+        workflow_path = self.repo_root / workflow.get("path", "")
+        validation = validate_workflow(workflow_id, workflow_path)
+        if not validation.valid:
+            reason = validation.reasons[0] if validation.reasons else f"Workflow validation failed: {workflow_id}"
+            return False, reason
+        return True, None
+
+    def _comfyui_runtime_ready(self) -> tuple[bool, str | None]:
+        runtime_path = self.bundle.path("comfyui_runtime")
+        if not (runtime_path / ".git").is_dir():
+            return False, "ComfyUI runtime is not a valid git repository."
+        if not (runtime_path / "main.py").is_file():
+            return False, "ComfyUI runtime is missing main.py."
+        return True, None
+
+    def _capability_runtime_checks(self, cap: dict[str, Any]) -> list[str]:
+        issues: list[str] = []
+        capability_id = cap.get("id", "")
+
+        if capability_id == "txt2img":
+            comfy_ok, comfy_reason = self._comfyui_runtime_ready()
+            if not comfy_ok and comfy_reason:
+                issues.append(comfy_reason)
+
+        for workflow_id in cap.get("required_workflows", []):
+            ready, reason = self._workflow_ready(workflow_id)
+            if not ready and reason:
+                issues.append(reason)
+
+        if capability_id == "txt2img":
+            for asset_id in ("sd15_checkpoint", "workflow_base_txt2img"):
+                if not self._asset_ready(asset_id):
+                    issues.append(f"Required asset not ready: {asset_id}")
+
+        return issues
+
+    def _evaluate_generation_evidence(self, capability_id: str) -> tuple[str, dict[str, Any]]:
+        if capability_id != "txt2img":
+            return "not_evaluated", {}
+
+        evidence = inspect_generation_evidence(
+            self.bundle.path("comfyui_output"),
+            self.bundle.path("drive_outputs"),
+        )
+        return evidence.evidence_status, evidence.to_dict()
 
     def _dependency_reason(self, dep_id: str, dep_status: str) -> str:
         if dep_status == "blocked":
@@ -129,8 +214,9 @@ class CapabilityManager:
         next_visiting = active_visiting | {capability_id}
 
         missing_models = [m for m in cap.get("required_models", []) if m not in self._model_ids]
-        missing_nodes = [n for n in cap.get("required_nodes", []) if n not in self._node_ids]
-        missing_assets = [a for a in cap.get("required_assets", []) if not self._asset_is_satisfied(a)]
+        missing_nodes, uninstalled_nodes = self._evaluate_required_nodes(cap)
+        missing_assets = [a for a in cap.get("required_assets", []) if not self._asset_ready(a)]
+        runtime_checks = self._capability_runtime_checks(cap)
         missing_workflows = [w for w in cap.get("required_workflows", []) if w not in self._workflow_ids]
         missing_dependencies = [
             d for d in cap.get("dependencies", []) if d not in self._capability_ids
@@ -149,12 +235,16 @@ class CapabilityManager:
             reasons.append(f"Missing model registrations: {', '.join(missing_models)}")
         if missing_nodes:
             reasons.append(f"Missing node registrations: {', '.join(missing_nodes)}")
+        for node_name in uninstalled_nodes:
+            reasons.append(f"Required node not installed: {node_name}")
         if missing_assets:
             reasons.append(f"Missing required assets: {', '.join(missing_assets)}")
         if missing_workflows:
             reasons.append(f"Missing workflow registrations: {', '.join(missing_workflows)}")
         if missing_dependencies:
             reasons.append(f"Unknown dependencies: {', '.join(missing_dependencies)}")
+        if runtime_checks:
+            reasons.extend(runtime_checks)
 
         for dep_eval in dependency_evaluations:
             dep_reason = self._dependency_reason(dep_eval.id, dep_eval.computed_status)
@@ -172,20 +262,28 @@ class CapabilityManager:
             or dependency_blocked
         )
         hard_missing = bool(missing_models or missing_nodes or missing_workflows)
+        runtime_blocked = bool(runtime_checks or uninstalled_nodes)
 
+        registry_status = cap.get("status", "planned")
         computed_status = "ready"
         if blocked:
             computed_status = "blocked"
         elif hard_missing:
             computed_status = "unavailable"
-        elif missing_assets or dependency_partial:
+        elif missing_assets or dependency_partial or runtime_blocked:
             computed_status = "partial"
-        elif cap.get("status") == "ready":
-            computed_status = "ready"
-        elif cap.get("status") in {"planned", "partial"}:
-            computed_status = "partial"
+        elif registry_status == "disabled":
+            computed_status = "blocked"
         else:
             computed_status = "ready"
+
+        if computed_status == "ready" and not self._is_implemented(cap):
+            computed_status = "partial"
+            reasons.append(
+                "Capability implementation_status is planned; runtime implementation is deferred."
+            )
+
+        evidence_status, evidence_details = self._evaluate_generation_evidence(cap["id"])
 
         evaluation = CapabilityEvaluation(
             id=cap["id"],
@@ -198,10 +296,14 @@ class CapabilityManager:
             reasons=reasons,
             missing_models=missing_models,
             missing_nodes=missing_nodes,
+            uninstalled_nodes=uninstalled_nodes,
             missing_assets=missing_assets,
             missing_workflows=missing_workflows,
             missing_dependencies=missing_dependencies,
             supported_engines=list(cap.get("supported_engines", [])),
+            evidence_status=evidence_status,
+            evidence_details=evidence_details,
+            runtime_checks=runtime_checks,
         )
         self._eval_cache[capability_id] = evaluation
         return evaluation

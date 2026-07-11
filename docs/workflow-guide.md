@@ -193,8 +193,12 @@ Before adding ControlNet, IPAdapter, or animation workflows, validate the base p
 
 1. Follow [dogfooding/core-runtime-txt2img-checklist.md](dogfooding/core-runtime-txt2img-checklist.md)
 2. Launch with `control_panel()` option 1 (`safe` / `minimal` / `full`)
-3. Import `workflows/base/txt2img/workflow.json` in ComfyUI and queue a baseline prompt
-4. Copy the latest output with `python core/scripts/sync_outputs.py` (use `--dry-run` first)
+3. Confirm `txt2img` readiness with `python core/scripts/validate_capabilities.py --capability txt2img`
+4. Confirm generation evidence with `python core/scripts/verify_generation.py --summary`
+5. Import `workflows/base/txt2img/workflow.json` in ComfyUI and queue a baseline prompt
+6. Copy the latest output with `python core/scripts/sync_outputs.py` (use `--dry-run` first)
+
+Readiness and evidence are separate: a fresh runtime can be `READY` before the first image exists. Optional node gaps such as **ComfyUI-ReActor** do not block base txt2img.
 
 **Workflow path in Colab:**
 

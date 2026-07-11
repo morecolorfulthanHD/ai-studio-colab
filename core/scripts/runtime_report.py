@@ -30,6 +30,7 @@ def build_report(manager: RuntimeManager) -> dict:
         (c for c in capabilities.get("capabilities", []) if c.get("id") == "txt2img"),
         None,
     )
+    node_details = checks.get("node_registry", {}).get("details", {})
     return {
         "runtime_status": status,
         "health": health.to_dict(),
@@ -49,7 +50,16 @@ def build_report(manager: RuntimeManager) -> dict:
             "capability_status": txt2img_capability.get("computed_status", "unknown")
             if txt2img_capability
             else "unknown",
+            "evidence_status": txt2img_capability.get("evidence_status", "not_evaluated")
+            if txt2img_capability
+            else "not_evaluated",
             "capability_reasons": txt2img_capability.get("reasons", []) if txt2img_capability else [],
+            "runtime_checks": txt2img_capability.get("runtime_checks", []) if txt2img_capability else [],
+        },
+        "nodes": {
+            "core_ready": node_details.get("core_ready", False),
+            "missing_required": node_details.get("missing_required", []),
+            "missing_optional": node_details.get("missing_optional", []),
         },
         "extension_points": manager.extension_points(),
     }
@@ -118,11 +128,26 @@ def to_human(report: dict) -> str:
                 "txt2img Runtime Status",
                 "-" * 40,
                 f"  Workflow:   {txt2img.get('workflow_status', 'unknown')} ({txt2img.get('workflow_path', '')})",
-                f"  Capability: {txt2img.get('capability_status', 'unknown')}",
+                f"  Readiness:  {txt2img.get('capability_status', 'unknown')}",
+                f"  Evidence:   {txt2img.get('evidence_status', 'not_evaluated')}",
             ]
         )
         for reason in txt2img.get("capability_reasons", []):
             lines.append(f"  Reason:     {reason}")
+        for reason in txt2img.get("runtime_checks", []):
+            lines.append(f"  Runtime:    {reason}")
+    nodes = report.get("nodes", {})
+    if nodes:
+        lines.extend(
+            [
+                "",
+                "Node Health",
+                "-" * 40,
+                f"  Core ready: {nodes.get('core_ready', False)}",
+                f"  Missing required: {', '.join(nodes.get('missing_required', [])) or 'none'}",
+                f"  Missing optional: {', '.join(nodes.get('missing_optional', [])) or 'none'}",
+            ]
+        )
     return "\n".join(lines)
 
 
@@ -148,12 +173,18 @@ def to_summary(report: dict) -> str:
     node_state = runtime_exec.get("nodes", {}).get("status", "unknown").upper()
     model_state = runtime_exec.get("models", {}).get("status", "unknown").upper()
     txt2img_state = report.get("txt2img", {}).get("capability_status", "unknown")
+    evidence_state = report.get("txt2img", {}).get("evidence_status", "not_evaluated")
+    node_details = report.get("nodes", {})
+    optional_missing = len(node_details.get("missing_optional", []))
+    node_part = f" | CoreNodes: {'OK' if node_details.get('core_ready') else 'WARN'}"
+    if optional_missing:
+        node_part += f" | OptionalMissing: {optional_missing}"
     return (
         f"Health: {health['overall_status'].upper()} | "
         f"Env: {report['runtime_status']['environment']} | "
-        f"ComfyUI: {comfyui_state} | Nodes: {node_state} | ModelCheck: {model_state} | "
+        f"ComfyUI: {comfyui_state} | Nodes: {node_state} | ModelCheck: {model_state}{node_part} | "
         f"Models: {reg['models']} | Nodes: {reg['nodes']} | "
-        f"Workflows: {reg['workflows']} | txt2img: {txt2img_state}{asset_part}{capability_part}"
+        f"Workflows: {reg['workflows']} | txt2img: {txt2img_state} | evidence: {evidence_state}{asset_part}{capability_part}"
     )
 
 

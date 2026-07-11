@@ -15,22 +15,17 @@ import shutil
 import sys
 from pathlib import Path
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from core.runtime.output_evidence import (
+    ELIGIBLE_OUTPUT_SUFFIXES,
+    latest_eligible_output,
+)
+
 SCRIPT_PATH = Path(__file__).resolve()
 SCRIPT_REPO_ROOT = SCRIPT_PATH.parents[2]
-
-ELIGIBLE_OUTPUT_SUFFIXES = {
-    ".png",
-    ".jpg",
-    ".jpeg",
-    ".webp",
-    ".gif",
-    ".mp4",
-    ".webm",
-}
-
-PLACEHOLDER_BASENAMES = {
-    "_output_images_will_be_put_here",
-}
 
 
 def is_repo_root(path: Path) -> bool:
@@ -55,35 +50,6 @@ def load_paths(repo_root: Path) -> tuple[Path, Path]:
         data = json.load(fh)
     paths = data["paths"]
     return Path(paths["comfyui_output"]), Path(paths["drive_outputs"])
-
-
-def is_eligible_output(path: Path) -> bool:
-    if not path.is_file():
-        return False
-
-    try:
-        stat = path.stat()
-    except OSError:
-        return False
-
-    if stat.st_size == 0:
-        return False
-
-    if path.name in PLACEHOLDER_BASENAMES:
-        return False
-
-    return path.suffix.lower() in ELIGIBLE_OUTPUT_SUFFIXES
-
-
-def latest_eligible_output(directory: Path) -> Path | None:
-    if not directory.is_dir():
-        return None
-
-    candidates = [path for path in directory.rglob("*") if is_eligible_output(path)]
-    if not candidates:
-        return None
-
-    return max(candidates, key=lambda path: path.stat().st_mtime)
 
 
 def main() -> int:

@@ -7,19 +7,30 @@
       "description": "Generate images from text prompts.",
       "category": "generation",
       "maturity": "stable",
-      "status": "partial",
-      "supported_engines": ["comfyui", "a1111"],
-      "required_models": ["sd15_checkpoint"],
+      "status": "ready",
+      "supported_engines": [
+        "comfyui",
+        "a1111"
+      ],
+      "required_models": [
+        "sd15_checkpoint"
+      ],
       "required_nodes": [],
-      "required_assets": ["sd15_checkpoint", "workflow_base_txt2img"],
-      "required_workflows": ["base_txt2img"],
+      "required_assets": [
+        "sd15_checkpoint",
+        "workflow_base_txt2img"
+      ],
+      "required_workflows": [
+        "base_txt2img"
+      ],
       "dependencies": [],
       "validation_rules": [
         "at_least_one_supported_engine_available",
         "all_required_models_registered",
         "all_required_assets_present_or_planned"
       ],
-      "notes": "Base workflow is implemented; readiness still depends on SD1.5 model validation in runtime."
+      "notes": "Base workflow implemented and dogfooded. Runtime readiness is computed dynamically from ComfyUI, SD1.5, workflow validation, and generation evidence.",
+      "implementation_status": "implemented"
     },
     {
       "id": "img2img",
@@ -28,17 +39,29 @@
       "category": "generation",
       "maturity": "stable",
       "status": "planned",
-      "supported_engines": ["comfyui", "a1111"],
-      "required_models": ["sd15_checkpoint"],
+      "supported_engines": [
+        "comfyui",
+        "a1111"
+      ],
+      "required_models": [
+        "sd15_checkpoint"
+      ],
       "required_nodes": [],
-      "required_assets": ["sd15_checkpoint"],
-      "required_workflows": ["base_img2img"],
-      "dependencies": ["txt2img"],
+      "required_assets": [
+        "sd15_checkpoint"
+      ],
+      "required_workflows": [
+        "base_img2img"
+      ],
+      "dependencies": [
+        "txt2img"
+      ],
       "validation_rules": [
         "all_required_models_registered",
         "all_required_workflows_registered"
       ],
-      "notes": "Depends on txt2img checkpoint foundation."
+      "notes": "Depends on txt2img checkpoint foundation.",
+      "implementation_status": "planned"
     },
     {
       "id": "inpainting",
@@ -47,14 +70,26 @@
       "category": "generation",
       "maturity": "beta",
       "status": "planned",
-      "supported_engines": ["comfyui", "a1111"],
-      "required_models": ["sd15_checkpoint"],
+      "supported_engines": [
+        "comfyui",
+        "a1111"
+      ],
+      "required_models": [
+        "sd15_checkpoint"
+      ],
       "required_nodes": [],
-      "required_assets": ["sd15_checkpoint"],
+      "required_assets": [
+        "sd15_checkpoint"
+      ],
       "required_workflows": [],
-      "dependencies": ["img2img"],
-      "validation_rules": ["all_required_models_registered"],
-      "notes": "Workflow JSON pending in later package."
+      "dependencies": [
+        "img2img"
+      ],
+      "validation_rules": [
+        "all_required_models_registered"
+      ],
+      "notes": "Workflow JSON pending in later package.",
+      "implementation_status": "planned"
     },
     {
       "id": "outpainting",
@@ -63,14 +98,26 @@
       "category": "generation",
       "maturity": "beta",
       "status": "planned",
-      "supported_engines": ["comfyui", "a1111"],
-      "required_models": ["sd15_checkpoint"],
+      "supported_engines": [
+        "comfyui",
+        "a1111"
+      ],
+      "required_models": [
+        "sd15_checkpoint"
+      ],
       "required_nodes": [],
-      "required_assets": ["sd15_checkpoint"],
+      "required_assets": [
+        "sd15_checkpoint"
+      ],
       "required_workflows": [],
-      "dependencies": ["img2img"],
-      "validation_rules": ["all_required_models_registered"],
-      "notes": "Workflow JSON pending in later package."
+      "dependencies": [
+        "img2img"
+      ],
+      "validation_rules": [
+        "all_required_models_registered"
+      ],
+      "notes": "Workflow JSON pending in later package.",
+      "implementation_status": "planned"
     },
     {
       "id": "openpose_conditioning",
@@ -79,17 +126,32 @@
       "category": "conditioning",
       "maturity": "beta",
       "status": "planned",
-      "supported_engines": ["comfyui"],
-      "required_models": ["controlnet_openpose", "sd15_checkpoint"],
-      "required_nodes": ["comfyui_controlnet_aux"],
-      "required_assets": ["controlnet_openpose", "workflow_openpose_portrait"],
-      "required_workflows": ["openpose_portrait"],
-      "dependencies": ["txt2img"],
+      "supported_engines": [
+        "comfyui"
+      ],
+      "required_models": [
+        "controlnet_openpose",
+        "sd15_checkpoint"
+      ],
+      "required_nodes": [
+        "comfyui_controlnet_aux"
+      ],
+      "required_assets": [
+        "controlnet_openpose",
+        "workflow_openpose_portrait"
+      ],
+      "required_workflows": [
+        "openpose_portrait"
+      ],
+      "dependencies": [
+        "txt2img"
+      ],
       "validation_rules": [
         "all_required_nodes_registered",
         "all_required_models_registered"
       ],
-      "notes": "ComfyUI-first capability."
+      "notes": "ComfyUI-first capability.",
+      "implementation_status": "planned"
     },
     {
       "id": "depth_extraction",
@@ -98,14 +160,25 @@
       "category": "extraction",
       "maturity": "beta",
       "status": "planned",
-      "supported_engines": ["comfyui"],
+      "supported_engines": [
+        "comfyui"
+      ],
       "required_models": [],
-      "required_nodes": ["comfyui_controlnet_aux"],
-      "required_assets": ["example_depth_map"],
-      "required_workflows": ["depth_map_extraction"],
+      "required_nodes": [
+        "comfyui_controlnet_aux"
+      ],
+      "required_assets": [
+        "example_depth_map"
+      ],
+      "required_workflows": [
+        "depth_map_extraction"
+      ],
       "dependencies": [],
-      "validation_rules": ["all_required_nodes_registered"],
-      "notes": "Extraction maps are generated assets."
+      "validation_rules": [
+        "all_required_nodes_registered"
+      ],
+      "notes": "Extraction maps are generated assets.",
+      "implementation_status": "planned"
     },
     {
       "id": "normal_extraction",
@@ -114,14 +187,25 @@
       "category": "extraction",
       "maturity": "beta",
       "status": "planned",
-      "supported_engines": ["comfyui"],
+      "supported_engines": [
+        "comfyui"
+      ],
       "required_models": [],
-      "required_nodes": ["comfyui_controlnet_aux"],
-      "required_assets": ["example_normal_map"],
-      "required_workflows": ["normal_map_extraction"],
+      "required_nodes": [
+        "comfyui_controlnet_aux"
+      ],
+      "required_assets": [
+        "example_normal_map"
+      ],
+      "required_workflows": [
+        "normal_map_extraction"
+      ],
       "dependencies": [],
-      "validation_rules": ["all_required_nodes_registered"],
-      "notes": "Used by environment consistency pipelines."
+      "validation_rules": [
+        "all_required_nodes_registered"
+      ],
+      "notes": "Used by environment consistency pipelines.",
+      "implementation_status": "planned"
     },
     {
       "id": "segmentation_extraction",
@@ -130,14 +214,26 @@
       "category": "extraction",
       "maturity": "beta",
       "status": "planned",
-      "supported_engines": ["comfyui"],
+      "supported_engines": [
+        "comfyui"
+      ],
       "required_models": [],
-      "required_nodes": ["comfyui_controlnet_aux", "ComfyUI-Impact-Pack"],
-      "required_assets": ["example_segmentation_map"],
-      "required_workflows": ["segmentation_map_extraction"],
+      "required_nodes": [
+        "comfyui_controlnet_aux",
+        "ComfyUI-Impact-Pack"
+      ],
+      "required_assets": [
+        "example_segmentation_map"
+      ],
+      "required_workflows": [
+        "segmentation_map_extraction"
+      ],
       "dependencies": [],
-      "validation_rules": ["all_required_nodes_registered"],
-      "notes": "Requires Impact Pack node stack."
+      "validation_rules": [
+        "all_required_nodes_registered"
+      ],
+      "notes": "Requires Impact Pack node stack.",
+      "implementation_status": "planned"
     },
     {
       "id": "lineart_extraction",
@@ -146,14 +242,21 @@
       "category": "extraction",
       "maturity": "experimental",
       "status": "planned",
-      "supported_engines": ["comfyui"],
+      "supported_engines": [
+        "comfyui"
+      ],
       "required_models": [],
-      "required_nodes": ["comfyui_controlnet_aux"],
+      "required_nodes": [
+        "comfyui_controlnet_aux"
+      ],
       "required_assets": [],
       "required_workflows": [],
       "dependencies": [],
-      "validation_rules": ["all_required_nodes_registered"],
-      "notes": "Workflow implementation deferred."
+      "validation_rules": [
+        "all_required_nodes_registered"
+      ],
+      "notes": "Workflow implementation deferred.",
+      "implementation_status": "planned"
     },
     {
       "id": "ipadapter_conditioning",
@@ -162,14 +265,29 @@
       "category": "conditioning",
       "maturity": "beta",
       "status": "planned",
-      "supported_engines": ["comfyui"],
-      "required_models": ["ipadapter", "sd15_checkpoint"],
+      "supported_engines": [
+        "comfyui"
+      ],
+      "required_models": [
+        "ipadapter",
+        "sd15_checkpoint"
+      ],
       "required_nodes": [],
-      "required_assets": ["ipadapter_sd15", "clip_vision_sd15"],
-      "required_workflows": ["reference_lock"],
-      "dependencies": ["txt2img"],
-      "validation_rules": ["all_required_assets_present_or_planned"],
-      "notes": "CLIP vision encoder required."
+      "required_assets": [
+        "ipadapter_sd15",
+        "clip_vision_sd15"
+      ],
+      "required_workflows": [
+        "reference_lock"
+      ],
+      "dependencies": [
+        "txt2img"
+      ],
+      "validation_rules": [
+        "all_required_assets_present_or_planned"
+      ],
+      "notes": "CLIP vision encoder required.",
+      "implementation_status": "planned"
     },
     {
       "id": "reference_lock",
@@ -178,14 +296,29 @@
       "category": "consistency",
       "maturity": "beta",
       "status": "planned",
-      "supported_engines": ["comfyui"],
-      "required_models": ["ipadapter", "sd15_checkpoint"],
+      "supported_engines": [
+        "comfyui"
+      ],
+      "required_models": [
+        "ipadapter",
+        "sd15_checkpoint"
+      ],
       "required_nodes": [],
-      "required_assets": ["ipadapter_sd15", "example_reference_portrait"],
-      "required_workflows": ["reference_lock"],
-      "dependencies": ["ipadapter_conditioning"],
-      "validation_rules": ["all_required_assets_present_or_planned"],
-      "notes": "General-purpose consistency feature."
+      "required_assets": [
+        "ipadapter_sd15",
+        "example_reference_portrait"
+      ],
+      "required_workflows": [
+        "reference_lock"
+      ],
+      "dependencies": [
+        "ipadapter_conditioning"
+      ],
+      "validation_rules": [
+        "all_required_assets_present_or_planned"
+      ],
+      "notes": "General-purpose consistency feature.",
+      "implementation_status": "planned"
     },
     {
       "id": "environment_lock",
@@ -194,14 +327,30 @@
       "category": "consistency",
       "maturity": "experimental",
       "status": "planned",
-      "supported_engines": ["comfyui"],
-      "required_models": ["controlnet_depth", "sd15_checkpoint"],
-      "required_nodes": ["comfyui_controlnet_aux"],
-      "required_assets": ["example_environment_anchor"],
-      "required_workflows": ["environment_generation"],
-      "dependencies": ["depth_extraction"],
-      "validation_rules": ["all_required_models_registered"],
-      "notes": "Depends on extraction + conditioning foundation."
+      "supported_engines": [
+        "comfyui"
+      ],
+      "required_models": [
+        "controlnet_depth",
+        "sd15_checkpoint"
+      ],
+      "required_nodes": [
+        "comfyui_controlnet_aux"
+      ],
+      "required_assets": [
+        "example_environment_anchor"
+      ],
+      "required_workflows": [
+        "environment_generation"
+      ],
+      "dependencies": [
+        "depth_extraction"
+      ],
+      "validation_rules": [
+        "all_required_models_registered"
+      ],
+      "notes": "Depends on extraction + conditioning foundation.",
+      "implementation_status": "planned"
     },
     {
       "id": "multi_angle_generation",
@@ -210,17 +359,34 @@
       "category": "consistency",
       "maturity": "experimental",
       "status": "planned",
-      "supported_engines": ["comfyui"],
-      "required_models": ["controlnet_openpose", "ipadapter", "sd15_checkpoint"],
-      "required_nodes": ["comfyui_controlnet_aux"],
-      "required_assets": ["example_environment_anchor", "example_character_anchor"],
-      "required_workflows": ["multi_angle_generation"],
-      "dependencies": ["reference_lock", "openpose_conditioning"],
+      "supported_engines": [
+        "comfyui"
+      ],
+      "required_models": [
+        "controlnet_openpose",
+        "ipadapter",
+        "sd15_checkpoint"
+      ],
+      "required_nodes": [
+        "comfyui_controlnet_aux"
+      ],
+      "required_assets": [
+        "example_environment_anchor",
+        "example_character_anchor"
+      ],
+      "required_workflows": [
+        "multi_angle_generation"
+      ],
+      "dependencies": [
+        "reference_lock",
+        "openpose_conditioning"
+      ],
       "validation_rules": [
         "all_required_models_registered",
         "all_required_workflows_registered"
       ],
-      "notes": "Cross-capability composition endpoint."
+      "notes": "Cross-capability composition endpoint.",
+      "implementation_status": "planned"
     },
     {
       "id": "reactor_faceswap",
@@ -229,14 +395,29 @@
       "category": "consistency",
       "maturity": "experimental",
       "status": "planned",
-      "supported_engines": ["comfyui", "a1111"],
-      "required_models": ["insightface", "sd15_checkpoint"],
-      "required_nodes": ["ComfyUI-ReActor"],
-      "required_assets": ["insightface_buffalo"],
-      "required_workflows": ["reactor_faceswap"],
+      "supported_engines": [
+        "comfyui",
+        "a1111"
+      ],
+      "required_models": [
+        "insightface",
+        "sd15_checkpoint"
+      ],
+      "required_nodes": [
+        "ComfyUI-ReActor"
+      ],
+      "required_assets": [
+        "insightface_buffalo"
+      ],
+      "required_workflows": [
+        "reactor_faceswap"
+      ],
       "dependencies": [],
-      "validation_rules": ["all_required_nodes_registered"],
-      "notes": "Engine support expands as parity improves."
+      "validation_rules": [
+        "all_required_nodes_registered"
+      ],
+      "notes": "Engine support expands as parity improves.",
+      "implementation_status": "planned"
     },
     {
       "id": "svd_image_to_video",
@@ -245,14 +426,27 @@
       "category": "animation",
       "maturity": "beta",
       "status": "planned",
-      "supported_engines": ["comfyui"],
-      "required_models": ["svd"],
+      "supported_engines": [
+        "comfyui"
+      ],
+      "required_models": [
+        "svd"
+      ],
       "required_nodes": [],
-      "required_assets": ["svd_xt"],
-      "required_workflows": ["svd_image_to_video"],
-      "dependencies": ["txt2img"],
-      "validation_rules": ["all_required_models_registered"],
-      "notes": "Video capability scaffold only."
+      "required_assets": [
+        "svd_xt"
+      ],
+      "required_workflows": [
+        "svd_image_to_video"
+      ],
+      "dependencies": [
+        "txt2img"
+      ],
+      "validation_rules": [
+        "all_required_models_registered"
+      ],
+      "notes": "Video capability scaffold only.",
+      "implementation_status": "planned"
     },
     {
       "id": "animatediff_sequence",
@@ -261,14 +455,30 @@
       "category": "animation",
       "maturity": "beta",
       "status": "planned",
-      "supported_engines": ["comfyui"],
-      "required_models": ["animatediff_motion_modules", "sd15_checkpoint"],
-      "required_nodes": ["ComfyUI-AnimateDiff-Evolved"],
-      "required_assets": ["animatediff_mm_v2"],
-      "required_workflows": ["animatediff_sequence"],
-      "dependencies": ["txt2img"],
-      "validation_rules": ["all_required_nodes_registered"],
-      "notes": "Temporal stability tuning deferred."
+      "supported_engines": [
+        "comfyui"
+      ],
+      "required_models": [
+        "animatediff_motion_modules",
+        "sd15_checkpoint"
+      ],
+      "required_nodes": [
+        "ComfyUI-AnimateDiff-Evolved"
+      ],
+      "required_assets": [
+        "animatediff_mm_v2"
+      ],
+      "required_workflows": [
+        "animatediff_sequence"
+      ],
+      "dependencies": [
+        "txt2img"
+      ],
+      "validation_rules": [
+        "all_required_nodes_registered"
+      ],
+      "notes": "Temporal stability tuning deferred.",
+      "implementation_status": "planned"
     },
     {
       "id": "runtime_health_report",
@@ -277,14 +487,19 @@
       "category": "utility",
       "maturity": "stable",
       "status": "ready",
-      "supported_engines": ["shared"],
+      "supported_engines": [
+        "shared"
+      ],
       "required_models": [],
       "required_nodes": [],
       "required_assets": [],
       "required_workflows": [],
       "dependencies": [],
-      "validation_rules": ["runtime_report_available"],
-      "notes": "Implemented by runtime_report.py and managers."
+      "validation_rules": [
+        "runtime_report_available"
+      ],
+      "notes": "Implemented by runtime_report.py and managers.",
+      "implementation_status": "implemented"
     }
   ]
 }

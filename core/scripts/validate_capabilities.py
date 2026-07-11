@@ -45,7 +45,11 @@ def _to_human(data: dict, selected_id: str | None = None) -> str:
         lines.append(f"  {key}: {s['by_status'][key]}")
     lines.append("\nCapabilities:")
     for cap in data["capabilities"]:
-        lines.append(f"  [{cap['computed_status'].upper():11}] {cap['id']} ({cap['name']})")
+        evidence = cap.get("evidence_status")
+        evidence_suffix = ""
+        if evidence and evidence != "not_evaluated":
+            evidence_suffix = f" | evidence={evidence}"
+        lines.append(f"  [{cap['computed_status'].upper():11}] {cap['id']} ({cap['name']}){evidence_suffix}")
         if cap.get("reasons"):
             for reason in cap["reasons"]:
                 lines.append(f"      - {reason}")

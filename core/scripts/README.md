@@ -15,6 +15,7 @@ Cross-engine utility scripts for bootstrap, validation, and batch processing.
 | `list_workflows.py` | List workflow JSON files by category | No |
 | `sync_outputs.py` | Copy single newest ComfyUI output to Drive (`--dry-run`; not bulk sync; cwd-independent) | No |
 | `dogfood_core_runtime.py` | Sprint 1 dogfooding checks (PASS/WARN/FAIL summary) | No |
+| `verify_generation.py` | Read-only local/Drive generation evidence (`--summary`, `--json`) | No |
 
 ## Runtime Verification (Phase 1b)
 
@@ -50,7 +51,10 @@ python core/scripts/check_nodes.py
 python core/scripts/verify_models.py
 python core/scripts/sync_outputs.py --dry-run
 python core/scripts/dogfood_core_runtime.py
+python core/scripts/verify_generation.py --summary
 ```
+
+`verify_generation.py` reports generation evidence separately from capability readiness. A capability can be `READY` while evidence is `NOT YET VERIFIED` until the first successful output exists.
 
 `sync_outputs.py` resolves the repository root from its own script location, so it works from any current working directory:
 

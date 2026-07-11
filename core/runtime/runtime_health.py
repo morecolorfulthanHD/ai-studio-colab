@@ -192,27 +192,39 @@ def check_workflow_registry(bundle: RegistryBundle) -> HealthCheck:
 
 
 def check_node_registry(bundle: RegistryBundle) -> HealthCheck:
+    from .node_registry_utils import summarize_node_installation
+
     custom_nodes = bundle.path("comfyui_runtime") / "custom_nodes"
-    installed: list[str] = []
-    missing: list[str] = []
-    for entry in bundle.nodes:
-        folder = entry.get("folder_name") or entry["name"]
-        target = custom_nodes / folder
-        if target.is_dir():
-            installed.append(entry["name"])
-        else:
-            missing.append(entry["name"])
+    summary = summarize_node_installation(bundle.nodes, custom_nodes)
+
+    missing_required = summary["missing_required"]
+    missing_optional = summary["missing_optional"]
+    installed = summary["installed"]
+
     if not bundle.nodes:
         status = HealthStatus.WARN
-    elif missing:
+        message = "No custom nodes registered."
+    elif missing_required:
         status = HealthStatus.WARN
+        message = (
+            f"Required nodes: {len(missing_required)} missing; "
+            f"optional nodes: {len(missing_optional)} missing."
+        )
+    elif missing_optional:
+        status = HealthStatus.WARN
+        message = (
+            f"Required nodes: OK ({len(installed)} present); "
+            f"optional nodes: {len(missing_optional)} missing."
+        )
     else:
         status = HealthStatus.OK
+        message = f"Required nodes: OK; optional nodes: OK ({len(installed)} present)."
+
     return HealthCheck(
         "node_registry",
         status,
-        f"{len(installed)} present, {len(missing)} missing of {len(bundle.nodes)} registered.",
-        {"installed": installed, "missing": missing, "custom_nodes_dir": str(custom_nodes)},
+        message,
+        summary,
     )
 
 
