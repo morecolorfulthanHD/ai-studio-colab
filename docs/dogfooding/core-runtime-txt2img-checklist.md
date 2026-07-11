@@ -248,14 +248,18 @@ Filename prefix from workflow: `ai_studio_base_txt2img`
 Preview:
 
 ```bash
-python core/scripts/sync_outputs.py --dry-run
+python /content/ai-studio-colab/core/scripts/sync_outputs.py --dry-run
 ```
 
-Copy latest file only (not bulk sync):
+Copy latest eligible file only (not bulk sync):
 
 ```bash
-python core/scripts/sync_outputs.py
+python /content/ai-studio-colab/core/scripts/sync_outputs.py
 ```
+
+These commands work from any Colab working directory; `%cd /content/ai-studio-colab` is not required.
+
+The script ignores zero-byte placeholders such as `_output_images_will_be_put_here` and selects the newest eligible image/video output (`.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`, `.mp4`, `.webm`).
 
 Destination:
 

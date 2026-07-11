@@ -13,7 +13,7 @@ Cross-engine utility scripts for bootstrap, validation, and batch processing.
 | `validate_paths.py` | Validate Colab/Drive/repo paths from manifest | No |
 | `validate_manifests.py` | Validate JSON schemas under `configs/` | No |
 | `list_workflows.py` | List workflow JSON files by category | No |
-| `sync_outputs.py` | Copy single newest ComfyUI output to Drive (`--dry-run`; not bulk sync) | No |
+| `sync_outputs.py` | Copy single newest ComfyUI output to Drive (`--dry-run`; not bulk sync; cwd-independent) | No |
 | `dogfood_core_runtime.py` | Sprint 1 dogfooding checks (PASS/WARN/FAIL summary) | No |
 
 ## Runtime Verification (Phase 1b)
@@ -51,6 +51,15 @@ python core/scripts/verify_models.py
 python core/scripts/sync_outputs.py --dry-run
 python core/scripts/dogfood_core_runtime.py
 ```
+
+`sync_outputs.py` resolves the repository root from its own script location, so it works from any current working directory:
+
+```bash
+python /content/ai-studio-colab/core/scripts/sync_outputs.py --dry-run
+python /content/ai-studio-colab/core/scripts/sync_outputs.py
+```
+
+It selects only the newest eligible generated image/video file and ignores zero-byte placeholders such as `_output_images_will_be_put_here`.
 
 See [docs/dogfooding/core-runtime-txt2img-checklist.md](../../docs/dogfooding/core-runtime-txt2img-checklist.md) for Colab validation steps.
 

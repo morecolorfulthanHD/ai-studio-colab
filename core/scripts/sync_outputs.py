@@ -15,12 +15,37 @@ import shutil
 import sys
 from pathlib import Path
 
+SCRIPT_PATH = Path(__file__).resolve()
+SCRIPT_REPO_ROOT = SCRIPT_PATH.parents[2]
+
+ELIGIBLE_OUTPUT_SUFFIXES = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".gif",
+    ".mp4",
+    ".webm",
+}
+
+PLACEHOLDER_BASENAMES = {
+    "_output_images_will_be_put_here",
+}
+
+
+def is_repo_root(path: Path) -> bool:
+    return (path / "README.md").is_file() and (path / "configs").is_dir()
+
 
 def find_repo_root(start: Path | None = None) -> Path:
+    if is_repo_root(SCRIPT_REPO_ROOT):
+        return SCRIPT_REPO_ROOT
+
     current = (start or Path.cwd()).resolve()
     for path in (current, *current.parents):
-        if (path / "README.md").is_file() and (path / "configs").is_dir():
+        if is_repo_root(path):
             return path
+
     raise FileNotFoundError("Could not locate repository root.")
 
 
@@ -32,15 +57,33 @@ def load_paths(repo_root: Path) -> tuple[Path, Path]:
     return Path(paths["comfyui_output"]), Path(paths["drive_outputs"])
 
 
-def latest_file(directory: Path) -> Path | None:
+def is_eligible_output(path: Path) -> bool:
+    if not path.is_file():
+        return False
+
+    try:
+        stat = path.stat()
+    except OSError:
+        return False
+
+    if stat.st_size == 0:
+        return False
+
+    if path.name in PLACEHOLDER_BASENAMES:
+        return False
+
+    return path.suffix.lower() in ELIGIBLE_OUTPUT_SUFFIXES
+
+
+def latest_eligible_output(directory: Path) -> Path | None:
     if not directory.is_dir():
         return None
 
-    candidates = [p for p in directory.rglob("*") if p.is_file()]
+    candidates = [path for path in directory.rglob("*") if is_eligible_output(path)]
     if not candidates:
         return None
 
-    return max(candidates, key=lambda p: p.stat().st_mtime)
+    return max(candidates, key=lambda path: path.stat().st_mtime)
 
 
 def main() -> int:
@@ -68,6 +111,7 @@ def main() -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
+    print(f"Repository root:  {repo_root}")
     print(f"Source directory: {source_dir}")
     print(f"Destination:      {dest_dir}")
     print(f"Dry run:          {args.dry_run}")
@@ -76,9 +120,17 @@ def main() -> int:
         print(f"ERROR: Source directory does not exist: {source_dir}", file=sys.stderr)
         return 1
 
-    latest = latest_file(source_dir)
+    latest = latest_eligible_output(source_dir)
     if latest is None:
-        print("ERROR: No files found in ComfyUI output directory.", file=sys.stderr)
+        print(
+            "ERROR: No eligible generated output found in ComfyUI output directory.",
+            file=sys.stderr,
+        )
+        print(
+            "Expected a non-empty image or video file "
+            f"({', '.join(sorted(ELIGIBLE_OUTPUT_SUFFIXES))}).",
+            file=sys.stderr,
+        )
         return 1
 
     dest_path = dest_dir / latest.name
@@ -91,6 +143,12 @@ def main() -> int:
 
     try:
         dest_dir.mkdir(parents=True, exist_ok=True)
+        if dest_path.exists():
+            print(
+                f"ERROR: Destination file already exists: {dest_path}",
+                file=sys.stderr,
+            )
+            return 1
         shutil.copy2(latest, dest_path)
     except OSError as exc:
         print(f"ERROR: Copy failed: {exc}", file=sys.stderr)

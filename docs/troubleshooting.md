@@ -184,15 +184,19 @@ Recovery never deletes Drive model content.
 
 ## Output Sync
 
-`sync_outputs.py` copies **only the single newest file** from ComfyUI output — not a bulk folder sync. Safe to run after generation.
+`sync_outputs.py` copies **only the single newest eligible generated file** from ComfyUI output — not a bulk folder sync. Safe to run after generation.
+
+The script resolves the repository root from its own location, so it works regardless of the caller's current working directory.
 
 ```bash
-# Preview without copying
-python core/scripts/sync_outputs.py --dry-run
+# Preview without copying (absolute path works from any cwd)
+python /content/ai-studio-colab/core/scripts/sync_outputs.py --dry-run
 
-# Copy latest file only
-python core/scripts/sync_outputs.py
+# Copy latest eligible file only
+python /content/ai-studio-colab/core/scripts/sync_outputs.py
 ```
+
+Eligible outputs include common image/video extensions (`.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`, `.mp4`, `.webm`). Zero-byte placeholders such as `_output_images_will_be_put_here` are ignored. If no eligible output exists, the script exits with a clear error.
 
 Source: `/content/ComfyUI/output` → Destination: `/content/drive/MyDrive/AI_Studio/outputs`
 
