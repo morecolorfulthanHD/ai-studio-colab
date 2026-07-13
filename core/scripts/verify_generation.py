@@ -19,6 +19,14 @@ _activate.activate(__file__)
 
 from core.runtime.output_evidence import inspect_generation_evidence
 from core.runtime.registry_loader import RegistryLoader, find_repo_root
+from core.runtime.workflow_validation import WORKFLOW_OUTPUT_PREFIXES
+
+WORKFLOW_CHOICES = {
+    "txt2img": WORKFLOW_OUTPUT_PREFIXES["base_txt2img"],
+    "img2img": WORKFLOW_OUTPUT_PREFIXES["base_img2img"],
+    "inpainting": WORKFLOW_OUTPUT_PREFIXES["base_inpainting"],
+    "outpainting": WORKFLOW_OUTPUT_PREFIXES["base_outpainting"],
+}
 
 
 def main() -> int:
@@ -38,6 +46,12 @@ def main() -> int:
         action="store_true",
         help="Exit non-zero when no eligible Drive output exists.",
     )
+    parser.add_argument(
+        "--workflow",
+        choices=sorted(WORKFLOW_CHOICES),
+        default=None,
+        help="Filter evidence by workflow output prefix.",
+    )
     args = parser.parse_args()
 
     try:
@@ -47,9 +61,11 @@ def main() -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
+    output_prefix = WORKFLOW_CHOICES.get(args.workflow) if args.workflow else None
     evidence = inspect_generation_evidence(
         bundle.path("comfyui_output"),
         bundle.path("drive_outputs"),
+        output_prefix=output_prefix,
     )
     payload = evidence.to_dict()
 
@@ -62,6 +78,7 @@ def main() -> int:
         drive_name = drive_file.get("filename", "none")
         print(
             f"Generation evidence: {payload['evidence_status']} | "
+            f"workflow={args.workflow or 'latest'} | "
             f"local={local_name} | drive={drive_name}"
         )
     else:

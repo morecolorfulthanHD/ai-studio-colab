@@ -407,15 +407,46 @@ def run_capability_simulations() -> list[tuple[str, str]]:
         results.append(("txt2img ready without generated image evidence", "PASS"))
 
         img2img = dogfood_manager.evaluate_capability("img2img")
-        _assert_equal("dogfood img2img status", img2img.computed_status, "partial")
+        _assert_equal("dogfood img2img status", img2img.computed_status, "ready")
+        _assert_equal("dogfood img2img execution input", img2img.execution_input_status, "not_selected")
+        results.append(("img2img ready with valid workflow and no selected input", "PASS"))
+
+        missing_img2img_repo = tmp / "repo_no_img2img"
+        shutil.copytree(_REPO_ROOT / "configs", missing_img2img_repo / "configs")
+        shutil.copytree(_REPO_ROOT / "workflows", missing_img2img_repo / "workflows")
+        (missing_img2img_repo / "workflows/base/img2img/workflow.json").unlink()
+        paths_file = missing_img2img_repo / "configs/paths/colab_paths.json"
+        paths_data = json.loads(paths_file.read_text(encoding="utf-8"))
+        paths_data["paths"]["comfyui_runtime"] = str(tmp / "ComfyUI2")
+        comfy2 = tmp / "ComfyUI2"
+        comfy2.mkdir()
+        (comfy2 / ".git").mkdir()
+        (comfy2 / "main.py").write_text("print('ok')\n", encoding="utf-8")
+        (comfy2 / "output").mkdir()
+        paths_data["paths"]["comfyui_output"] = str(comfy2 / "output")
+        paths_data["paths"]["drive_outputs"] = str(tmp / "drive_outputs2")
+        (tmp / "drive_outputs2").mkdir()
+        paths_file.write_text(json.dumps(paths_data, indent=2), encoding="utf-8")
+        assets_file = missing_img2img_repo / "configs/assets/asset_registry.json"
+        assets_data = json.loads(assets_file.read_text(encoding="utf-8"))
+        sd15 = tmp / "models2" / "sd15.safetensors"
+        sd15.parent.mkdir(parents=True, exist_ok=True)
+        sd15.write_bytes(b"fake-checkpoint")
+        for asset in assets_data.get("assets", []):
+            if asset.get("id") == "sd15_checkpoint":
+                asset["runtime_path"] = str(sd15)
+        assets_file.write_text(json.dumps(assets_data, indent=2), encoding="utf-8")
+        missing_img2img_manager = CapabilityManager(bundle=RegistryLoader(missing_img2img_repo).load_all())
+        missing_img2img = missing_img2img_manager.evaluate_capability("img2img")
+        _assert_equal("missing img2img workflow status", missing_img2img.computed_status, "partial")
         results.append(("txt2img ready but base_img2img workflow absent", "PASS"))
+
+        inpainting = dogfood_manager.evaluate_capability("inpainting")
+        _assert_equal("dogfood inpainting status", inpainting.computed_status, "ready")
+        results.append(("inpainting ready with implemented workflow", "PASS"))
 
     bundle = RegistryLoader(_REPO_ROOT).load_all()
     manager = _evaluate_with_bundle(bundle)
-
-    inpainting = manager.evaluate_capability("inpainting")
-    _assert_equal("inpainting status", inpainting.computed_status, "partial")
-    results.append(("inpainting partial", "PASS"))
 
     ipadapter = manager.evaluate_capability("ipadapter_conditioning")
     _assert_equal("planned capability with planned assets", ipadapter.computed_status, "partial")

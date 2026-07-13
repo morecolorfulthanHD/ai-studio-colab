@@ -233,6 +233,25 @@ python core/scripts/validate_capabilities.py --capability txt2img
 python /content/ai-studio-colab/core/scripts/verify_generation.py --summary
 ```
 
+## Image Editing Readiness and Preparation
+
+Base img2img, inpainting, and outpainting use native ComfyUI nodes only. ReActor and other optional identity nodes are not required.
+
+| Signal | Meaning |
+|--------|---------|
+| `img2img` / `inpainting` / `outpainting` `READY` | ComfyUI runtime, SD1.5, and validated workflow present |
+| `execution_input_status: not_selected` | No Drive input image yet — does **not** downgrade capability status |
+| `execution_input_status: mask_not_selected` | Inpainting source available but mask missing |
+| `prepare_workflow.py` error | Invalid extension, missing mask, or negative expansion values |
+
+```bash
+python core/scripts/validate_capabilities.py --capability img2img
+python core/scripts/prepare_workflow.py --workflow inpainting --input /path/to/source.png --mask /path/to/mask.png --dry-run
+python core/scripts/verify_generation.py --workflow outpainting --summary
+```
+
+Base inpainting uses `VAEEncodeForInpaint` with KSampler denoise **1.0**. Base outpainting uses the same true-inpainting latent path (`ImagePadForOutpaint` → `VAEEncodeForInpaint`) and also requires denoise **1.0**. Lower-strength masked editing is deferred to a future workflow.
+
 ## Reproducibility Issues
 
 | Symptom | Likely Cause | Resolution |

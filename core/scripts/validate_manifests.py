@@ -29,8 +29,10 @@ MANIFEST_RULES: dict[str, dict] = {
             "a1111_runtime",
             "comfyui_output",
             "drive_outputs",
+            "drive_inputs",
             "drive_models",
             "drive_workflows",
+            "runtime_workflows",
         },
     },
     "models/model_registry.json": {

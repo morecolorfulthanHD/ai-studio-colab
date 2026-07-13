@@ -51,10 +51,14 @@ def _to_human(data: dict, selected_id: str | None = None) -> str:
     lines.append("\nCapabilities:")
     for cap in data["capabilities"]:
         evidence = cap.get("evidence_status")
+        execution = cap.get("execution_input_status")
         evidence_suffix = ""
         if evidence and evidence != "not_evaluated":
             evidence_suffix = f" | evidence={evidence}"
-        lines.append(f"  [{cap['computed_status'].upper():11}] {cap['id']} ({cap['name']}){evidence_suffix}")
+        execution_suffix = ""
+        if execution and execution != "not_applicable":
+            execution_suffix = f" | input={execution}"
+        lines.append(f"  [{cap['computed_status'].upper():11}] {cap['id']} ({cap['name']}){evidence_suffix}{execution_suffix}")
         if cap.get("reasons"):
             for reason in cap["reasons"]:
                 lines.append(f"      - {reason}")

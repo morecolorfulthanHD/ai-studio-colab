@@ -15,7 +15,9 @@ Cross-engine utility scripts for bootstrap, validation, and batch processing.
 | `list_workflows.py` | List workflow JSON files by category | No |
 | `sync_outputs.py` | Copy single newest ComfyUI output to Drive (`--dry-run`, `--fail-on-existing`; collision-safe rename; cwd-independent) | No |
 | `dogfood_core_runtime.py` | Sprint 1 dogfooding checks (PASS/WARN/FAIL summary) | No |
-| `verify_generation.py` | Read-only local/Drive generation evidence (`--summary`, `--json`) | No |
+| `verify_generation.py` | Read-only local/Drive generation evidence (`--summary`, `--json`, `--workflow img2img\|inpainting\|outpainting`) | No |
+| `list_inputs.py` | List eligible Drive input images and masks (read-only) | No |
+| `prepare_workflow.py` | Prepare ephemeral runtime workflow JSON with selected inputs (`--dry-run`, `--json`) | No |
 
 ## Runtime Verification (Phase 1b)
 
@@ -52,9 +54,15 @@ python core/scripts/verify_models.py
 python core/scripts/sync_outputs.py --dry-run
 python core/scripts/dogfood_core_runtime.py
 python core/scripts/verify_generation.py --summary
+python core/scripts/verify_generation.py --workflow img2img --summary
+python core/scripts/list_inputs.py
+python core/scripts/prepare_workflow.py --workflow img2img --input /path/to/image.png --dry-run
+python core/scripts/simulate_package4_editing.py
 ```
 
-`verify_generation.py` reports generation evidence separately from capability readiness. A capability can be `READY` while evidence is `NOT YET VERIFIED` until the first successful output exists. After collision-safe synchronization, evidence recognizes timestamped Drive copies when the byte size matches the local file exactly.
+`prepare_workflow.py` stages persistent Drive inputs into ComfyUI `input/` using SHA-256 content comparison before reuse. `--dry-run` is fully read-only (no directory creation, copies, or workflow writes).
+
+`verify_generation.py` filters evidence by workflow prefix. `validate_capabilities.py` reports `execution_input_status` separately from implementation readiness. Workflow validators require connected execution graphs — see `simulate_package4_editing.py`.
 
 All user-facing scripts under `core/scripts/` resolve the repository root from the invoked script path (via `cli_activate.py` / `core/runtime/repo_paths.py`), so absolute-path invocation works from any working directory:
 

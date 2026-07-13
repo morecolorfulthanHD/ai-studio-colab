@@ -135,7 +135,9 @@ Model downloads remain intentionally deferred.
 
 - **Readiness** answers whether a capability can run now (runtime, workflow, required assets, required nodes).
 - **Evidence** answers whether a successful generation has already been observed (local output and optional Drive sync).
-- Base `txt2img` can be `READY` with evidence `NOT YET VERIFIED` on a fresh runtime before the first image is generated.
+- Base `txt2img`, `img2img`, `inpainting`, and `outpainting` can be `READY` with evidence `NOT YET VERIFIED` on a fresh runtime before the first image is generated.
+- **Implementation readiness** covers ComfyUI runtime, SD1.5, workflow validation, and required nodes.
+- **Execution input readiness** (`execution_input_status`) reports whether Drive/runtime source images and masks are available; it does not downgrade installed capability status when inputs are not yet selected.
 - Drive evidence requires an exact byte-size match. When `sync_outputs.py` writes a collision-safe timestamped filename, `verify_generation.py` recognizes that derivative as synchronized evidence when sizes match.
 
 ### CLI repository resolution
@@ -144,7 +146,18 @@ User-facing scripts under `core/scripts/` resolve the repository root from the i
 
 ### Required vs optional node health
 
-Node health distinguishes required bootstrap nodes from optional workflow packs. Missing optional nodes (for example `ComfyUI-ReActor`) produce warnings but do not block base txt2img readiness.
+Node health distinguishes required bootstrap nodes from optional workflow packs. Missing optional nodes (for example `ComfyUI-ReActor`) produce warnings but do not block base txt2img or image-editing readiness.
+
+### Image editing inputs and preparation
+
+| Path | Purpose |
+|------|---------|
+| `drive_inputs/images/` | Persistent source images (`.png`, `.jpg`, `.jpeg`, `.webp`) |
+| `drive_inputs/masks/` | Inpainting masks |
+| `comfyui_runtime/input/` | Ephemeral staged inputs copied by `prepare_workflow.py` (SHA-256 content match before reuse) |
+| `runtime_workflows/` | Ephemeral prepared workflow JSON |
+
+`prepare_workflow.py` validates inputs, stages copies into ComfyUI `input/` with collision-safe naming, patches LoadImage/mask/pad nodes in a runtime copy, and never modifies canonical repository workflow JSON. Workflow validators also require connected execution graphs, not just node presence.
 
 ### Planned extension points
 

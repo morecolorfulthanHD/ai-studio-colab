@@ -2,7 +2,7 @@
 
 A general-purpose, version-controlled AI Studio for high-end image generation, environment generation, character consistency, and video generation.
 
-**Current phase:** Production Package 1 — runtime execution + base txt2img.
+**Current phase:** Production Package 4 — image editing foundation (img2img, inpainting, outpainting).
 
 ## What This Is
 
@@ -126,6 +126,38 @@ After generating an image:
 python core/scripts/sync_outputs.py --dry-run
 python core/scripts/sync_outputs.py
 ```
+
+### Image Editing (Package 4)
+
+Implemented capabilities: **img2img**, **inpainting**, **outpainting**.
+
+Persistent Drive inputs:
+
+```
+/content/drive/MyDrive/AI_Studio/inputs/images/
+/content/drive/MyDrive/AI_Studio/inputs/masks/
+```
+
+Prepare ephemeral runtime workflows (canonical JSON never modified; inputs staged into ComfyUI/input):
+
+```bash
+python core/scripts/list_inputs.py
+python core/scripts/prepare_workflow.py --workflow img2img --input /path/to/source.png
+python core/scripts/prepare_workflow.py --workflow inpainting --input /path/to/source.png --mask /path/to/mask.png
+python core/scripts/prepare_workflow.py --workflow outpainting --input /path/to/source.png --left 256 --right 256
+python core/scripts/prepare_workflow.py --workflow img2img --input /path/to/source.png --dry-run
+python core/scripts/verify_generation.py --workflow img2img --summary
+```
+
+`--dry-run` is fully read-only (no directories created, no copies). Staged-file reuse requires identical SHA-256 content, not just matching filename and size.
+
+**Dogfooding sequence:** Drive inputs → `list_inputs.py` → `prepare_workflow.py` (stages into `/content/ComfyUI/input`) → import prepared workflow → generate → `sync_outputs.py` → `verify_generation.py`.
+
+**Implementation readiness** (ComfyUI + SD1.5 + valid workflow) is computed separately from **execution input readiness** (whether the user has selected source/mask files). A capability can be `READY` before any Drive input is placed.
+
+Control panel: `control_panel()` → **7. Image Editing**.
+
+Dogfooding: [docs/dogfooding/img2img-checklist.md](docs/dogfooding/img2img-checklist.md), [inpainting](docs/dogfooding/inpainting-checklist.md), [outpainting](docs/dogfooding/outpainting-checklist.md).
 
 ## Bootstrap Scripts
 

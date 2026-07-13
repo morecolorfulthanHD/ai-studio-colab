@@ -132,9 +132,23 @@ def _drive_sync_verified(local_latest: Path, drive_candidate: Path) -> tuple[boo
     return True, messages
 
 
+def latest_eligible_output_with_prefix(directory: Path, output_prefix: str) -> Path | None:
+    if not directory.is_dir():
+        return None
+    candidates = [
+        path
+        for path in directory.rglob("*")
+        if is_eligible_output(path) and path.name.startswith(output_prefix)
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda path: path.stat().st_mtime)
+
+
 def inspect_generation_evidence(
     local_output_dir: Path,
     drive_output_dir: Path | None = None,
+    output_prefix: str | None = None,
 ) -> GenerationEvidence:
     evidence = GenerationEvidence(
         local_output_dir=str(local_output_dir),
@@ -145,10 +159,18 @@ def inspect_generation_evidence(
         evidence.messages.append("ComfyUI output directory does not exist yet.")
         return evidence
 
-    local_latest = latest_eligible_output(local_output_dir)
-    if local_latest is None:
-        evidence.messages.append("No eligible generated output found in ComfyUI output directory.")
-        return evidence
+    if output_prefix:
+        local_latest = latest_eligible_output_with_prefix(local_output_dir, output_prefix)
+        if local_latest is None:
+            evidence.messages.append(
+                f"No eligible generated output with prefix {output_prefix!r} found in ComfyUI output directory."
+            )
+            return evidence
+    else:
+        local_latest = latest_eligible_output(local_output_dir)
+        if local_latest is None:
+            evidence.messages.append("No eligible generated output found in ComfyUI output directory.")
+            return evidence
 
     evidence.local_verified = True
     evidence.local_file = describe_output_file(local_latest)

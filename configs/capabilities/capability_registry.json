@@ -38,7 +38,7 @@
       "description": "Refine source images with denoise control.",
       "category": "generation",
       "maturity": "stable",
-      "status": "planned",
+      "status": "ready",
       "supported_engines": [
         "comfyui",
         "a1111"
@@ -48,7 +48,8 @@
       ],
       "required_nodes": [],
       "required_assets": [
-        "sd15_checkpoint"
+        "sd15_checkpoint",
+        "workflow_base_img2img"
       ],
       "required_workflows": [
         "base_img2img"
@@ -60,8 +61,8 @@
         "all_required_models_registered",
         "all_required_workflows_registered"
       ],
-      "notes": "Depends on txt2img checkpoint foundation.",
-      "implementation_status": "planned"
+      "notes": "Base img2img workflow implemented with native ComfyUI nodes. Execution inputs are selected separately.",
+      "implementation_status": "implemented"
     },
     {
       "id": "inpainting",
@@ -69,7 +70,7 @@
       "description": "Regenerate masked regions while preserving context.",
       "category": "generation",
       "maturity": "beta",
-      "status": "planned",
+      "status": "ready",
       "supported_engines": [
         "comfyui",
         "a1111"
@@ -79,17 +80,20 @@
       ],
       "required_nodes": [],
       "required_assets": [
-        "sd15_checkpoint"
+        "sd15_checkpoint",
+        "workflow_base_inpainting"
       ],
-      "required_workflows": [],
+      "required_workflows": [
+        "base_inpainting"
+      ],
       "dependencies": [
         "img2img"
       ],
       "validation_rules": [
         "all_required_models_registered"
       ],
-      "notes": "Workflow JSON pending in later package.",
-      "implementation_status": "planned"
+      "notes": "Base inpainting workflow implemented with native ComfyUI nodes and mask input.",
+      "implementation_status": "implemented"
     },
     {
       "id": "outpainting",
@@ -97,7 +101,7 @@
       "description": "Extend image canvas while preserving composition.",
       "category": "generation",
       "maturity": "beta",
-      "status": "planned",
+      "status": "ready",
       "supported_engines": [
         "comfyui",
         "a1111"
@@ -107,17 +111,20 @@
       ],
       "required_nodes": [],
       "required_assets": [
-        "sd15_checkpoint"
+        "sd15_checkpoint",
+        "workflow_base_outpainting"
       ],
-      "required_workflows": [],
+      "required_workflows": [
+        "base_outpainting"
+      ],
       "dependencies": [
         "img2img"
       ],
       "validation_rules": [
         "all_required_models_registered"
       ],
-      "notes": "Workflow JSON pending in later package.",
-      "implementation_status": "planned"
+      "notes": "Base outpainting workflow implemented with ImagePadForOutpaint. SD1.5 quality limits apply.",
+      "implementation_status": "implemented"
     },
     {
       "id": "openpose_conditioning",

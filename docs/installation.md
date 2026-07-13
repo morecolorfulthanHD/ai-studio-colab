@@ -2,7 +2,7 @@
 
 Setup and launch procedures for AI Studio Colab.
 
-**Current phase:** Production Package 1 — runtime execution + base txt2img workflow.
+**Current phase:** Production Package 4 — image editing foundation (img2img, inpainting, outpainting).
 
 ## Prerequisites
 
@@ -237,6 +237,46 @@ python core/scripts/sync_outputs.py
 For end-to-end Colab validation (bootstrap → install → txt2img → output copy), follow
 [dogfooding/core-runtime-txt2img-checklist.md](dogfooding/core-runtime-txt2img-checklist.md).
 
+### Image editing inputs (Drive)
+
+Create persistent input folders (placeholders only in Git; add your own images on Drive):
+
+```text
+/content/drive/MyDrive/AI_Studio/inputs/images/
+/content/drive/MyDrive/AI_Studio/inputs/masks/
+```
+
+List eligible files:
+
+```bash
+python core/scripts/list_inputs.py
+```
+
+Prepare and stage into ComfyUI `input/`:
+
+```bash
+python core/scripts/prepare_workflow.py --workflow img2img --input /content/drive/MyDrive/AI_Studio/inputs/images/your_image.png
+python core/scripts/prepare_workflow.py --workflow inpainting --input /path/to/source.png --mask /path/to/mask.png
+python core/scripts/prepare_workflow.py --workflow outpainting --input /path/to/source.png --left 256 --right 256
+python core/scripts/prepare_workflow.py --workflow img2img --input /path/to/image.png --dry-run
+```
+
+**Dogfooding sequence:** Drive inputs → list → prepare (stages to ComfyUI/input) → import prepared workflow → generate → sync → verify evidence.
+
+| Capability | Canonical workflow | Preparation |
+|------------|-------------------|-------------|
+| img2img | `workflows/base/img2img/workflow.json` | `prepare_workflow.py --workflow img2img --input <path>` |
+| inpainting | `workflows/base/inpainting/workflow.json` | `--workflow inpainting --input <path> --mask <path>` (denoise 1.0) |
+| outpainting | `workflows/base/outpainting/workflow.json` | `--workflow outpainting --input <path> --left N` (denoise 1.0) |
+
+Preparation stages selected files into ComfyUI `input/` with content-based reuse (SHA-256) and collision-safe naming when needed. Load the prepared JSON in ComfyUI.
+
+Base inpainting and outpainting both use `VAEEncodeForInpaint` with KSampler denoise **1.0**. Prefer iterative 128–256 px canvas extensions for outpainting.
+
+Control panel shortcut: `control_panel()` → **7. Image Editing**.
+
+SD1.5 base outpainting has quality limitations — prefer iterative small expansions. See [workflows/base/outpainting/README.md](../workflows/base/outpainting/README.md).
+
 ## Launching
 
 | Environment | Method |
@@ -264,6 +304,8 @@ All Colab and Drive paths are in `configs/paths/colab_paths.json`:
 | `a1111_runtime` | `/content/A1111` |
 | `comfyui_output` | `/content/ComfyUI/output` |
 | `drive_outputs` | `/content/drive/MyDrive/AI_Studio/outputs` |
+| `drive_inputs` | `/content/drive/MyDrive/AI_Studio/inputs` |
+| `runtime_workflows` | `/content/ai-studio-runtime/workflows` |
 | `drive_models` | `/content/drive/MyDrive/AI_Studio/models/shared` |
 | `drive_workflows` | `/content/drive/MyDrive/AI_Studio/workflows` |
 

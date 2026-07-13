@@ -183,7 +183,26 @@ use_cases/zara_morrison/test_outputs/
 
 ## Status
 
-`base_txt2img` is now implemented at `workflows/base/txt2img/workflow.json` and serves as the first production baseline. Remaining workflows in `configs/workflows/workflow_registry.json` are still planned.
+`base_txt2img`, `base_img2img`, `base_inpainting`, and `base_outpainting` are implemented under `workflows/base/`. Remaining workflows in `configs/workflows/workflow_registry.json` are still planned.
+
+### Validating base workflows in Colab
+
+**Fast path:** `control_panel()` → **1. Launch** → `minimal`
+
+**txt2img:** Follow [dogfooding/core-runtime-txt2img-checklist.md](dogfooding/core-runtime-txt2img-checklist.md)
+
+**Image editing:** `control_panel()` → **7. Image Editing**, or:
+
+```bash
+python core/scripts/list_inputs.py
+python core/scripts/prepare_workflow.py --workflow img2img --input /path/to/image.png
+python core/scripts/validate_capabilities.py --capability img2img
+python core/scripts/verify_generation.py --workflow img2img --summary
+```
+
+Preparation stages selected files into ComfyUI `input/` and writes a prepared workflow JSON. Base inpainting and outpainting use `VAEEncodeForInpaint` with KSampler denoise **1.0** (true-inpainting path). Prefer iterative 128–256 px outpainting extensions.
+
+See also [img2img](dogfooding/img2img-checklist.md), [inpainting](dogfooding/inpainting-checklist.md), and [outpainting](dogfooding/outpainting-checklist.md) checklists.
 
 ### Validating base txt2img in Colab
 

@@ -6,7 +6,9 @@
       "category": "base",
       "path": "workflows/base/txt2img/workflow.json",
       "status": "active",
-      "required_models": ["sd15_checkpoint"],
+      "required_models": [
+        "sd15_checkpoint"
+      ],
       "required_nodes": [],
       "notes": "Fundamental text-to-image workflow implemented with core ComfyUI nodes."
     },
@@ -14,18 +16,25 @@
       "id": "base_img2img",
       "category": "base",
       "path": "workflows/base/img2img/workflow.json",
-      "status": "planned",
-      "required_models": ["sd15_checkpoint"],
+      "status": "active",
+      "required_models": [
+        "sd15_checkpoint"
+      ],
       "required_nodes": [],
-      "notes": "Image refinement with configurable denoise strength."
+      "notes": "Image refinement with configurable denoise strength using native ComfyUI nodes."
     },
     {
       "id": "openpose_portrait",
       "category": "controlnet",
       "path": "workflows/controlnet/openpose/workflow.json",
       "status": "planned",
-      "required_models": ["sd15_checkpoint", "controlnet_openpose"],
-      "required_nodes": ["comfyui_controlnet_aux"],
+      "required_models": [
+        "sd15_checkpoint",
+        "controlnet_openpose"
+      ],
+      "required_nodes": [
+        "comfyui_controlnet_aux"
+      ],
       "notes": "Pose-guided portrait generation."
     },
     {
@@ -34,7 +43,9 @@
       "path": "workflows/extraction/depth_map/workflow.json",
       "status": "planned",
       "required_models": [],
-      "required_nodes": ["comfyui_controlnet_aux"],
+      "required_nodes": [
+        "comfyui_controlnet_aux"
+      ],
       "notes": "Extract depth map from source image."
     },
     {
@@ -43,7 +54,9 @@
       "path": "workflows/extraction/normal_map/workflow.json",
       "status": "planned",
       "required_models": [],
-      "required_nodes": ["comfyui_controlnet_aux"],
+      "required_nodes": [
+        "comfyui_controlnet_aux"
+      ],
       "notes": "Extract surface normal map from source image."
     },
     {
@@ -52,7 +65,10 @@
       "path": "workflows/extraction/segmentation_map/workflow.json",
       "status": "planned",
       "required_models": [],
-      "required_nodes": ["comfyui_controlnet_aux", "ComfyUI-Impact-Pack"],
+      "required_nodes": [
+        "comfyui_controlnet_aux",
+        "ComfyUI-Impact-Pack"
+      ],
       "notes": "Extract semantic segmentation map from source image."
     },
     {
@@ -60,7 +76,10 @@
       "category": "reference",
       "path": "workflows/reference/reference_lock/workflow.json",
       "status": "planned",
-      "required_models": ["sd15_checkpoint", "ipadapter"],
+      "required_models": [
+        "sd15_checkpoint",
+        "ipadapter"
+      ],
       "required_nodes": [],
       "notes": "Lock visual attributes from a reference image."
     },
@@ -69,8 +88,14 @@
       "category": "pipelines",
       "path": "workflows/pipelines/environment_generation/workflow.json",
       "status": "planned",
-      "required_models": ["sd15_checkpoint", "controlnet_depth"],
-      "required_nodes": ["comfyui_controlnet_aux", "was-node-suite-comfyui"],
+      "required_models": [
+        "sd15_checkpoint",
+        "controlnet_depth"
+      ],
+      "required_nodes": [
+        "comfyui_controlnet_aux",
+        "was-node-suite-comfyui"
+      ],
       "notes": "Generate coherent environment scenes with depth guidance."
     },
     {
@@ -78,8 +103,15 @@
       "category": "pipelines",
       "path": "workflows/pipelines/environment_reconstruction/workflow.json",
       "status": "planned",
-      "required_models": ["sd15_checkpoint", "controlnet_depth", "controlnet_normal"],
-      "required_nodes": ["comfyui_controlnet_aux", "was-node-suite-comfyui"],
+      "required_models": [
+        "sd15_checkpoint",
+        "controlnet_depth",
+        "controlnet_normal"
+      ],
+      "required_nodes": [
+        "comfyui_controlnet_aux",
+        "was-node-suite-comfyui"
+      ],
       "notes": "Reconstruct environment from multiple viewpoint references."
     },
     {
@@ -87,8 +119,14 @@
       "category": "pipelines",
       "path": "workflows/pipelines/multi_angle_generation/workflow.json",
       "status": "planned",
-      "required_models": ["sd15_checkpoint", "controlnet_openpose", "ipadapter"],
-      "required_nodes": ["comfyui_controlnet_aux"],
+      "required_models": [
+        "sd15_checkpoint",
+        "controlnet_openpose",
+        "ipadapter"
+      ],
+      "required_nodes": [
+        "comfyui_controlnet_aux"
+      ],
       "notes": "Generate new camera angles with identity and scene consistency."
     },
     {
@@ -96,8 +134,13 @@
       "category": "reference",
       "path": "workflows/reference/identity/workflow.json",
       "status": "planned",
-      "required_models": ["sd15_checkpoint", "insightface"],
-      "required_nodes": ["ComfyUI-ReActor"],
+      "required_models": [
+        "sd15_checkpoint",
+        "insightface"
+      ],
+      "required_nodes": [
+        "ComfyUI-ReActor"
+      ],
       "notes": "Face swap and identity refinement via ReActor."
     },
     {
@@ -105,7 +148,9 @@
       "category": "animation",
       "path": "workflows/animation/svd/workflow.json",
       "status": "planned",
-      "required_models": ["svd"],
+      "required_models": [
+        "svd"
+      ],
       "required_nodes": [],
       "notes": "Stable Video Diffusion image-to-video generation."
     },
@@ -114,9 +159,36 @@
       "category": "animation",
       "path": "workflows/animation/animatediff/workflow.json",
       "status": "planned",
-      "required_models": ["sd15_checkpoint", "animatediff_motion_modules"],
-      "required_nodes": ["ComfyUI-AnimateDiff-Evolved"],
+      "required_models": [
+        "sd15_checkpoint",
+        "animatediff_motion_modules"
+      ],
+      "required_nodes": [
+        "ComfyUI-AnimateDiff-Evolved"
+      ],
       "notes": "AnimateDiff short animation sequence generation."
+    },
+    {
+      "id": "base_inpainting",
+      "category": "base",
+      "path": "workflows/base/inpainting/workflow.json",
+      "status": "active",
+      "required_models": [
+        "sd15_checkpoint"
+      ],
+      "required_nodes": [],
+      "notes": "Mask-guided region regeneration with native ComfyUI nodes."
+    },
+    {
+      "id": "base_outpainting",
+      "category": "base",
+      "path": "workflows/base/outpainting/workflow.json",
+      "status": "active",
+      "required_models": [
+        "sd15_checkpoint"
+      ],
+      "required_nodes": [],
+      "notes": "Canvas extension with ImagePadForOutpaint and native inpaint sampling."
     }
   ]
 }

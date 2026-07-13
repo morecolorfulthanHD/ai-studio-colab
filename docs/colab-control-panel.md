@@ -102,6 +102,22 @@ SD1.5 expected path:
 
 No automatic model download is performed.
 
+## Image Editing (Option 7)
+
+Run `control_panel()` and choose **7. Image Editing** for img2img, inpainting, or outpainting:
+
+| Submenu | Workflow | Required inputs |
+|---------|----------|-----------------|
+| 1. img2img | `workflows/base/img2img/workflow.json` | source image |
+| 2. Inpainting | `workflows/base/inpainting/workflow.json` | source image + mask |
+| 3. Outpainting | `workflows/base/outpainting/workflow.json` | source image + expansion pixels |
+
+The submenu calls `list_inputs.py`, `validate_capabilities.py`, and `prepare_workflow.py` — validation logic is not duplicated in the notebook. Preparation stages inputs into ComfyUI `input/` automatically.
+
+Persistent Drive inputs: `/content/drive/MyDrive/AI_Studio/inputs/images/` and `.../masks/`.
+
+Prepared workflows: `/content/ai-studio-runtime/workflows/` (ephemeral).
+
 ## Bootstrap Scripts (callable from notebook)
 
 Run **Repository Sync** first (clones/pulls repo from GitHub), then Cell 3b:

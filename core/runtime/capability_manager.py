@@ -9,11 +9,29 @@ from typing import Any
 
 from .asset_manager import AssetManager
 from .node_registry_utils import evaluate_required_nodes
+from .input_utils import list_eligible_inputs
 from .output_evidence import inspect_generation_evidence
 from .registry_loader import RegistryBundle, RegistryLoader, find_repo_root
-from .workflow_validation import validate_workflow
+from .workflow_validation import WORKFLOW_OUTPUT_PREFIXES, validate_workflow
 
 CAPABILITY_REGISTRY_PATH = "configs/capabilities/capability_registry.json"
+
+COMFYUI_RUNTIME_CAPABILITIES = frozenset({"txt2img", "img2img", "inpainting", "outpainting"})
+EDITING_CAPABILITIES = frozenset({"img2img", "inpainting", "outpainting"})
+
+CAPABILITY_WORKFLOW_ASSETS: dict[str, tuple[str, ...]] = {
+    "txt2img": ("sd15_checkpoint", "workflow_base_txt2img"),
+    "img2img": ("sd15_checkpoint", "workflow_base_img2img"),
+    "inpainting": ("sd15_checkpoint", "workflow_base_inpainting"),
+    "outpainting": ("sd15_checkpoint", "workflow_base_outpainting"),
+}
+
+CAPABILITY_OUTPUT_PREFIXES: dict[str, str] = {
+    "txt2img": WORKFLOW_OUTPUT_PREFIXES["base_txt2img"],
+    "img2img": WORKFLOW_OUTPUT_PREFIXES["base_img2img"],
+    "inpainting": WORKFLOW_OUTPUT_PREFIXES["base_inpainting"],
+    "outpainting": WORKFLOW_OUTPUT_PREFIXES["base_outpainting"],
+}
 
 STATUS_RANK = {
     "ready": 0,
@@ -42,6 +60,8 @@ class CapabilityEvaluation:
     supported_engines: list[str] = field(default_factory=list)
     evidence_status: str = "not_evaluated"
     evidence_details: dict[str, Any] = field(default_factory=dict)
+    execution_input_status: str = "not_applicable"
+    execution_input_details: dict[str, Any] = field(default_factory=dict)
     runtime_checks: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -146,7 +166,7 @@ class CapabilityManager:
         issues: list[str] = []
         capability_id = cap.get("id", "")
 
-        if capability_id == "txt2img":
+        if capability_id in COMFYUI_RUNTIME_CAPABILITIES:
             comfy_ok, comfy_reason = self._comfyui_runtime_ready()
             if not comfy_ok and comfy_reason:
                 issues.append(comfy_reason)
@@ -156,20 +176,61 @@ class CapabilityManager:
             if not ready and reason:
                 issues.append(reason)
 
-        if capability_id == "txt2img":
-            for asset_id in ("sd15_checkpoint", "workflow_base_txt2img"):
-                if not self._asset_ready(asset_id):
-                    issues.append(f"Required asset not ready: {asset_id}")
+        asset_ids = CAPABILITY_WORKFLOW_ASSETS.get(capability_id, ())
+        for asset_id in asset_ids:
+            if not self._asset_ready(asset_id):
+                issues.append(f"Required asset not ready: {asset_id}")
 
         return issues
 
+    def _input_directories(self) -> tuple[Path, Path]:
+        inputs_root = self.bundle.path("drive_inputs")
+        return inputs_root / "images", inputs_root / "masks"
+
+    def _evaluate_execution_input(self, cap: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        capability_id = cap.get("id", "")
+        if capability_id not in EDITING_CAPABILITIES:
+            return "not_applicable", {}
+
+        images_dir, masks_dir = self._input_directories()
+        images = list_eligible_inputs(images_dir)
+        masks = list_eligible_inputs(masks_dir)
+        details = {
+            "images_dir": str(images_dir),
+            "masks_dir": str(masks_dir),
+            "available_images": [str(path) for path in images],
+            "available_masks": [str(path) for path in masks],
+        }
+
+        if capability_id == "img2img":
+            if images:
+                return "available", details
+            return "not_selected", details
+
+        if capability_id == "inpainting":
+            if images and masks:
+                return "available", details
+            if images and not masks:
+                details["message"] = "Source image available; mask not selected."
+                return "mask_not_selected", details
+            return "not_selected", details
+
+        if capability_id == "outpainting":
+            if images:
+                return "available", details
+            return "not_selected", details
+
+        return "not_applicable", details
+
     def _evaluate_generation_evidence(self, capability_id: str) -> tuple[str, dict[str, Any]]:
-        if capability_id != "txt2img":
+        output_prefix = CAPABILITY_OUTPUT_PREFIXES.get(capability_id)
+        if output_prefix is None:
             return "not_evaluated", {}
 
         evidence = inspect_generation_evidence(
             self.bundle.path("comfyui_output"),
             self.bundle.path("drive_outputs"),
+            output_prefix=output_prefix,
         )
         return evidence.evidence_status, evidence.to_dict()
 
@@ -283,6 +344,8 @@ class CapabilityManager:
                 "Capability implementation_status is planned; runtime implementation is deferred."
             )
 
+        execution_input_status, execution_input_details = self._evaluate_execution_input(cap)
+
         evidence_status, evidence_details = self._evaluate_generation_evidence(cap["id"])
 
         evaluation = CapabilityEvaluation(
@@ -303,6 +366,8 @@ class CapabilityManager:
             supported_engines=list(cap.get("supported_engines", [])),
             evidence_status=evidence_status,
             evidence_details=evidence_details,
+            execution_input_status=execution_input_status,
+            execution_input_details=execution_input_details,
             runtime_checks=runtime_checks,
         )
         self._eval_cache[capability_id] = evaluation

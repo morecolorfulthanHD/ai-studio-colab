@@ -21,6 +21,33 @@ from core.runtime.runtime_manager import RuntimeManager
 from core.runtime.registry_loader import find_repo_root
 
 
+EDITING_CAPABILITY_IDS = ("img2img", "inpainting", "outpainting")
+
+
+def _capability_block(capability: dict | None, default_path: str) -> dict:
+    if not capability:
+        return {
+            "workflow_present": False,
+            "workflow_status": "missing",
+            "workflow_path": default_path,
+            "capability_status": "unknown",
+            "evidence_status": "not_evaluated",
+            "execution_input_status": "not_applicable",
+            "capability_reasons": [],
+            "runtime_checks": [],
+        }
+    return {
+        "workflow_present": True,
+        "workflow_status": "active",
+        "workflow_path": default_path,
+        "capability_status": capability.get("computed_status", "unknown"),
+        "evidence_status": capability.get("evidence_status", "not_evaluated"),
+        "execution_input_status": capability.get("execution_input_status", "not_applicable"),
+        "capability_reasons": capability.get("reasons", []),
+        "runtime_checks": capability.get("runtime_checks", []),
+    }
+
+
 def build_report(manager: RuntimeManager) -> dict:
     health = manager.health_report()
     status = manager.get_runtime_status()
@@ -35,6 +62,17 @@ def build_report(manager: RuntimeManager) -> dict:
         (c for c in capabilities.get("capabilities", []) if c.get("id") == "txt2img"),
         None,
     )
+    editing_capabilities = {
+        cap_id: _capability_block(
+            next((c for c in capabilities.get("capabilities", []) if c.get("id") == cap_id), None),
+            {
+                "img2img": "workflows/base/img2img/workflow.json",
+                "inpainting": "workflows/base/inpainting/workflow.json",
+                "outpainting": "workflows/base/outpainting/workflow.json",
+            }[cap_id],
+        )
+        for cap_id in EDITING_CAPABILITY_IDS
+    }
     node_details = checks.get("node_registry", {}).get("details", {})
     return {
         "runtime_status": status,
@@ -61,6 +99,7 @@ def build_report(manager: RuntimeManager) -> dict:
             "capability_reasons": txt2img_capability.get("reasons", []) if txt2img_capability else [],
             "runtime_checks": txt2img_capability.get("runtime_checks", []) if txt2img_capability else [],
         },
+        "image_editing": editing_capabilities,
         "nodes": {
             "core_ready": node_details.get("core_ready", False),
             "missing_required": node_details.get("missing_required", []),
@@ -141,6 +180,16 @@ def to_human(report: dict) -> str:
             lines.append(f"  Reason:     {reason}")
         for reason in txt2img.get("runtime_checks", []):
             lines.append(f"  Runtime:    {reason}")
+    editing = report.get("image_editing", {})
+    if editing:
+        lines.extend(["", "Image Editing Runtime Status", "-" * 40])
+        for cap_id in EDITING_CAPABILITY_IDS:
+            cap = editing.get(cap_id, {})
+            lines.append(
+                f"  {cap_id:11} readiness={cap.get('capability_status', 'unknown')} "
+                f"evidence={cap.get('evidence_status', 'not_evaluated')} "
+                f"input={cap.get('execution_input_status', 'not_applicable')}"
+            )
     nodes = report.get("nodes", {})
     if nodes:
         lines.extend(
@@ -184,12 +233,21 @@ def to_summary(report: dict) -> str:
     node_part = f" | CoreNodes: {'OK' if node_details.get('core_ready') else 'WARN'}"
     if optional_missing:
         node_part += f" | OptionalMissing: {optional_missing}"
+    editing_states = [
+        report.get("image_editing", {}).get(cap_id, {}).get("capability_status", "unknown")
+        for cap_id in EDITING_CAPABILITY_IDS
+    ]
+    editing_part = ""
+    if any(state != "unknown" for state in editing_states):
+        editing_part = (
+            f" | editing: img2img={editing_states[0]} inpaint={editing_states[1]} outpaint={editing_states[2]}"
+        )
     return (
         f"Health: {health['overall_status'].upper()} | "
         f"Env: {report['runtime_status']['environment']} | "
         f"ComfyUI: {comfyui_state} | Nodes: {node_state} | ModelCheck: {model_state}{node_part} | "
         f"Models: {reg['models']} | Nodes: {reg['nodes']} | "
-        f"Workflows: {reg['workflows']} | txt2img: {txt2img_state} | evidence: {evidence_state}{asset_part}{capability_part}"
+        f"Workflows: {reg['workflows']} | txt2img: {txt2img_state} | evidence: {evidence_state}{editing_part}{asset_part}{capability_part}"
     )
 
 

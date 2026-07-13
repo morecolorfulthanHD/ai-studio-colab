@@ -8,8 +8,10 @@
     "a1111_runtime": "/content/A1111",
     "comfyui_output": "/content/ComfyUI/output",
     "drive_outputs": "/content/drive/MyDrive/AI_Studio/outputs",
+    "drive_inputs": "/content/drive/MyDrive/AI_Studio/inputs",
     "drive_models": "/content/drive/MyDrive/AI_Studio/models/shared",
-    "drive_workflows": "/content/drive/MyDrive/AI_Studio/workflows"
+    "drive_workflows": "/content/drive/MyDrive/AI_Studio/workflows",
+    "runtime_workflows": "/content/ai-studio-runtime/workflows"
   },
   "repo_relative": {
     "workflows": "workflows",

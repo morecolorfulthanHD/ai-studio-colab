@@ -11,7 +11,10 @@
       "engine": "shared",
       "intended_path": "assets/checkpoints/v1-5-pruned-emaonly.safetensors",
       "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/checkpoints/sd15.safetensors",
-      "required_for": ["base_txt2img", "base_img2img"],
+      "required_for": [
+        "base_txt2img",
+        "base_img2img"
+      ],
       "status": "planned",
       "source_type": "huggingface",
       "source_url": "https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5",
@@ -43,7 +46,10 @@
       "engine": "comfyui",
       "intended_path": "assets/controlnets/control_v11f1p_sd15_depth.pth",
       "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/controlnet/control_v11f1p_sd15_depth_fp16.safetensors",
-      "required_for": ["depth_map_extraction", "environment_generation"],
+      "required_for": [
+        "depth_map_extraction",
+        "environment_generation"
+      ],
       "status": "planned",
       "source_type": "huggingface",
       "source_url": "https://huggingface.co/lllyasviel/control_v11f1p_sd15_depth",
@@ -59,7 +65,10 @@
       "engine": "comfyui",
       "intended_path": "assets/controlnets/control_v11p_sd15_openpose.pth",
       "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/controlnet/control_v11p_sd15_openpose_fp16.safetensors",
-      "required_for": ["openpose_portrait", "multi_angle_generation"],
+      "required_for": [
+        "openpose_portrait",
+        "multi_angle_generation"
+      ],
       "status": "planned",
       "source_type": "huggingface",
       "source_url": "https://huggingface.co/lllyasviel/control_v11p_sd15_openpose",
@@ -79,7 +88,7 @@
       "status": "planned",
       "source_type": "external",
       "source_url": "",
-      "license_notes": "Placeholder — add license when asset is registered",
+      "license_notes": "Placeholder \u2014 add license when asset is registered",
       "notes": "Example LoRA slot for future fine-tuned adapters."
     },
     {
@@ -91,7 +100,9 @@
       "engine": "shared",
       "intended_path": "assets/vaes/vae-ft-mse-840000-ema-pruned.safetensors",
       "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/vae/vae-ft-mse-840000-ema-pruned.safetensors",
-      "required_for": ["base_txt2img"],
+      "required_for": [
+        "base_txt2img"
+      ],
       "status": "planned",
       "source_type": "huggingface",
       "source_url": "https://huggingface.co/stabilityai/sd-vae-ft-mse-original",
@@ -139,7 +150,10 @@
       "engine": "comfyui",
       "intended_path": "assets/ipadapter/ip-adapter_sd15.safetensors",
       "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/ipadapter/ip-adapter_sd15.safetensors",
-      "required_for": ["reference_lock", "multi_angle_generation"],
+      "required_for": [
+        "reference_lock",
+        "multi_angle_generation"
+      ],
       "status": "planned",
       "source_type": "huggingface",
       "source_url": "https://huggingface.co/h94/IP-Adapter",
@@ -155,7 +169,9 @@
       "engine": "comfyui",
       "intended_path": "assets/clip/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
       "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/clip/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
-      "required_for": ["reference_lock"],
+      "required_for": [
+        "reference_lock"
+      ],
       "status": "planned",
       "source_type": "huggingface",
       "source_url": "https://huggingface.co/h94/IP-Adapter",
@@ -171,7 +187,9 @@
       "engine": "comfyui",
       "intended_path": "assets/insightface/models/buffalo_l/w600k_r50.onnx",
       "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/insightface/models/buffalo_l/w600k_r50.onnx",
-      "required_for": ["reactor_faceswap"],
+      "required_for": [
+        "reactor_faceswap"
+      ],
       "status": "planned",
       "source_type": "external",
       "source_url": "",
@@ -187,7 +205,9 @@
       "engine": "comfyui",
       "intended_path": "assets/checkpoints/svd_xt.safetensors",
       "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/svd/svd_xt.safetensors",
-      "required_for": ["svd_image_to_video"],
+      "required_for": [
+        "svd_image_to_video"
+      ],
       "status": "planned",
       "source_type": "huggingface",
       "source_url": "https://huggingface.co/stabilityai/stable-video-diffusion-img2vid-xt",
@@ -203,7 +223,9 @@
       "engine": "comfyui",
       "intended_path": "assets/checkpoints/mm_sd_v15_v2.ckpt",
       "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/animatediff/mm_sd_v15_v2.ckpt",
-      "required_for": ["animatediff_sequence"],
+      "required_for": [
+        "animatediff_sequence"
+      ],
       "status": "planned",
       "source_type": "huggingface",
       "source_url": "https://huggingface.co/guoyww/animatediff",
@@ -219,7 +241,9 @@
       "engine": "comfyui",
       "intended_path": "workflows/base/txt2img/workflow.json",
       "runtime_path": "/content/drive/MyDrive/AI_Studio/workflows/base_txt2img/workflow.json",
-      "required_for": ["base_txt2img"],
+      "required_for": [
+        "base_txt2img"
+      ],
       "status": "active",
       "source_type": "repository",
       "source_url": "",
@@ -235,7 +259,9 @@
       "engine": "comfyui",
       "intended_path": "workflows/controlnet/openpose/workflow.json",
       "runtime_path": "/content/drive/MyDrive/AI_Studio/workflows/openpose_portrait/workflow.json",
-      "required_for": ["openpose_portrait"],
+      "required_for": [
+        "openpose_portrait"
+      ],
       "status": "planned",
       "source_type": "repository",
       "source_url": "",
@@ -267,7 +293,9 @@
       "engine": "shared",
       "intended_path": "use_cases/_template/references/example_portrait.png",
       "runtime_path": "/content/drive/MyDrive/AI_Studio/references/example_portrait.png",
-      "required_for": ["reference_lock"],
+      "required_for": [
+        "reference_lock"
+      ],
       "status": "planned",
       "source_type": "external",
       "source_url": "",
@@ -299,7 +327,9 @@
       "engine": "shared",
       "intended_path": "use_cases/_template/environments/environment_anchor.png",
       "runtime_path": "/content/drive/MyDrive/AI_Studio/anchors/environment/example_anchor.png",
-      "required_for": ["environment_generation"],
+      "required_for": [
+        "environment_generation"
+      ],
       "status": "planned",
       "source_type": "external",
       "source_url": "",
@@ -315,7 +345,9 @@
       "engine": "comfyui",
       "intended_path": "output/extraction/depth_map/example_depth.png",
       "runtime_path": "/content/drive/MyDrive/AI_Studio/maps/depth/example_depth.png",
-      "required_for": ["depth_map_extraction"],
+      "required_for": [
+        "depth_map_extraction"
+      ],
       "status": "planned",
       "source_type": "generated",
       "source_url": "",
@@ -331,7 +363,9 @@
       "engine": "comfyui",
       "intended_path": "output/extraction/normal_map/example_normal.png",
       "runtime_path": "/content/drive/MyDrive/AI_Studio/maps/normal/example_normal.png",
-      "required_for": ["normal_map_extraction"],
+      "required_for": [
+        "normal_map_extraction"
+      ],
       "status": "planned",
       "source_type": "generated",
       "source_url": "",
@@ -347,12 +381,68 @@
       "engine": "comfyui",
       "intended_path": "output/extraction/segmentation_map/example_seg.png",
       "runtime_path": "/content/drive/MyDrive/AI_Studio/maps/segmentation/example_seg.png",
-      "required_for": ["segmentation_map_extraction"],
+      "required_for": [
+        "segmentation_map_extraction"
+      ],
       "status": "planned",
       "source_type": "generated",
       "source_url": "",
       "license_notes": "Derived from user content",
       "notes": "Semantic segmentation map output."
+    },
+    {
+      "id": "workflow_base_img2img",
+      "name": "Base img2img Workflow",
+      "asset_type": "workflow",
+      "category": "base",
+      "scope": "workflow",
+      "engine": "comfyui",
+      "intended_path": "workflows/base/img2img/workflow.json",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/workflows/base_img2img/workflow.json",
+      "required_for": [
+        "base_img2img"
+      ],
+      "status": "active",
+      "source_type": "repository",
+      "source_url": "",
+      "license_notes": "Project license",
+      "notes": "Git-managed img2img workflow JSON implemented in repo."
+    },
+    {
+      "id": "workflow_base_inpainting",
+      "name": "Base inpainting Workflow",
+      "asset_type": "workflow",
+      "category": "base",
+      "scope": "workflow",
+      "engine": "comfyui",
+      "intended_path": "workflows/base/inpainting/workflow.json",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/workflows/base_inpainting/workflow.json",
+      "required_for": [
+        "base_inpainting"
+      ],
+      "status": "active",
+      "source_type": "repository",
+      "source_url": "",
+      "license_notes": "Project license",
+      "notes": "Git-managed inpainting workflow JSON implemented in repo."
+    },
+    {
+      "id": "workflow_base_outpainting",
+      "name": "Base outpainting Workflow",
+      "asset_type": "workflow",
+      "category": "base",
+      "scope": "workflow",
+      "engine": "comfyui",
+      "intended_path": "workflows/base/outpainting/workflow.json",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/workflows/base_outpainting/workflow.json",
+      "required_for": [
+        "base_outpainting"
+      ],
+      "status": "active",
+      "source_type": "repository",
+      "source_url": "",
+      "license_notes": "Project license",
+      "notes": "Git-managed outpainting workflow JSON implemented in repo."
     }
   ]
 }
