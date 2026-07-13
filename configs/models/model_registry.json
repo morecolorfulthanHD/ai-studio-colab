@@ -11,6 +11,15 @@
       "notes": "Primary SD 1.5 base checkpoint for Phase 1 txt2img workflow."
     },
     {
+      "name": "sd15_inpainting_checkpoint",
+      "category": "checkpoint",
+      "intended_path": "assets/checkpoints/512-inpainting-ema.safetensors",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/checkpoints/512-inpainting-ema.safetensors",
+      "required_for": ["base_inpainting", "inpainting"],
+      "status": "planned",
+      "notes": "Dedicated SD 1.5 inpainting checkpoint required for true inpainting object replacement."
+    },
+    {
       "name": "sdxl_base",
       "category": "checkpoint",
       "intended_path": "assets/checkpoints/sd_xl_base_1.0.safetensors",

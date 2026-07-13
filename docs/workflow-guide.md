@@ -200,7 +200,7 @@ python core/scripts/validate_capabilities.py --capability img2img
 python core/scripts/verify_generation.py --workflow img2img --summary
 ```
 
-Preparation stages selected files into ComfyUI `input/` and writes a prepared workflow JSON. Base inpainting and outpainting use `VAEEncodeForInpaint` with KSampler denoise **1.0** (true-inpainting path). Prefer iterative 128–256 px outpainting extensions.
+Preparation stages selected files into ComfyUI `input/` and writes a prepared workflow JSON. Base inpainting and outpainting use `VAEEncodeForInpaint` with KSampler denoise **1.0** (true-inpainting path). Inpainting requires `512-inpainting-ema.safetensors`; `sd15.safetensors` is not the dedicated inpainting model. Prefer iterative 128–256 px outpainting extensions.
 
 See also [img2img](dogfooding/img2img-checklist.md), [inpainting](dogfooding/inpainting-checklist.md), and [outpainting](dogfooding/outpainting-checklist.md) checklists.
 
@@ -226,5 +226,9 @@ Readiness and evidence are separate: a fresh runtime can be `READY` before the f
 **Required checkpoint:**
 
 `/content/drive/MyDrive/AI_Studio/models/shared/checkpoints/sd15.safetensors`
+
+**Required inpainting checkpoint:**
+
+`/content/drive/MyDrive/AI_Studio/models/shared/checkpoints/512-inpainting-ema.safetensors`
 
 Launch and select workflows via [`colab/notebooks/AI_Studio_Control_Panel_Colab.ipynb`](../colab/notebooks/AI_Studio_Control_Panel_Colab.ipynb) once workflow menus are wired in the control panel.

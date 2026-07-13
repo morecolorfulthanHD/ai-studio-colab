@@ -29,6 +29,7 @@ def collect_files() -> list[Path]:
         "prepare_workflow.py",
         "list_inputs.py",
         "runtime_report.py",
+        "verify_models.py",
         "verify_generation.py",
         "sync_outputs.py",
         "check_nodes.py",

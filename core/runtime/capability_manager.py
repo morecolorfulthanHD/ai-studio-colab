@@ -22,7 +22,7 @@ EDITING_CAPABILITIES = frozenset({"img2img", "inpainting", "outpainting"})
 CAPABILITY_WORKFLOW_ASSETS: dict[str, tuple[str, ...]] = {
     "txt2img": ("sd15_checkpoint", "workflow_base_txt2img"),
     "img2img": ("sd15_checkpoint", "workflow_base_img2img"),
-    "inpainting": ("sd15_checkpoint", "workflow_base_inpainting"),
+    "inpainting": ("sd15_inpainting_checkpoint", "workflow_base_inpainting"),
     "outpainting": ("sd15_checkpoint", "workflow_base_outpainting"),
 }
 
@@ -179,7 +179,10 @@ class CapabilityManager:
         asset_ids = CAPABILITY_WORKFLOW_ASSETS.get(capability_id, ())
         for asset_id in asset_ids:
             if not self._asset_ready(asset_id):
-                issues.append(f"Required asset not ready: {asset_id}")
+                if capability_id == "inpainting" and asset_id == "sd15_inpainting_checkpoint":
+                    issues.append("Dedicated SD1.5 inpainting checkpoint not found.")
+                else:
+                    issues.append(f"Required asset not ready: {asset_id}")
 
         return issues
 

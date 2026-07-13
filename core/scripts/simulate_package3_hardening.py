@@ -229,6 +229,8 @@ def _create_dogfood_bundle(tmp: Path) -> RegistryBundle:
     sd15 = tmp / "models" / "sd15.safetensors"
     sd15.parent.mkdir(parents=True, exist_ok=True)
     sd15.write_bytes(b"fake-checkpoint")
+    sd15_inpaint = tmp / "models" / "512-inpainting-ema.safetensors"
+    sd15_inpaint.write_bytes(b"fake-inpainting-checkpoint")
 
     paths_file = repo / "configs/paths/colab_paths.json"
     paths_data = json.loads(paths_file.read_text(encoding="utf-8"))
@@ -242,6 +244,8 @@ def _create_dogfood_bundle(tmp: Path) -> RegistryBundle:
     for asset in assets_data.get("assets", []):
         if asset.get("id") == "sd15_checkpoint":
             asset["runtime_path"] = str(sd15)
+        if asset.get("id") == "sd15_inpainting_checkpoint":
+            asset["runtime_path"] = str(sd15_inpaint)
     assets_file.write_text(json.dumps(assets_data, indent=2), encoding="utf-8")
 
     return RegistryLoader(repo).load_all()

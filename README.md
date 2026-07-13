@@ -151,6 +151,12 @@ python core/scripts/verify_generation.py --workflow img2img --summary
 
 `--dry-run` is fully read-only (no directories created, no copies). Staged-file reuse requires identical SHA-256 content, not just matching filename and size.
 
+Inpainting requires a dedicated checkpoint at:
+
+`/content/drive/MyDrive/AI_Studio/models/shared/checkpoints/512-inpainting-ema.safetensors`
+
+`sd15.safetensors` is not sufficient for reliable base inpainting object replacement. No automatic download occurs; place the model manually and review licensing/source before use.
+
 **Dogfooding sequence:** Drive inputs → `list_inputs.py` → `prepare_workflow.py` (stages into `/content/ComfyUI/input`) → import prepared workflow → generate → `sync_outputs.py` → `verify_generation.py`.
 
 **Implementation readiness** (ComfyUI + SD1.5 + valid workflow) is computed separately from **execution input readiness** (whether the user has selected source/mask files). A capability can be `READY` before any Drive input is placed.

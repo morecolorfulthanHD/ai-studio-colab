@@ -10,9 +10,9 @@ Regenerate a masked region of an image while preserving unmasked areas.
 
 | Model | Location |
 |-------|----------|
-| SD 1.5 checkpoint | Drive: `AI_Studio/models/shared/checkpoints/sd15.safetensors` |
+| SD 1.5 inpainting checkpoint | Drive: `AI_Studio/models/shared/checkpoints/512-inpainting-ema.safetensors` |
 
-Uses `VAEEncodeForInpaint` with the standard SD1.5 checkpoint. This is the **true-inpainting** base path, so KSampler denoise is **1.0** (full denoise on the masked latent). Lower-strength masked editing without full latent replacement will be a separate future workflow.
+Uses `VAEEncodeForInpaint` with the dedicated SD1.5 inpainting checkpoint (`512-inpainting-ema.safetensors`). This is the **true-inpainting** base path, so KSampler denoise is **1.0** (full denoise on the masked latent). Lower-strength masked editing without full latent replacement will be a separate future workflow.
 
 ## Required Nodes
 
@@ -26,7 +26,7 @@ None beyond stock ComfyUI.
 
 | Parameter | Value |
 |-----------|-------|
-| Checkpoint | `sd15.safetensors` |
+| Checkpoint | `512-inpainting-ema.safetensors` |
 | Denoise | **1.0** (true-inpainting path via `VAEEncodeForInpaint`) |
 | Steps | 24 |
 | CFG | 7.0 |
@@ -45,5 +45,5 @@ python core/scripts/prepare_workflow.py --workflow inpainting --input /path/to/s
 
 ## Known Limitations
 
-- SD1.5 base checkpoint inpainting may show seams at mask boundaries; smaller masks and moderate denoise help.
-- Dedicated inpainting checkpoints are not required in this package but may improve blending in future workflows.
+- Dedicated inpainting checkpoint must be present in Drive; no automatic download is performed.
+- SD1.5 inpainting can still show seams at mask boundaries; smaller masks help.

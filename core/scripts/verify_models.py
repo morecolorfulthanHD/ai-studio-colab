@@ -113,6 +113,11 @@ def main() -> int:
         action="store_true",
         help="Exit non-zero when SD1.5 checkpoint (sd15.safetensors) is missing.",
     )
+    parser.add_argument(
+        "--require-inpainting",
+        action="store_true",
+        help="Exit non-zero when dedicated SD1.5 inpainting checkpoint is missing.",
+    )
     args = parser.parse_args()
 
     print("AI Studio Colab — Model Verification")
@@ -197,6 +202,46 @@ def main() -> int:
             )
             return 1
         print(f"\nRESULT: OK — SD1.5 checkpoint present at {sd15_path}")
+        return 0
+
+    standard_entry = next((e for e in registry if e["name"] == "sd15_checkpoint"), None)
+    inpaint_entry = next((e for e in registry if e["name"] == "sd15_inpainting_checkpoint"), None)
+    if standard_entry:
+        standard_paths = resolve_check_paths(standard_entry, repo_root, drive_models)
+        standard_status, _ = check_entry(standard_paths)
+        standard_marker = "PRESENT" if standard_status == "present" else "MISSING"
+        expected = Path("/content/drive/MyDrive/AI_Studio/models/shared/checkpoints/sd15.safetensors")
+        print(f"[{standard_marker}] sd15_checkpoint")
+        print(f"  Expected: {expected}")
+    if inpaint_entry:
+        inpaint_paths = resolve_check_paths(inpaint_entry, repo_root, drive_models)
+        inpaint_status, _ = check_entry(inpaint_paths)
+        inpaint_marker = "PRESENT" if inpaint_status == "present" else "MISSING"
+        expected = Path(
+            "/content/drive/MyDrive/AI_Studio/models/shared/checkpoints/512-inpainting-ema.safetensors"
+        )
+        print(f"[{inpaint_marker}] sd15_inpainting_checkpoint")
+        print(f"  Expected: {expected}")
+
+    if args.require_inpainting:
+        if not inpaint_entry:
+            print("\nRESULT: FAIL — sd15_inpainting_checkpoint not found in model registry.", file=sys.stderr)
+            return 1
+        inpaint_paths = resolve_check_paths(inpaint_entry, repo_root, drive_models)
+        inpaint_status, _ = check_entry(inpaint_paths)
+        if inpaint_status != "present":
+            expected = Path(
+                "/content/drive/MyDrive/AI_Studio/models/shared/checkpoints/512-inpainting-ema.safetensors"
+            )
+            print("\nRESULT: FAIL — dedicated SD1.5 inpainting checkpoint missing.", file=sys.stderr)
+            print(f"  Expected path: {expected}", file=sys.stderr)
+            print(
+                "  Place 512-inpainting-ema.safetensors at this path. "
+                "sd15.safetensors is not the inpainting checkpoint.",
+                file=sys.stderr,
+            )
+            return 1
+        print("\nRESULT: OK — dedicated SD1.5 inpainting checkpoint present.")
         return 0
 
     print("\nRESULT: OK — model verification complete (informational).")

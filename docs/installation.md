@@ -211,6 +211,14 @@ Expected path (manual placement — no auto-download):
 
 ```text
 /content/drive/MyDrive/AI_Studio/models/shared/checkpoints/sd15.safetensors
+
+### SD1.5 Inpainting Checkpoint (Required for inpainting)
+
+```text
+/content/drive/MyDrive/AI_Studio/models/shared/checkpoints/512-inpainting-ema.safetensors
+```
+
+No automatic download occurs. You must place this checkpoint manually and review model licensing/source before use.
 ```
 
 Verify:
@@ -266,12 +274,12 @@ python core/scripts/prepare_workflow.py --workflow img2img --input /path/to/imag
 | Capability | Canonical workflow | Preparation |
 |------------|-------------------|-------------|
 | img2img | `workflows/base/img2img/workflow.json` | `prepare_workflow.py --workflow img2img --input <path>` |
-| inpainting | `workflows/base/inpainting/workflow.json` | `--workflow inpainting --input <path> --mask <path>` (denoise 1.0) |
+| inpainting | `workflows/base/inpainting/workflow.json` | `--workflow inpainting --input <path> --mask <path>` (checkpoint `512-inpainting-ema.safetensors`, denoise 1.0) |
 | outpainting | `workflows/base/outpainting/workflow.json` | `--workflow outpainting --input <path> --left N` (denoise 1.0) |
 
 Preparation stages selected files into ComfyUI `input/` with content-based reuse (SHA-256) and collision-safe naming when needed. Load the prepared JSON in ComfyUI.
 
-Base inpainting and outpainting both use `VAEEncodeForInpaint` with KSampler denoise **1.0**. Prefer iterative 128–256 px canvas extensions for outpainting.
+Base inpainting and outpainting both use `VAEEncodeForInpaint` with KSampler denoise **1.0**. Inpainting additionally requires the dedicated inpainting checkpoint (`512-inpainting-ema.safetensors`). Prefer iterative 128–256 px canvas extensions for outpainting.
 
 Control panel shortcut: `control_panel()` → **7. Image Editing**.
 

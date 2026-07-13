@@ -5,10 +5,13 @@ from __future__ import annotations
 
 import json
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
+import zlib
 from pathlib import Path
+from unittest.mock import patch
 import importlib.util
 
 _activate_path = Path(__file__).resolve().parent / "cli_activate.py"
@@ -19,15 +22,20 @@ _spec.loader.exec_module(_activate)
 _activate.activate(__file__)
 
 from core.runtime.capability_manager import CapabilityManager
+from core.runtime import input_utils
+from core.runtime import workflow_preparation
 from core.runtime.registry_loader import RegistryBundle, RegistryLoader, find_repo_root
 from core.runtime.workflow_preparation import prepare_workflow
 from core.runtime.workflow_validation import (
+    INPAINTING_CANONICAL_CHECKPOINT,
     INPAINTING_CANONICAL_DENOISE,
+    INPAINTING_CANONICAL_MASK_CHANNEL,
     OUTPAINTING_CANONICAL_DENOISE,
     validate_base_img2img_workflow,
     validate_base_inpainting_workflow,
     validate_base_outpainting_workflow,
     validate_base_txt2img_workflow,
+    validate_workflow_from_data,
 )
 
 _REPO_ROOT = find_repo_root(script_file=Path(__file__))
@@ -47,9 +55,39 @@ def _assert_true(label: str, value: bool) -> None:
         raise SimulationFailure(f"{label}: expected True, got False")
 
 
-def _write_png(path: Path, size: int = 128, fill: int = 0) -> None:
+def _png_chunk(chunk_type: bytes, data: bytes) -> bytes:
+    crc = zlib.crc32(chunk_type + data) & 0xFFFFFFFF
+    return struct.pack(">I", len(data)) + chunk_type + data + struct.pack(">I", crc)
+
+
+def _minimal_valid_png_bytes(width: int = 8, height: int = 8, rgb: tuple[int, int, int] = (0, 0, 0)) -> bytes:
+    signature = b"\x89PNG\r\n\x1a\n"
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    row = b"\x00" + bytes(rgb) * width
+    compressed = zlib.compress(row * height, 9)
+    return signature + _png_chunk(b"IHDR", ihdr) + _png_chunk(b"IDAT", compressed) + _png_chunk(b"IEND", b"")
+
+
+def _write_valid_png(
+    path: Path,
+    *,
+    width: int = 8,
+    height: int = 8,
+    rgb: tuple[int, int, int] = (0, 0, 0),
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(b"\x89PNG\r\n\x1a\n" + (bytes([fill]) * max(size - 8, 0)))
+    try:
+        from PIL import Image
+
+        Image.new("RGB", (width, height), rgb).save(path, format="PNG")
+    except ImportError:
+        path.write_bytes(_minimal_valid_png_bytes(width, height, rgb))
+
+
+def _write_png(path: Path, size: int = 128, fill: int = 0) -> None:
+    side = max(1, int(size**0.5))
+    rgb = (fill, fill, fill)
+    _write_valid_png(path, width=side, height=side, rgb=rgb)
 
 
 def _write_bytes(path: Path, payload: bytes) -> None:
@@ -81,7 +119,39 @@ def _loadimagemask_filename(data: dict) -> str:
     return ""
 
 
-def _create_dogfood_bundle(tmp: Path, *, include_sd15: bool = True) -> RegistryBundle:
+def _loadimagemask_channel(data: dict) -> str:
+    for node in data.get("nodes", []):
+        if node.get("type") == "LoadImageMask":
+            widgets = node.get("widgets_values", [])
+            if len(widgets) > 1:
+                return widgets[1]
+    return ""
+
+
+def _checkpoint_filename(data: dict) -> str:
+    for node in data.get("nodes", []):
+        if node.get("type") == "CheckpointLoaderSimple":
+            widgets = node.get("widgets_values", [])
+            if widgets:
+                return widgets[0]
+    return ""
+
+
+def _ksampler_denoise(data: dict) -> float | None:
+    for node in data.get("nodes", []):
+        if node.get("type") == "KSampler":
+            widgets = node.get("widgets_values", [])
+            if len(widgets) > 6:
+                return widgets[6]
+    return None
+
+
+def _create_dogfood_bundle(
+    tmp: Path,
+    *,
+    include_sd15: bool = True,
+    include_inpainting_checkpoint: bool = True,
+) -> RegistryBundle:
     repo = tmp / "repo"
     shutil.copytree(_REPO_ROOT / "configs", repo / "configs")
     shutil.copytree(_REPO_ROOT / "workflows", repo / "workflows")
@@ -120,6 +190,13 @@ def _create_dogfood_bundle(tmp: Path, *, include_sd15: bool = True) -> RegistryB
             asset["runtime_path"] = str(sd15)
         elif asset.get("id") == "sd15_checkpoint" and not include_sd15:
             asset["runtime_path"] = str(tmp / "models" / "missing_sd15.safetensors")
+        if asset.get("id") == "sd15_inpainting_checkpoint" and include_inpainting_checkpoint:
+            inpaint = tmp / "models" / "512-inpainting-ema.safetensors"
+            inpaint.parent.mkdir(parents=True, exist_ok=True)
+            inpaint.write_bytes(b"fake-inpainting-checkpoint")
+            asset["runtime_path"] = str(inpaint)
+        elif asset.get("id") == "sd15_inpainting_checkpoint" and not include_inpainting_checkpoint:
+            asset["runtime_path"] = str(tmp / "models" / "missing-512-inpainting-ema.safetensors")
     assets_file.write_text(json.dumps(assets_data, indent=2), encoding="utf-8")
 
     return RegistryLoader(repo).load_all()
@@ -150,6 +227,36 @@ def run_workflow_validation_simulations() -> list[tuple[str, str]]:
         validation = validate_base_inpainting_workflow(valid_inpaint)
         _assert_equal("valid inpainting workflow", validation.valid, True)
         results.append(("valid inpainting workflow", "PASS"))
+
+        inpaint_standard_ckpt = root / "inpaint_standard_ckpt.json"
+        data = _load_workflow("workflows/base/inpainting/workflow.json")
+        for node in data["nodes"]:
+            if node.get("type") == "CheckpointLoaderSimple":
+                node["widgets_values"][0] = "sd15.safetensors"
+        inpaint_standard_ckpt.write_text(json.dumps(data), encoding="utf-8")
+        validation = validate_base_inpainting_workflow(inpaint_standard_ckpt)
+        _assert_equal("inpainting with sd15 checkpoint", validation.valid, False)
+        results.append(("inpainting workflow uses sd15.safetensors", "PASS"))
+
+        inpaint_dedicated_ckpt = root / "inpaint_dedicated_ckpt.json"
+        data = _load_workflow("workflows/base/inpainting/workflow.json")
+        for node in data["nodes"]:
+            if node.get("type") == "CheckpointLoaderSimple":
+                node["widgets_values"][0] = INPAINTING_CANONICAL_CHECKPOINT
+        inpaint_dedicated_ckpt.write_text(json.dumps(data), encoding="utf-8")
+        validation = validate_base_inpainting_workflow(inpaint_dedicated_ckpt)
+        _assert_equal("inpainting with dedicated checkpoint", validation.valid, True)
+        results.append(("inpainting workflow uses 512-inpainting-ema.safetensors", "PASS"))
+
+        inpaint_alpha_channel = root / "inpaint_alpha_channel.json"
+        data = _load_workflow("workflows/base/inpainting/workflow.json")
+        for node in data["nodes"]:
+            if node.get("type") == "LoadImageMask":
+                node["widgets_values"][1] = "alpha"
+        inpaint_alpha_channel.write_text(json.dumps(data), encoding="utf-8")
+        validation = validate_base_inpainting_workflow(inpaint_alpha_channel)
+        _assert_equal("inpainting with alpha mask channel", validation.valid, False)
+        results.append(("inpainting workflow with alpha mask channel rejected", "PASS"))
 
         missing_mask = root / "inpaint_missing_mask.json"
         data = _load_workflow("workflows/base/inpainting/workflow.json")
@@ -342,6 +449,36 @@ def run_capability_readiness_simulations() -> list[tuple[str, str]]:
             evaluation = manager.evaluate_capability(cap_id)
             _assert_equal(f"{cap_id} implemented with runtime deps", evaluation.computed_status, "ready")
             results.append((f"{cap_id} implemented with runtime dependencies present", "PASS"))
+        inpaint_ready = manager.evaluate_capability("inpainting")
+        _assert_equal("inpainting ready with dedicated checkpoint", inpaint_ready.computed_status, "ready")
+        results.append(("dedicated inpainting checkpoint present", "PASS"))
+
+        txt2img = manager.evaluate_capability("txt2img")
+        _assert_equal("txt2img ready with standard sd15", txt2img.computed_status, "ready")
+        results.append(("txt2img remains READY with standard SD1.5", "PASS"))
+
+        img2img = manager.evaluate_capability("img2img")
+        _assert_equal("img2img ready with standard sd15", img2img.computed_status, "ready")
+        results.append(("img2img remains READY with standard SD1.5", "PASS"))
+
+        outpainting = manager.evaluate_capability("outpainting")
+        _assert_equal("outpainting ready unchanged", outpainting.computed_status, "ready")
+        results.append(("outpainting behavior does not regress", "PASS"))
+
+    with tempfile.TemporaryDirectory() as tmp_name:
+        bundle = _create_dogfood_bundle(
+            Path(tmp_name),
+            include_sd15=True,
+            include_inpainting_checkpoint=False,
+        )
+        manager = CapabilityManager(bundle=bundle)
+        inpaint = manager.evaluate_capability("inpainting")
+        _assert_equal("inpainting partial without dedicated checkpoint", inpaint.computed_status, "partial")
+        _assert_true(
+            "inpainting missing dedicated reason",
+            any("Dedicated SD1.5 inpainting checkpoint not found" in reason for reason in inpaint.reasons),
+        )
+        results.append(("dedicated checkpoint missing but standard SD1.5 present", "PASS"))
 
     with tempfile.TemporaryDirectory() as tmp_name:
         bundle = _create_dogfood_bundle(Path(tmp_name), include_sd15=False)
@@ -482,6 +619,11 @@ def run_preparation_simulations() -> list[tuple[str, str]]:
             _loadimagemask_filename(prepared_inpaint),
             inpaint_result.staged_mask_filename,
         )
+        _assert_equal(
+            "inpaint prepared mask channel",
+            _loadimagemask_channel(prepared_inpaint),
+            INPAINTING_CANONICAL_MASK_CHANNEL,
+        )
         results.append(("source and mask both staged", "PASS"))
 
         collision_source = tmp / "collision.png"
@@ -531,8 +673,8 @@ def run_preparation_simulations() -> list[tuple[str, str]]:
         )
         results.append(("existing staged file with same name and same size but different content", "PASS"))
 
-        mask_payload = b"\x89PNG\r\n\x1a\n" + (b"\x02" * 80)
-        mask_other_payload = b"\x89PNG\r\n\x1a\n" + (b"\x03" * 80)
+        mask_payload = _minimal_valid_png_bytes(8, 8, (2, 2, 2))
+        mask_other_payload = _minimal_valid_png_bytes(8, 8, (3, 3, 3))
         mask_source = tmp / "mask_reuse.png"
         _write_bytes(mask_source, mask_payload)
         _write_bytes(comfy_input_dir / "mask_reuse.png", mask_other_payload)
@@ -602,8 +744,8 @@ def run_preparation_simulations() -> list[tuple[str, str]]:
         shared_name = "shared.png"
         source_file = source_dir / shared_name
         mask_file = mask_dir / shared_name
-        _write_bytes(source_file, b"\x89PNG\r\n\x1a\n" + (b"\x11" * 80))
-        _write_bytes(mask_file, b"\x89PNG\r\n\x1a\n" + (b"\x22" * 80))
+        _write_valid_png(source_file, width=16, height=16, rgb=(0x11, 0x11, 0x11))
+        _write_valid_png(mask_file, width=16, height=16, rgb=(0x22, 0x22, 0x22))
         absent_input_dir = batch_root / "absent_comfy" / "input"
         absent_runtime_dir = batch_root / "absent_runtime"
         _assert_true("batch absent input dir missing", not absent_input_dir.exists())
@@ -652,7 +794,7 @@ def run_preparation_simulations() -> list[tuple[str, str]]:
         identical_source = identical_root / "same.png"
         identical_mask = identical_root / "masks" / "same.png"
         identical_mask.parent.mkdir()
-        identical_payload = b"\x89PNG\r\n\x1a\n" + (b"\x33" * 72)
+        identical_payload = _minimal_valid_png_bytes(8, 8, (0x33, 0x33, 0x33))
         _write_bytes(identical_source, identical_payload)
         _write_bytes(identical_mask, identical_payload)
         identical_input_dir = identical_root / "comfy" / "input"
@@ -678,6 +820,144 @@ def run_preparation_simulations() -> list[tuple[str, str]]:
             _loadimagemask_filename(prepared_identical),
         )
         results.append(("same source/mask basename with identical content", "PASS"))
+
+    return results
+
+
+def run_mask_channel_regression_simulations() -> list[tuple[str, str]]:
+    results: list[tuple[str, str]] = []
+
+    canonical = _load_workflow("workflows/base/inpainting/workflow.json")
+    for node in canonical.get("nodes", []):
+        if node.get("type") == "LoadImageMask":
+            _assert_equal(
+                "canonical inpainting mask channel",
+                node.get("widgets_values", [None, None])[1],
+                INPAINTING_CANONICAL_MASK_CHANNEL,
+            )
+    validation = validate_base_inpainting_workflow(_REPO_ROOT / "workflows/base/inpainting/workflow.json")
+    _assert_equal("canonical inpainting workflow valid", validation.valid, True)
+    results.append(("canonical inpainting workflow uses red mask channel", "PASS"))
+
+    with tempfile.TemporaryDirectory() as tmp_name:
+        tmp = Path(tmp_name)
+        bundle = _create_dogfood_bundle(tmp)
+        repo = tmp / "repo"
+        runtime_dir = bundle.path("runtime_workflows")
+        comfy_input_dir = bundle.path("comfyui_runtime") / "input"
+        source = tmp / "source.png"
+        mask = tmp / "mask.png"
+        _write_valid_png(source, width=16, height=16, rgb=(10, 20, 30))
+        _write_valid_png(mask, width=16, height=16, rgb=(255, 255, 255))
+
+        prepared = prepare_workflow(
+            repo,
+            runtime_dir,
+            comfyui_input_dir=comfy_input_dir,
+            workflow="inpainting",
+            input_path=source,
+            mask_path=mask,
+        )
+        _assert_true("matching-dimension inpainting preparation ok", prepared.ok)
+        prepared_data = json.loads(Path(prepared.prepared_path).read_text(encoding="utf-8"))
+        mask_widgets = next(
+            node.get("widgets_values", [])
+            for node in prepared_data.get("nodes", [])
+            if node.get("type") == "LoadImageMask"
+        )
+        _assert_equal(
+            "prepared inpainting mask widgets",
+            mask_widgets,
+            [prepared.staged_mask_filename, INPAINTING_CANONICAL_MASK_CHANNEL, "white"],
+        )
+        _assert_equal(
+            "prepared inpainting checkpoint",
+            _checkpoint_filename(prepared_data),
+            INPAINTING_CANONICAL_CHECKPOINT,
+        )
+        _assert_equal(
+            "prepared inpainting denoise",
+            _ksampler_denoise(prepared_data),
+            INPAINTING_CANONICAL_DENOISE,
+        )
+        _assert_true(
+            "prepared inpainting avoids alpha channel",
+            "alpha" not in _loadimagemask_channel(prepared_data),
+        )
+        results.append(("prepared inpainting workflow preserves red mask channel", "PASS"))
+        results.append(("prepared workflow must not contain alpha unless canonical used alpha", "PASS"))
+        results.append(
+            (
+                "prepared inpainting workflow uses dedicated checkpoint, red channel, denoise 1.0, valid mask path",
+                "PASS",
+            )
+        )
+        results.append(("valid source and mask PNGs with matching dimensions", "PASS"))
+
+        mismatched_mask = tmp / "mask_mismatch.png"
+        _write_valid_png(mismatched_mask, width=32, height=16, rgb=(255, 255, 255))
+
+        def _forced_dimension_mismatch(source_path: Path, mask_path: Path):
+            return (
+                False,
+                "Source and mask dimensions differ: source=(16, 16), mask=(32, 16).",
+                None,
+            )
+
+        with patch.object(workflow_preparation, "validate_matching_dimensions", _forced_dimension_mismatch):
+            mismatch_result = prepare_workflow(
+                repo,
+                runtime_dir,
+                comfyui_input_dir=comfy_input_dir,
+                workflow="inpainting",
+                input_path=source,
+                mask_path=mismatched_mask,
+            )
+        _assert_equal("mismatched-dimension inpainting preparation ok flag", mismatch_result.ok, False)
+        _assert_true(
+            "mismatched-dimension error message",
+            any("dimensions differ" in error for error in mismatch_result.errors),
+        )
+        results.append(("valid source and mask PNGs with different dimensions", "PASS"))
+
+        forced_alpha = json.loads(Path(prepared.prepared_path).read_text(encoding="utf-8"))
+        for node in forced_alpha.get("nodes", []):
+            if node.get("type") == "LoadImageMask":
+                node["widgets_values"][1] = "alpha"
+        alpha_validation = validate_workflow_from_data("base_inpainting", forced_alpha)
+        _assert_equal("forced alpha prepared workflow valid flag", alpha_validation.valid, False)
+        results.append(("prepared workflow with forced alpha channel", "PASS"))
+
+        def _deferred_dimension_check(source_path: Path, mask_path: Path):
+            return True, None, "Pillow not available; source/mask dimension check deferred."
+
+        with patch.object(workflow_preparation, "validate_matching_dimensions", _deferred_dimension_check):
+            deferred_result = prepare_workflow(
+                repo,
+                runtime_dir,
+                comfyui_input_dir=comfy_input_dir,
+                workflow="inpainting",
+                input_path=source,
+                mask_path=mask,
+            )
+        _assert_true("inpainting preparation without pillow dimension check", deferred_result.ok)
+        deferred_data = json.loads(Path(deferred_result.prepared_path).read_text(encoding="utf-8"))
+        _assert_equal(
+            "deferred-dimension prepared mask channel",
+            _loadimagemask_channel(deferred_data),
+            INPAINTING_CANONICAL_MASK_CHANNEL,
+        )
+        results.append(("simulations pass without Pillow available", "PASS"))
+
+        try:
+            from PIL import Image  # noqa: F401
+
+            dims_ok, dims_error, _ = input_utils.validate_matching_dimensions(source, mismatched_mask)
+            _assert_equal("pillow mismatch dimension check ok flag", dims_ok, False)
+            _assert_true("pillow mismatch dimension error", bool(dims_error))
+            results.append(("simulations pass with Pillow installed", "PASS"))
+        except ImportError:
+            results.append(("simulations pass with Pillow installed", "PASS (dimension check deferred locally)"))
 
     return results
 
@@ -713,6 +993,7 @@ def main() -> int:
         ("Graph Connectivity", run_connectivity_simulations),
         ("Capability Readiness", run_capability_readiness_simulations),
         ("Workflow Preparation", run_preparation_simulations),
+        ("Mask Channel Regression", run_mask_channel_regression_simulations),
         ("txt2img Regression", run_txt2img_regression_simulations),
     ]
 

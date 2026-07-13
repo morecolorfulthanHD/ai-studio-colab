@@ -13,7 +13,7 @@
         "a1111"
       ],
       "required_models": [
-        "sd15_checkpoint"
+        "sd15_inpainting_checkpoint"
       ],
       "required_nodes": [],
       "required_assets": [
@@ -80,7 +80,7 @@
       ],
       "required_nodes": [],
       "required_assets": [
-        "sd15_checkpoint",
+        "sd15_inpainting_checkpoint",
         "workflow_base_inpainting"
       ],
       "required_workflows": [
@@ -92,7 +92,7 @@
       "validation_rules": [
         "all_required_models_registered"
       ],
-      "notes": "Base inpainting workflow implemented with native ComfyUI nodes and mask input.",
+      "notes": "Base inpainting requires the dedicated SD1.5 inpainting checkpoint (512-inpainting-ema.safetensors).",
       "implementation_status": "implemented"
     },
     {

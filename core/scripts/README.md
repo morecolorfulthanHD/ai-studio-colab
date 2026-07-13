@@ -51,6 +51,7 @@ python core/scripts/validate_assets.py --summary
 python core/scripts/validate_capabilities.py --summary
 python core/scripts/check_nodes.py
 python core/scripts/verify_models.py
+python core/scripts/verify_models.py --require-inpainting
 python core/scripts/sync_outputs.py --dry-run
 python core/scripts/dogfood_core_runtime.py
 python core/scripts/verify_generation.py --summary
@@ -60,7 +61,7 @@ python core/scripts/prepare_workflow.py --workflow img2img --input /path/to/imag
 python core/scripts/simulate_package4_editing.py
 ```
 
-`prepare_workflow.py` stages persistent Drive inputs into ComfyUI `input/` using SHA-256 content comparison before reuse. `--dry-run` is fully read-only (no directory creation, copies, or workflow writes).
+`prepare_workflow.py` stages persistent Drive inputs into ComfyUI `input/` using SHA-256 content comparison before reuse. `--dry-run` is fully read-only (no directory creation, copies, or workflow writes). Inpainting preparation requires `512-inpainting-ema.safetensors`; use `verify_models.py --require-inpainting` before preparing inpainting workflows.
 
 `verify_generation.py` filters evidence by workflow prefix. `validate_capabilities.py` reports `execution_input_status` separately from implementation readiness. Workflow validators require connected execution graphs — see `simulate_package4_editing.py`.
 

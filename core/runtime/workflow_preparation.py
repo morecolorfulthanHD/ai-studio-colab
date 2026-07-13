@@ -15,7 +15,9 @@ from .workflow_validation import (
     BASE_IMG2IMG_WORKFLOW_ID,
     BASE_INPAINTING_WORKFLOW_ID,
     BASE_OUTPAINTING_WORKFLOW_ID,
+    INPAINTING_CANONICAL_MASK_CHANNEL,
     validate_workflow,
+    validate_workflow_from_data,
 )
 
 WORKFLOW_ALIASES = {
@@ -64,6 +66,17 @@ def _resolve_workflow_id(workflow: str) -> str:
     return workflow_id
 
 
+def _patch_load_image_mask_widgets(node: dict[str, Any], staged_mask_filename: str) -> None:
+    widgets = node.get("widgets_values")
+    if isinstance(widgets, list) and len(widgets) >= 3:
+        channel = widgets[1] if isinstance(widgets[1], str) else INPAINTING_CANONICAL_MASK_CHANNEL
+        mask_color = widgets[2] if isinstance(widgets[2], str) else "white"
+    else:
+        channel = INPAINTING_CANONICAL_MASK_CHANNEL
+        mask_color = "white"
+    node["widgets_values"] = [staged_mask_filename, channel, mask_color]
+
+
 def _patch_nodes(
     data: dict[str, Any],
     *,
@@ -79,7 +92,7 @@ def _patch_nodes(
         if node_type == "LoadImage":
             node["widgets_values"] = [staged_input_filename, "image"]
         elif node_type == "LoadImageMask" and staged_mask_filename is not None:
-            node["widgets_values"] = [staged_mask_filename, "alpha", "white"]
+            _patch_load_image_mask_widgets(node, staged_mask_filename)
         elif node_type == "ImagePadForOutpaint" and expansion is not None:
             node["widgets_values"] = [
                 expansion.get("left", 0),
@@ -216,6 +229,15 @@ def prepare_workflow(
         staged_mask_filename=staged_mask_filename,
         expansion=expansion,
     )
+
+    patched_validation = validate_workflow_from_data(workflow_id, data)
+    if not patched_validation.valid:
+        result.errors.append(
+            patched_validation.reasons[0]
+            if patched_validation.reasons
+            else "Prepared workflow validation failed."
+        )
+        return result
 
     prepared_path = _runtime_output_path(runtime_dir, workflow_id, operation_ts)
     result.prepared_path = str(prepared_path)

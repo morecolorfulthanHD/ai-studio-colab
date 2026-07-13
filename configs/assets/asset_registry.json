@@ -22,6 +22,24 @@
       "notes": "Primary SD 1.5 checkpoint. Also listed in model_registry.json."
     },
     {
+      "id": "sd15_inpainting_checkpoint",
+      "name": "SD 1.5 Inpainting Checkpoint",
+      "asset_type": "checkpoint",
+      "category": "diffusion",
+      "scope": "core",
+      "engine": "shared",
+      "intended_path": "assets/checkpoints/512-inpainting-ema.safetensors",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/checkpoints/512-inpainting-ema.safetensors",
+      "required_for": [
+        "base_inpainting"
+      ],
+      "status": "planned",
+      "source_type": "external",
+      "source_url": "",
+      "license_notes": "Review upstream model card and license before use.",
+      "notes": "Dedicated SD 1.5 inpainting checkpoint required for reliable masked object replacement."
+    },
+    {
       "id": "sdxl_base_checkpoint",
       "name": "SDXL Base Checkpoint",
       "asset_type": "checkpoint",

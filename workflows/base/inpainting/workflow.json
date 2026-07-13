@@ -31,7 +31,7 @@
         {"name": "MASK", "type": "MASK", "links": [2], "slot_index": 0}
       ],
       "properties": {"Node name for S&R": "LoadImageMask"},
-      "widgets_values": ["mask_image.png", "alpha", "white"]
+      "widgets_values": ["mask_image.png", "red", "white"]
     },
     {
       "id": 3,
@@ -48,7 +48,7 @@
         {"name": "VAE", "type": "VAE", "links": [6, 11], "slot_index": 2}
       ],
       "properties": {"Node name for S&R": "CheckpointLoaderSimple"},
-      "widgets_values": ["sd15.safetensors"]
+      "widgets_values": ["512-inpainting-ema.safetensors"]
     },
     {
       "id": 4,

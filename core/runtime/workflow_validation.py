@@ -66,6 +66,8 @@ BASE_OUTPAINTING_NODE_COUNT = 9
 
 INPAINTING_CANONICAL_DENOISE = 1.0
 OUTPAINTING_CANONICAL_DENOISE = 1.0
+INPAINTING_CANONICAL_CHECKPOINT = "512-inpainting-ema.safetensors"
+INPAINTING_CANONICAL_MASK_CHANNEL = "red"
 
 WORKFLOW_OUTPUT_PREFIXES = {
     BASE_TXT2IMG_WORKFLOW_ID: "ai_studio_base_txt2img",
@@ -665,6 +667,26 @@ def _inpainting_extra_checks(data: dict[str, Any], node_types: list[str], result
             result.reasons.append(
                 f"Inpainting KSampler denoise must be {INPAINTING_CANONICAL_DENOISE} for the true-inpainting path."
             )
+    checkpoint_nodes = [
+        node for node in data.get("nodes", []) if isinstance(node, dict) and node.get("type") == "CheckpointLoaderSimple"
+    ]
+    if len(checkpoint_nodes) == 1:
+        widgets = checkpoint_nodes[0].get("widgets_values", [])
+        checkpoint_name = widgets[0] if widgets else None
+        if checkpoint_name != INPAINTING_CANONICAL_CHECKPOINT:
+            result.reasons.append(
+                f"Inpainting checkpoint must be {INPAINTING_CANONICAL_CHECKPOINT!r}; found {checkpoint_name!r}."
+            )
+    mask_nodes = [
+        node for node in data.get("nodes", []) if isinstance(node, dict) and node.get("type") == "LoadImageMask"
+    ]
+    if len(mask_nodes) == 1:
+        widgets = mask_nodes[0].get("widgets_values", [])
+        mask_channel = widgets[1] if len(widgets) > 1 else None
+        if mask_channel != INPAINTING_CANONICAL_MASK_CHANNEL:
+            result.reasons.append(
+                f"Inpainting mask channel must be {INPAINTING_CANONICAL_MASK_CHANNEL!r}; found {mask_channel!r}."
+            )
 
 
 def _outpainting_extra_checks(data: dict[str, Any], node_types: list[str], result: WorkflowValidationResult) -> None:
@@ -757,3 +779,15 @@ def validate_workflow(workflow_id: str, path: Path) -> WorkflowValidationResult:
         return result
     result.valid = True
     return result
+
+
+def validate_workflow_from_data(workflow_id: str, data: dict[str, Any]) -> WorkflowValidationResult:
+    """Validate an in-memory workflow document using the shared workflow validators."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "workflow.json"
+        path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        result = validate_workflow(workflow_id, path)
+        result.path = "<prepared>"
+        return result

@@ -51,7 +51,7 @@ python core/comfyui/install_models.py --dry-run
 | `bootstrap_repo.py` fails | Repo not cloned fully | Re-clone; ensure all top-level dirs present |
 | `validate_paths.py` warns on Colab paths | First run before install | Normal — install ComfyUI via notebook first |
 | `install_nodes.py` reports clone failure | Repo unavailable or network issue | Re-run with `--execute`; optional node failures are reported |
-| `verify_models.py` reports required missing model | SD 1.5 not found at expected path | Place `sd15.safetensors` in Drive shared checkpoint path |
+| `verify_models.py` reports required missing model | SD 1.5 or inpainting checkpoint not found at expected path | Place required checkpoint in Drive shared checkpoint path |
 
 ## Launch Flow Issues
 
@@ -64,6 +64,7 @@ python core/comfyui/install_models.py --dry-run
 | `install.sh` extra_model_paths user-managed conflict | Existing `extra_model_paths.yaml` without AI Studio markers | Merge the `ai_studio_drive` block manually; installer will not overwrite unrelated user config |
 | `install.sh` requirements.txt missing | ComfyUI clone incomplete | Re-run with `--force-reinstall --execute` after reviewing install log |
 | SD1.5 missing after launch | Checkpoint not on Drive | Place `sd15.safetensors` at expected path (no auto-download) |
+| Inpainting blocked in Image Editing menu | Dedicated inpainting checkpoint missing | Place `512-inpainting-ema.safetensors` at `/content/drive/MyDrive/AI_Studio/models/shared/checkpoints/` |
 | txt2img capability `partial` | SD1.5 or runtime prerequisite missing | Expected until SD1.5 present and generation succeeds |
 | Full mode node install fails | Required node clone error | Check network; re-run `install_nodes.py --execute` |
 | ComfyUI URL not shown | Port timeout | Check `/content/drive/MyDrive/AI_Studio/logs/comfyui.log` |
@@ -239,7 +240,8 @@ Base img2img, inpainting, and outpainting use native ComfyUI nodes only. ReActor
 
 | Signal | Meaning |
 |--------|---------|
-| `img2img` / `inpainting` / `outpainting` `READY` | ComfyUI runtime, SD1.5, and validated workflow present |
+| `img2img` / `outpainting` `READY` | ComfyUI runtime, SD1.5, and validated workflow present |
+| `inpainting` `READY` | ComfyUI runtime, dedicated inpainting checkpoint, and validated inpainting workflow present |
 | `execution_input_status: not_selected` | No Drive input image yet — does **not** downgrade capability status |
 | `execution_input_status: mask_not_selected` | Inpainting source available but mask missing |
 | `prepare_workflow.py` error | Invalid extension, missing mask, or negative expansion values |
@@ -250,7 +252,7 @@ python core/scripts/prepare_workflow.py --workflow inpainting --input /path/to/s
 python core/scripts/verify_generation.py --workflow outpainting --summary
 ```
 
-Base inpainting uses `VAEEncodeForInpaint` with KSampler denoise **1.0**. Base outpainting uses the same true-inpainting latent path (`ImagePadForOutpaint` → `VAEEncodeForInpaint`) and also requires denoise **1.0**. Lower-strength masked editing is deferred to a future workflow.
+Base inpainting uses `VAEEncodeForInpaint` with KSampler denoise **1.0** and requires `512-inpainting-ema.safetensors`. `sd15.safetensors` is not the dedicated inpainting checkpoint. Base outpainting uses the same true-inpainting latent path (`ImagePadForOutpaint` → `VAEEncodeForInpaint`) and also requires denoise **1.0**. Lower-strength masked editing is deferred to a future workflow.
 
 ## Reproducibility Issues
 
