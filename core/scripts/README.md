@@ -22,6 +22,13 @@ Cross-engine utility scripts for bootstrap, validation, and batch processing.
 | `compare_inpainting_workflows.py` | Compare canonical and official reference inpainting workflows (`--summary`, `--json`) | No |
 | `create_inpainting_diagnostic_fixture.py` | Generate synthetic RGB/mask/RGBA inpainting fixtures in a runtime directory | No |
 | `prepare_inpainting_reference.py` | Prepare temporary official-reference workflow from one RGBA PNG (configured Colab paths; `--match-canonical-sampler`; `--positive-prompt` / `--negative-prompt`; `--dry-run`) | No |
+| `prepare_qwen_image_edit.py` | Prepare temporary Qwen-Image-Edit-2511 benchmark workflow (`--allow-missing-models`, `--dry-run`) | No |
+| `prepare_flux_fill.py` | Prepare temporary FLUX.1 Fill [dev] benchmark workflow (non-commercial license warning) | No |
+| `run_output_watcher.py` | Event-driven output autosync watcher (`--status`, `--once`, `--no-websocket`) | No |
+| `run_editing_benchmark.py` | Append editing benchmark ledger records | No |
+| `report_editing_benchmark.py` | Report editing benchmark ledger | No |
+| `simulate_output_autosync.py` | Package 4.4 autosync simulations | No |
+| `simulate_modern_editing_benchmark.py` | Package 4.4 modern editing benchmark simulations | No |
 
 ## Runtime Verification (Phase 1b)
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import platform
+import json
 import shutil
 import subprocess
 import sys
@@ -370,6 +371,46 @@ def check_capabilities(bundle: RegistryBundle) -> HealthCheck:
     )
 
 
+def check_output_watcher(bundle: RegistryBundle) -> HealthCheck:
+    try:
+        logs_dir = bundle.path("drive_logs") / "autosync"
+    except KeyError:
+        return HealthCheck(
+            "output_watcher",
+            HealthStatus.WARN,
+            "drive_logs path not configured.",
+        )
+    status_path = logs_dir / "output_watcher_status.json"
+    lock_path = logs_dir / "output_watcher.lock"
+    if not status_path.is_file():
+        return HealthCheck(
+            "output_watcher",
+            HealthStatus.WARN,
+            "Output watcher status not found (starts automatically after ComfyUI launch).",
+            {"status_path": str(status_path)},
+        )
+    try:
+        payload = json.loads(status_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return HealthCheck(
+            "output_watcher",
+            HealthStatus.FAIL,
+            f"Unable to read watcher status: {exc}",
+        )
+    watcher = str(payload.get("watcher") or "UNKNOWN").upper()
+    status = HealthStatus.OK
+    if watcher == "WARN":
+        status = HealthStatus.WARN
+    elif watcher == "FAIL":
+        status = HealthStatus.FAIL
+    message = (
+        f"Watcher={watcher}; last_prompt={payload.get('last_completed_prompt') or 'none'}; "
+        f"pending={payload.get('pending_sync_count', 0)}; failed={payload.get('failed_sync_count', 0)}; "
+        f"lock={'yes' if lock_path.exists() else 'no'}"
+    )
+    return HealthCheck("output_watcher", status, message, payload)
+
+
 def build_health_report(bundle: RegistryBundle) -> HealthReport:
     checks = [
         check_notebook(bundle),
@@ -382,6 +423,7 @@ def build_health_report(bundle: RegistryBundle) -> HealthReport:
         check_model_registry(bundle),
         check_asset_registry(bundle),
         check_capabilities(bundle),
+        check_output_watcher(bundle),
         check_gpu(),
     ]
     generated_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()

@@ -254,6 +254,35 @@ def check_generation_evidence(repo_root: Path) -> DogfoodCheck:
     )
 
 
+def check_output_autosync(repo_root: Path) -> DogfoodCheck:
+    bundle = RegistryLoader(repo_root).load_all()
+    status_path = bundle.path("drive_logs") / "autosync" / "output_watcher_status.json"
+    if not status_path.is_file():
+        return DogfoodCheck(
+            "output_autosync",
+            "WARN",
+            "Watcher status missing (expected after ComfyUI launch starts autosync).",
+        )
+    try:
+        payload = json.loads(status_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return DogfoodCheck("output_autosync", "FAIL", f"Watcher status unreadable: {exc}")
+    watcher = str(payload.get("watcher") or "unknown").upper()
+    if watcher == "OK":
+        return DogfoodCheck(
+            "output_autosync",
+            "PASS",
+            (
+                f"Watcher OK; last_prompt={payload.get('last_completed_prompt') or 'none'}; "
+                f"failed={payload.get('failed_sync_count', 0)}"
+            ),
+        )
+    if watcher == "WARN":
+        messages = payload.get("messages") or ["watcher warn"]
+        return DogfoodCheck("output_autosync", "WARN", str(messages[-1]))
+    return DogfoodCheck("output_autosync", "FAIL", f"Watcher state {watcher}")
+
+
 def run_checks(repo_root: Path) -> list[DogfoodCheck]:
     return [
         check_repo_root(repo_root),
@@ -264,6 +293,7 @@ def run_checks(repo_root: Path) -> list[DogfoodCheck]:
         check_model_status(repo_root),
         check_txt2img_workflow(repo_root),
         check_generation_evidence(repo_root),
+        check_output_autosync(repo_root),
     ]
 
 

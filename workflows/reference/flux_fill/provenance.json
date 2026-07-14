@@ -1,0 +1,25 @@
+{
+  "label": "official_comfyui_flux_fill_dev_inpainting_workflow",
+  "status": "extracted_from_official_workflow_png",
+  "not_approximation": true,
+  "reconstruction": false,
+  "source_page": "https://docs.comfy.org/tutorials/flux/flux-1-fill-dev",
+  "source_image_url": "https://raw.githubusercontent.com/Comfy-Org/example_workflows/main/flux/inpaint/flux_fill_inpaint.png",
+  "source_image_filename": "flux_fill_inpaint.png",
+  "source_image_sha256": "4fedd2967fdac59218dc493bdda7fddef00fd7fafa76f4436ff56285c7fdf3a2",
+  "extracted_workflow_json": "workflow.json",
+  "extracted_workflow_json_sha256": "4df08d6d67fced54d60332a7a5a2e9d111361f877e7b9ba98775c572712f44eb",
+  "extraction_method": "PNG tEXt workflow chunk",
+  "retrieval_date": "2026-07-14",
+  "models_referenced": [
+    "flux1-fill-dev.safetensors",
+    "clip_l.safetensors",
+    "t5xxl_fp16.safetensors",
+    "ae.safetensors"
+  ],
+  "license_warning": "FLUX.1 Fill [dev] uses the FLUX.1-dev Non-Commercial License. Do not treat as commercial production default.",
+  "notes": [
+    "Uses LoadImage IMAGE+MASK (embedded alpha) with InpaintModelConditioning.",
+    "Source PNG not committed; extracted JSON and provenance are committed."
+  ]
+}

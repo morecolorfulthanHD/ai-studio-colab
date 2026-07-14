@@ -507,6 +507,67 @@
       ],
       "notes": "Implemented by runtime_report.py and managers.",
       "implementation_status": "implemented"
+    },
+    {
+      "id": "qwen_image_edit_benchmark",
+      "name": "Qwen Image Edit Benchmark",
+      "description": "Benchmark-only instruction-driven editing with Qwen-Image-Edit-2511.",
+      "category": "editing_benchmark",
+      "maturity": "experimental",
+      "status": "planned",
+      "supported_engines": [
+        "comfyui"
+      ],
+      "required_models": [
+        "qwen_image_edit_2511_diffusion",
+        "qwen_image_edit_text_encoder",
+        "qwen_image_vae"
+      ],
+      "required_nodes": [],
+      "required_assets": [
+        "qwen_image_edit_2511_diffusion",
+        "workflow_reference_qwen_image_edit"
+      ],
+      "required_workflows": [
+        "reference_qwen_image_edit"
+      ],
+      "dependencies": [],
+      "validation_rules": [
+        "all_required_models_registered"
+      ],
+      "notes": "Not the production inpainting default. Apache-2.0 weights. Manual model placement required.",
+      "implementation_status": "benchmark"
+    },
+    {
+      "id": "flux_fill_benchmark",
+      "name": "FLUX Fill Benchmark",
+      "description": "Benchmark-only mask-driven inpainting/outpainting with FLUX.1 Fill [dev].",
+      "category": "editing_benchmark",
+      "maturity": "experimental",
+      "status": "planned",
+      "supported_engines": [
+        "comfyui"
+      ],
+      "required_models": [
+        "flux_fill_dev_diffusion",
+        "flux_clip_l",
+        "flux_t5xxl",
+        "flux_ae_vae"
+      ],
+      "required_nodes": [],
+      "required_assets": [
+        "flux_fill_dev_diffusion",
+        "workflow_reference_flux_fill"
+      ],
+      "required_workflows": [
+        "reference_flux_fill"
+      ],
+      "dependencies": [],
+      "validation_rules": [
+        "all_required_models_registered"
+      ],
+      "notes": "Not production default. FLUX.1-dev non-commercial weight license. Gated download.",
+      "implementation_status": "benchmark"
     }
   ]
 }

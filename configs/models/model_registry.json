@@ -6,7 +6,11 @@
       "category": "checkpoint",
       "intended_path": "assets/checkpoints/v1-5-pruned-emaonly.safetensors",
       "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/checkpoints/sd15.safetensors",
-      "required_for": ["base_txt2img", "base_img2img", "sd15_txt2img"],
+      "required_for": [
+        "base_txt2img",
+        "base_img2img",
+        "sd15_txt2img"
+      ],
       "status": "planned",
       "notes": "Primary SD 1.5 base checkpoint for Phase 1 txt2img workflow."
     },
@@ -15,7 +19,10 @@
       "category": "checkpoint",
       "intended_path": "assets/checkpoints/512-inpainting-ema.safetensors",
       "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/checkpoints/512-inpainting-ema.safetensors",
-      "required_for": ["base_inpainting", "inpainting"],
+      "required_for": [
+        "base_inpainting",
+        "inpainting"
+      ],
       "status": "planned",
       "notes": "Dedicated SD 1.5 inpainting checkpoint required for true inpainting object replacement."
     },
@@ -42,7 +49,9 @@
       "category": "controlnet",
       "intended_path": "assets/controlnets/control_v11p_sd15_canny.pth",
       "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/controlnet/control_v11p_sd15_canny_fp16.safetensors",
-      "required_for": ["controlnet_canny"],
+      "required_for": [
+        "controlnet_canny"
+      ],
       "status": "planned",
       "notes": "Canny edge ControlNet for SD 1.5."
     },
@@ -51,7 +60,10 @@
       "category": "controlnet",
       "intended_path": "assets/controlnets/control_v11f1p_sd15_depth.pth",
       "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/controlnet/control_v11f1p_sd15_depth_fp16.safetensors",
-      "required_for": ["sd15_controlnet_depth", "depth_map_extraction"],
+      "required_for": [
+        "sd15_controlnet_depth",
+        "depth_map_extraction"
+      ],
       "status": "planned",
       "notes": "Depth ControlNet for spatial guidance."
     },
@@ -60,7 +72,10 @@
       "category": "controlnet",
       "intended_path": "assets/controlnets/control_v11p_sd15_openpose.pth",
       "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/controlnet/control_v11p_sd15_openpose_fp16.safetensors",
-      "required_for": ["openpose_portrait", "sd15_openpose_portrait"],
+      "required_for": [
+        "openpose_portrait",
+        "sd15_openpose_portrait"
+      ],
       "status": "planned",
       "notes": "OpenPose ControlNet for human pose guidance."
     },
@@ -68,7 +83,9 @@
       "name": "controlnet_normal",
       "category": "controlnet",
       "intended_path": "assets/controlnets/control_v11p_sd15_normalbae.pth",
-      "required_for": ["normal_map_extraction"],
+      "required_for": [
+        "normal_map_extraction"
+      ],
       "status": "planned",
       "notes": "Normal map ControlNet for surface consistency."
     },
@@ -76,7 +93,9 @@
       "name": "controlnet_segmentation",
       "category": "controlnet",
       "intended_path": "assets/controlnets/control_v11p_sd15_seg.pth",
-      "required_for": ["segmentation_map_extraction"],
+      "required_for": [
+        "segmentation_map_extraction"
+      ],
       "status": "planned",
       "notes": "Segmentation ControlNet for region-level control."
     },
@@ -85,7 +104,9 @@
       "category": "video",
       "intended_path": "assets/checkpoints/svd_xt.safetensors",
       "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/svd/svd_xt.safetensors",
-      "required_for": ["svd_image_to_video"],
+      "required_for": [
+        "svd_image_to_video"
+      ],
       "status": "planned",
       "notes": "Stable Video Diffusion checkpoint for image-to-video."
     },
@@ -94,7 +115,9 @@
       "category": "animation",
       "intended_path": "assets/checkpoints/mm_sd_v15_v2.ckpt",
       "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/animatediff/mm_sd_v15_v2.ckpt",
-      "required_for": ["animatediff_sequence"],
+      "required_for": [
+        "animatediff_sequence"
+      ],
       "status": "planned",
       "notes": "AnimateDiff motion module for SD 1.5."
     },
@@ -103,7 +126,9 @@
       "category": "face",
       "intended_path": "assets/insightface/",
       "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/insightface/models/buffalo_l/w600k_r50.onnx",
-      "required_for": ["reactor_faceswap"],
+      "required_for": [
+        "reactor_faceswap"
+      ],
       "status": "planned",
       "notes": "InsightFace ONNX models for face detection and identity."
     },
@@ -111,9 +136,89 @@
       "name": "ipadapter",
       "category": "reference",
       "intended_path": "assets/ipadapter/ip-adapter_sd15.safetensors",
-      "required_for": ["reference_lock", "sd15_reference_lock"],
+      "required_for": [
+        "reference_lock",
+        "sd15_reference_lock"
+      ],
       "status": "planned",
       "notes": "IPAdapter weights for reference image conditioning."
+    },
+    {
+      "name": "qwen_image_edit_2511_diffusion",
+      "category": "diffusion_model",
+      "intended_path": "assets/qwen_image_edit/qwen_image_edit_2511_fp8mixed.safetensors",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/qwen_image_edit/qwen_image_edit_2511_fp8mixed.safetensors",
+      "required_for": [
+        "qwen_image_edit_benchmark"
+      ],
+      "status": "planned",
+      "notes": "Comfy-Org/Qwen Image Edit 2511 fp8mixed diffusion weight. Manual download only. Apache-2.0."
+    },
+    {
+      "name": "qwen_image_edit_text_encoder",
+      "category": "text_encoder",
+      "intended_path": "assets/qwen_image_edit/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/qwen_image_edit/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+      "required_for": [
+        "qwen_image_edit_benchmark"
+      ],
+      "status": "planned",
+      "notes": "Qwen2.5-VL text encoder for Image Edit 2511."
+    },
+    {
+      "name": "qwen_image_vae",
+      "category": "vae",
+      "intended_path": "assets/qwen_image_edit/qwen_image_vae.safetensors",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/qwen_image_edit/qwen_image_vae.safetensors",
+      "required_for": [
+        "qwen_image_edit_benchmark"
+      ],
+      "status": "planned",
+      "notes": "Shared Qwen Image VAE."
+    },
+    {
+      "name": "flux_fill_dev_diffusion",
+      "category": "diffusion_model",
+      "intended_path": "assets/flux_fill/flux1-fill-dev.safetensors",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/flux_fill/flux1-fill-dev.safetensors",
+      "required_for": [
+        "flux_fill_benchmark"
+      ],
+      "status": "planned",
+      "notes": "FLUX.1 Fill [dev] gated non-commercial weights. Manual HF download after license agreement."
+    },
+    {
+      "name": "flux_clip_l",
+      "category": "text_encoder",
+      "intended_path": "assets/flux_fill/clip_l.safetensors",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/flux_fill/clip_l.safetensors",
+      "required_for": [
+        "flux_fill_benchmark"
+      ],
+      "status": "planned",
+      "notes": "CLIP-L for FLUX DualCLIPLoader."
+    },
+    {
+      "name": "flux_t5xxl",
+      "category": "text_encoder",
+      "intended_path": "assets/flux_fill/t5xxl_fp16.safetensors",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/flux_fill/t5xxl_fp16.safetensors",
+      "required_for": [
+        "flux_fill_benchmark"
+      ],
+      "status": "planned",
+      "notes": "T5-XXL for FLUX; fp8 variant acceptable for L4 if documented."
+    },
+    {
+      "name": "flux_ae_vae",
+      "category": "vae",
+      "intended_path": "assets/flux_fill/ae.safetensors",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/flux_fill/ae.safetensors",
+      "required_for": [
+        "flux_fill_benchmark"
+      ],
+      "status": "planned",
+      "notes": "FLUX autoencoder VAE."
     }
   ]
 }

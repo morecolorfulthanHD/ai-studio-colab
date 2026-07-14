@@ -461,6 +461,76 @@
       "source_url": "",
       "license_notes": "Project license",
       "notes": "Git-managed outpainting workflow JSON implemented in repo."
+    },
+    {
+      "id": "qwen_image_edit_2511_diffusion",
+      "name": "Qwen Image Edit 2511 Diffusion (fp8mixed)",
+      "asset_type": "checkpoint",
+      "category": "diffusion",
+      "scope": "benchmark",
+      "engine": "comfyui",
+      "intended_path": "assets/qwen_image_edit/qwen_image_edit_2511_fp8mixed.safetensors",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/qwen_image_edit/qwen_image_edit_2511_fp8mixed.safetensors",
+      "required_for": [
+        "qwen_image_edit_benchmark"
+      ],
+      "status": "planned",
+      "source_type": "huggingface",
+      "source_url": "https://huggingface.co/Qwen/Qwen-Image-Edit-2511",
+      "license_notes": "Apache-2.0",
+      "notes": "Official Comfy template references fp8mixed. Manual download; no auto-download."
+    },
+    {
+      "id": "workflow_reference_qwen_image_edit",
+      "name": "Reference Qwen Image Edit 2511 Workflow",
+      "asset_type": "workflow",
+      "category": "reference",
+      "scope": "benchmark",
+      "engine": "comfyui",
+      "intended_path": "workflows/reference/qwen_image_edit/workflow.json",
+      "required_for": [
+        "qwen_image_edit_benchmark"
+      ],
+      "status": "active",
+      "source_type": "repository",
+      "source_url": "https://docs.comfy.org/tutorials/image/qwen/qwen-image-edit-2511",
+      "license_notes": "Workflow template from Comfy-Org; model weights under Apache-2.0",
+      "notes": "Benchmark reference only."
+    },
+    {
+      "id": "flux_fill_dev_diffusion",
+      "name": "FLUX.1 Fill [dev] Diffusion",
+      "asset_type": "checkpoint",
+      "category": "diffusion",
+      "scope": "benchmark",
+      "engine": "comfyui",
+      "intended_path": "assets/flux_fill/flux1-fill-dev.safetensors",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/flux_fill/flux1-fill-dev.safetensors",
+      "required_for": [
+        "flux_fill_benchmark"
+      ],
+      "status": "planned",
+      "source_type": "huggingface",
+      "source_url": "https://huggingface.co/black-forest-labs/FLUX.1-Fill-dev",
+      "license_notes": "FLUX.1-dev Non-Commercial License (weights). Not a commercial production default.",
+      "notes": "Gated download. Manual agreement required."
+    },
+    {
+      "id": "workflow_reference_flux_fill",
+      "name": "Reference FLUX Fill Inpaint Workflow",
+      "asset_type": "workflow",
+      "category": "reference",
+      "scope": "benchmark",
+      "engine": "comfyui",
+      "intended_path": "workflows/reference/flux_fill/workflow.json",
+      "required_for": [
+        "flux_fill_benchmark"
+      ],
+      "status": "active",
+      "source_type": "repository",
+      "source_url": "https://docs.comfy.org/tutorials/flux/flux-1-fill-dev",
+      "license_notes": "Workflow from official ComfyUI tutorial; model under FLUX.1-dev NCL",
+      "notes": "Benchmark reference only."
     }
   ]
 }

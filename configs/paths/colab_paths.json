@@ -11,7 +11,8 @@
     "drive_inputs": "/content/drive/MyDrive/AI_Studio/inputs",
     "drive_models": "/content/drive/MyDrive/AI_Studio/models/shared",
     "drive_workflows": "/content/drive/MyDrive/AI_Studio/workflows",
-    "runtime_workflows": "/content/ai-studio-runtime/workflows"
+    "runtime_workflows": "/content/ai-studio-runtime/workflows",
+    "drive_logs": "/content/drive/MyDrive/AI_Studio/logs"
   },
   "repo_relative": {
     "workflows": "workflows",

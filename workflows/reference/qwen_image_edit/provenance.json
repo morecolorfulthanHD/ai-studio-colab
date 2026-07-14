@@ -1,0 +1,25 @@
+{
+  "label": "official_comfyui_qwen_image_edit_2511_workflow",
+  "status": "copied_from_official_comfy_org_workflow_template",
+  "not_approximation": true,
+  "reconstruction": false,
+  "source_page": "https://docs.comfy.org/tutorials/image/qwen/qwen-image-edit-2511",
+  "source_template_url": "https://raw.githubusercontent.com/Comfy-Org/workflow_templates/master/templates/image_qwen_image_edit_2511.json",
+  "source_image_url": null,
+  "source_workflow_json_sha256_raw": "d561a38c15bd7d08758a5e6773d467142244d5b83fc5d3aecdf6d8df9fe881b6",
+  "extracted_workflow_json": "workflow.json",
+  "extracted_workflow_json_sha256": "1325bfc9280f52f65e6f967e27e08bd77efcde0a655a7242553a737f56e0b483",
+  "extraction_method": "Direct download of Comfy-Org workflow template JSON",
+  "retrieval_date": "2026-07-14",
+  "models_referenced": [
+    "qwen_image_edit_2511_fp8mixed.safetensors",
+    "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+    "qwen_image_vae.safetensors",
+    "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors (optional)"
+  ],
+  "notes": [
+    "Official template uses a subgraph for edit graph topology.",
+    "Committed workflow.json is pretty-printed from the official template without changing topology.",
+    "Docs also mention bf16 diffusion weight; official template currently references fp8mixed."
+  ]
+}

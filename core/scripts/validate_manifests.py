@@ -33,6 +33,7 @@ MANIFEST_RULES: dict[str, dict] = {
             "drive_models",
             "drive_workflows",
             "runtime_workflows",
+            "drive_logs",
         },
     },
     "models/model_registry.json": {

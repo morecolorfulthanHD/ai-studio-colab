@@ -17,6 +17,7 @@ _spec.loader.exec_module(_activate)
 _activate.activate(__file__)
 
 
+from core.runtime.generation_evidence_ledger import EvidenceLedger
 from core.runtime.output_evidence import inspect_generation_evidence
 from core.runtime.registry_loader import RegistryLoader, find_repo_root
 from core.runtime.workflow_validation import WORKFLOW_OUTPUT_PREFIXES
@@ -69,6 +70,24 @@ def main() -> int:
     )
     payload = evidence.to_dict()
 
+    ledger_summary = {"path": "", "rows": 0, "verified": 0, "pending": 0, "failed": 0}
+    try:
+        ledger_path = bundle.path("drive_logs") / "generation_evidence.jsonl"
+        ledger_summary["path"] = str(ledger_path)
+        rows = EvidenceLedger(ledger_path).read_all()
+        ledger_summary["rows"] = len(rows)
+        for row in rows:
+            status = str(row.get("sync_status") or "")
+            if status == "verified":
+                ledger_summary["verified"] += 1
+            elif status == "pending":
+                ledger_summary["pending"] += 1
+            elif status == "failed":
+                ledger_summary["failed"] += 1
+    except KeyError:
+        pass
+    payload["autosync_ledger"] = ledger_summary
+
     if args.json:
         print(json.dumps(payload, indent=2))
     elif args.summary:
@@ -79,7 +98,9 @@ def main() -> int:
         print(
             f"Generation evidence: {payload['evidence_status']} | "
             f"workflow={args.workflow or 'latest'} | "
-            f"local={local_name} | drive={drive_name}"
+            f"local={local_name} | drive={drive_name} | "
+            f"ledger_verified={ledger_summary['verified']} "
+            f"pending={ledger_summary['pending']} failed={ledger_summary['failed']}"
         )
     else:
         print("AI Studio — Generation Evidence")
@@ -109,6 +130,11 @@ def main() -> int:
                 f"Historical drive:  {historical['filename']} "
                 f"({historical['size_bytes']} bytes, {historical['modified_at']})"
             )
+        print(
+            f"Autosync ledger:   {ledger_summary['rows']} rows "
+            f"(verified={ledger_summary['verified']}, "
+            f"pending={ledger_summary['pending']}, failed={ledger_summary['failed']})"
+        )
         for message in payload.get("messages", []):
             print(f"Note:              {message}")
 

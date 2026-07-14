@@ -242,12 +242,20 @@ def to_summary(report: dict) -> str:
         editing_part = (
             f" | editing: img2img={editing_states[0]} inpaint={editing_states[1]} outpaint={editing_states[2]}"
         )
+    watcher_check = next(
+        (c for c in health.get("checks", []) if c.get("component") == "output_watcher"),
+        None,
+    )
+    watcher_part = ""
+    if watcher_check:
+        watcher_part = f" | OutputWatcher: {str(watcher_check.get('status', 'unknown')).upper()}"
     return (
         f"Health: {health['overall_status'].upper()} | "
         f"Env: {report['runtime_status']['environment']} | "
         f"ComfyUI: {comfyui_state} | Nodes: {node_state} | ModelCheck: {model_state}{node_part} | "
         f"Models: {reg['models']} | Nodes: {reg['nodes']} | "
-        f"Workflows: {reg['workflows']} | txt2img: {txt2img_state} | evidence: {evidence_state}{editing_part}{asset_part}{capability_part}"
+        f"Workflows: {reg['workflows']} | txt2img: {txt2img_state} | evidence: {evidence_state}"
+        f"{editing_part}{watcher_part}{asset_part}{capability_part}"
     )
 
 

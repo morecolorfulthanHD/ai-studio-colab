@@ -1,0 +1,56 @@
+{
+  "version": "1.0.0",
+  "label": "modern_editing_benchmark_manifest",
+  "notes": [
+    "User-provided photographic sources are not committed.",
+    "Synthetic square fixture remains a low-level regression only."
+  ],
+  "primary_real_world_source": {
+    "id": "bike_brick_wall",
+    "description": "Bicycle against brick wall (user-provided Drive input)",
+    "suggested_drive_path": "/content/drive/MyDrive/AI_Studio/inputs/images/",
+    "committed_binary": false
+  },
+  "tasks": [
+    {
+      "id": "object_removal",
+      "prompt": "remove the bicycle and reconstruct the brick wall and pavement",
+      "mask_required_for_flux": true,
+      "mask_required_for_qwen": false
+    },
+    {
+      "id": "object_replacement",
+      "prompt": "replace the bicycle with a wooden bench; preserve wall, pavement, perspective, and lighting",
+      "mask_required_for_flux": true,
+      "mask_required_for_qwen": false
+    },
+    {
+      "id": "local_material_edit",
+      "prompt": "replace the bicycle seat with brown leather; preserve the rest of the bicycle and scene",
+      "mask_required_for_flux": true,
+      "mask_required_for_qwen": false
+    },
+    {
+      "id": "sign_text_removal",
+      "prompt": "remove the sign text and reconstruct the background cleanly",
+      "optional": true,
+      "requires_suitable_input": true
+    },
+    {
+      "id": "outpainting",
+      "prompt": "extend the scene to the right while preserving continuity",
+      "mask_required_for_flux": true,
+      "notes": "Prefer Flux Fill outpaint path when available"
+    }
+  ],
+  "regression_fixture": {
+    "id": "synthetic_square",
+    "generator": "core/scripts/create_inpainting_diagnostic_fixture.py",
+    "role": "low_level_regression_not_quality_benchmark"
+  },
+  "candidates": [
+    "sd15_inpainting_baseline",
+    "qwen_image_edit_2511",
+    "flux_fill_dev"
+  ]
+}

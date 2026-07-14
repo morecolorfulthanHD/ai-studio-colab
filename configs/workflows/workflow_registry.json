@@ -189,6 +189,33 @@
       ],
       "required_nodes": [],
       "notes": "Canvas extension with ImagePadForOutpaint and native inpaint sampling."
+    },
+    {
+      "id": "reference_qwen_image_edit",
+      "category": "reference",
+      "path": "workflows/reference/qwen_image_edit/workflow.json",
+      "status": "benchmark",
+      "required_models": [
+        "qwen_image_edit_2511_diffusion",
+        "qwen_image_edit_text_encoder",
+        "qwen_image_vae"
+      ],
+      "required_nodes": [],
+      "notes": "Official Comfy-Org Qwen Image Edit 2511 template. Benchmark only; not production default."
+    },
+    {
+      "id": "reference_flux_fill",
+      "category": "reference",
+      "path": "workflows/reference/flux_fill/workflow.json",
+      "status": "benchmark",
+      "required_models": [
+        "flux_fill_dev_diffusion",
+        "flux_clip_l",
+        "flux_t5xxl",
+        "flux_ae_vae"
+      ],
+      "required_nodes": [],
+      "notes": "Official ComfyUI FLUX Fill inpaint workflow. Benchmark only; non-commercial weight license."
     }
   ]
 }

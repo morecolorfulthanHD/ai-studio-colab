@@ -32,11 +32,19 @@ def collect_files() -> list[Path]:
         "compare_inpainting_workflows.py",
         "create_inpainting_diagnostic_fixture.py",
         "prepare_inpainting_reference.py",
+        "prepare_qwen_image_edit.py",
+        "prepare_flux_fill.py",
+        "run_output_watcher.py",
+        "run_editing_benchmark.py",
+        "report_editing_benchmark.py",
+        "simulate_output_autosync.py",
+        "simulate_modern_editing_benchmark.py",
         "runtime_report.py",
         "verify_models.py",
         "verify_generation.py",
         "sync_outputs.py",
         "check_nodes.py",
+        "dogfood_core_runtime.py",
     ):
         add(f"core/scripts/{script_name}")
 
@@ -50,6 +58,8 @@ def collect_files() -> list[Path]:
         "workflows/base/outpainting",
         "workflows/diagnostics/inpainting_mask_preview",
         "workflows/reference/inpainting_official",
+        "workflows/reference/qwen_image_edit",
+        "workflows/reference/flux_fill",
     )
     for workflow_dir in workflow_dirs:
         for workflow_file in sorted((REPO_ROOT / workflow_dir).rglob("*")):
@@ -64,10 +74,14 @@ def collect_files() -> list[Path]:
         "docs/runtime-platform.md",
         "docs/troubleshooting.md",
         "docs/workflow-guide.md",
+        "docs/model-compatibility-modern-editing.md",
+        "docs/decisions/modern-editing-selection-gate.md",
         "docs/dogfooding/img2img-checklist.md",
         "docs/dogfooding/inpainting-checklist.md",
         "docs/dogfooding/inpainting-diagnostic-checklist.md",
         "docs/dogfooding/outpainting-checklist.md",
+        "docs/dogfooding/output-autosync-checklist.md",
+        "docs/dogfooding/modern-editing-benchmark-checklist.md",
         "inputs/README.md",
         "inputs/images/README.md",
         "inputs/masks/README.md",
