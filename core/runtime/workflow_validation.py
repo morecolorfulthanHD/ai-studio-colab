@@ -12,6 +12,7 @@ BASE_TXT2IMG_WORKFLOW_ID = "base_txt2img"
 BASE_IMG2IMG_WORKFLOW_ID = "base_img2img"
 BASE_INPAINTING_WORKFLOW_ID = "base_inpainting"
 BASE_OUTPAINTING_WORKFLOW_ID = "base_outpainting"
+DIAG_INPAINTING_MASK_PREVIEW_WORKFLOW_ID = "diag_inpainting_mask_preview"
 
 BASE_TXT2IMG_REQUIRED_NODE_TYPES = frozenset(
     {
@@ -63,6 +64,17 @@ BASE_TXT2IMG_NODE_COUNT = 7
 BASE_IMG2IMG_NODE_COUNT = 8
 BASE_INPAINTING_NODE_COUNT = 9
 BASE_OUTPAINTING_NODE_COUNT = 9
+DIAG_INPAINTING_MASK_PREVIEW_NODE_COUNT = 6
+
+DIAG_INPAINTING_MASK_PREVIEW_REQUIRED_NODE_TYPES = frozenset(
+    {
+        "LoadImage",
+        "LoadImageMask",
+        "MaskToImage",
+        "ImageBlend",
+        "SaveImage",
+    }
+)
 
 INPAINTING_CANONICAL_DENOISE = 1.0
 OUTPAINTING_CANONICAL_DENOISE = 1.0
@@ -75,6 +87,11 @@ WORKFLOW_OUTPUT_PREFIXES = {
     BASE_INPAINTING_WORKFLOW_ID: "ai_studio_base_inpainting",
     BASE_OUTPAINTING_WORKFLOW_ID: "ai_studio_base_outpainting",
 }
+
+DIAG_MASK_PREVIEW_OUTPUT_PREFIXES = (
+    "ai_studio_diag_mask_preview",
+    "ai_studio_diag_mask_overlay",
+)
 
 
 @dataclass
@@ -614,9 +631,10 @@ def _validate_workflow_template(
     *,
     expected_node_count: int,
     required_types: frozenset[str],
-    output_prefix: str,
+    output_prefix: str | None = None,
     extra_checks: Callable[[dict[str, Any], list[str], WorkflowValidationResult], None] | None = None,
     connectivity_check: Callable[[WorkflowGraph, WorkflowValidationResult], None] | None = None,
+    require_clip_encode: bool = True,
 ) -> WorkflowValidationResult:
     result = WorkflowValidationResult(workflow_id=workflow_id, path=str(path), valid=False)
     data, load_errors = _load_workflow_json(path)
@@ -634,8 +652,10 @@ def _validate_workflow_template(
         )
 
     _require_node_types(result, node_types, required_types)
-    _require_clip_encode_count(result, node_types)
-    _require_save_prefix(data, result, output_prefix)
+    if require_clip_encode:
+        _require_clip_encode_count(result, node_types)
+    if output_prefix is not None:
+        _require_save_prefix(data, result, output_prefix)
     _validate_workflow_metadata(data, result)
     if connectivity_check is not None:
         _validate_graph_connectivity(data, result, connectivity_check=connectivity_check)
@@ -716,6 +736,90 @@ def _outpainting_extra_checks(data: dict[str, Any], node_types: list[str], resul
             )
 
 
+def _diag_mask_preview_extra_checks(
+    data: dict[str, Any],
+    node_types: list[str],
+    result: WorkflowValidationResult,
+) -> None:
+    forbidden = {"CheckpointLoaderSimple", "KSampler", "VAEDecode", "VAEEncodeForInpaint"}
+    if any(node_type in node_types for node_type in forbidden):
+        result.reasons.append("Diagnostic mask preview workflow must not include diffusion nodes.")
+    save_nodes = [
+        node for node in data.get("nodes", []) if isinstance(node, dict) and node.get("type") == "SaveImage"
+    ]
+    prefixes = [node.get("widgets_values", [""])[0] for node in save_nodes]
+    for required_prefix in DIAG_MASK_PREVIEW_OUTPUT_PREFIXES:
+        if required_prefix not in prefixes:
+            result.reasons.append(f"Diagnostic mask preview workflow missing SaveImage prefix {required_prefix!r}.")
+    mask_nodes = [
+        node for node in data.get("nodes", []) if isinstance(node, dict) and node.get("type") == "LoadImageMask"
+    ]
+    if len(mask_nodes) == 1:
+        widgets = mask_nodes[0].get("widgets_values", [])
+        if len(widgets) < 2 or widgets[1] != INPAINTING_CANONICAL_MASK_CHANNEL:
+            result.reasons.append(
+                f"Diagnostic mask preview LoadImageMask channel must be {INPAINTING_CANONICAL_MASK_CHANNEL!r}."
+            )
+
+
+def _validate_diag_mask_preview_connectivity(graph: WorkflowGraph, result: WorkflowValidationResult) -> None:
+    _require_path(
+        graph,
+        result,
+        src_type="LoadImageMask",
+        src_slot=0,
+        dst_type="MaskToImage",
+        dst_slot=0,
+        description="LoadImageMask MASK → MaskToImage mask",
+    )
+    save_nodes = graph.node_ids_of_type("SaveImage")
+    if len(save_nodes) >= 1:
+        preview_id = save_nodes[0]
+        if not any(
+            link.dst_node == preview_id and link.dst_slot == 0 and link.link_type == "IMAGE"
+            for link in graph.links
+        ):
+            result.reasons.append("MaskToImage IMAGE must connect to a SaveImage node.")
+    _require_path(
+        graph,
+        result,
+        src_type="LoadImage",
+        src_slot=0,
+        dst_type="ImageBlend",
+        dst_slot=0,
+        description="LoadImage IMAGE → ImageBlend image1",
+    )
+    _require_path(
+        graph,
+        result,
+        src_type="MaskToImage",
+        src_slot=0,
+        dst_type="ImageBlend",
+        dst_slot=1,
+        description="MaskToImage IMAGE → ImageBlend image2",
+    )
+    if len(save_nodes) >= 2:
+        overlay_id = save_nodes[1]
+        if not any(
+            link.dst_node == overlay_id and link.dst_slot == 0 and link.link_type == "IMAGE"
+            for link in graph.links
+        ):
+            result.reasons.append("ImageBlend IMAGE must connect to overlay SaveImage.")
+
+
+def validate_diag_inpainting_mask_preview_workflow(path: Path) -> WorkflowValidationResult:
+    return _validate_workflow_template(
+        DIAG_INPAINTING_MASK_PREVIEW_WORKFLOW_ID,
+        path,
+        expected_node_count=DIAG_INPAINTING_MASK_PREVIEW_NODE_COUNT,
+        required_types=DIAG_INPAINTING_MASK_PREVIEW_REQUIRED_NODE_TYPES,
+        output_prefix=None,
+        extra_checks=_diag_mask_preview_extra_checks,
+        connectivity_check=_validate_diag_mask_preview_connectivity,
+        require_clip_encode=False,
+    )
+
+
 def validate_base_txt2img_workflow(path: Path) -> WorkflowValidationResult:
     return _validate_workflow_template(
         BASE_TXT2IMG_WORKFLOW_ID,
@@ -768,6 +872,7 @@ def validate_workflow(workflow_id: str, path: Path) -> WorkflowValidationResult:
         BASE_IMG2IMG_WORKFLOW_ID: validate_base_img2img_workflow,
         BASE_INPAINTING_WORKFLOW_ID: validate_base_inpainting_workflow,
         BASE_OUTPAINTING_WORKFLOW_ID: validate_base_outpainting_workflow,
+        DIAG_INPAINTING_MASK_PREVIEW_WORKFLOW_ID: validate_diag_inpainting_mask_preview_workflow,
     }
     validator = validators.get(workflow_id)
     if validator is not None:

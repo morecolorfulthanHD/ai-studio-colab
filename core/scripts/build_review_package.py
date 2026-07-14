@@ -28,6 +28,10 @@ def collect_files() -> list[Path]:
         "validate_manifests.py",
         "prepare_workflow.py",
         "list_inputs.py",
+        "inspect_mask.py",
+        "compare_inpainting_workflows.py",
+        "create_inpainting_diagnostic_fixture.py",
+        "prepare_inpainting_reference.py",
         "runtime_report.py",
         "verify_models.py",
         "verify_generation.py",
@@ -44,6 +48,8 @@ def collect_files() -> list[Path]:
         "workflows/base/img2img",
         "workflows/base/inpainting",
         "workflows/base/outpainting",
+        "workflows/diagnostics/inpainting_mask_preview",
+        "workflows/reference/inpainting_official",
     )
     for workflow_dir in workflow_dirs:
         for workflow_file in sorted((REPO_ROOT / workflow_dir).rglob("*")):
@@ -60,6 +66,7 @@ def collect_files() -> list[Path]:
         "docs/workflow-guide.md",
         "docs/dogfooding/img2img-checklist.md",
         "docs/dogfooding/inpainting-checklist.md",
+        "docs/dogfooding/inpainting-diagnostic-checklist.md",
         "docs/dogfooding/outpainting-checklist.md",
         "inputs/README.md",
         "inputs/images/README.md",

@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .inpainting_inspection import format_inpainting_inspection, inspect_prepared_inpainting_workflow
 from .input_staging import stage_inputs_batch
 from .input_utils import validate_input_path, validate_matching_dimensions
 from .output_sync import utc_collision_timestamp
@@ -50,6 +51,7 @@ class WorkflowPreparationResult:
     dry_run: bool = False
     messages: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    diagnostic_details: dict[str, Any] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
@@ -130,6 +132,35 @@ def _append_execution_sequence(result: WorkflowPreparationResult) -> None:
         )
 
 
+def _append_inpainting_diagnostics(
+    result: WorkflowPreparationResult,
+    *,
+    prepared_data: dict[str, Any],
+    canonical_path: Path,
+    source_path: Path,
+    mask_path: Path | None,
+) -> None:
+    if mask_path is None:
+        return
+    inspection = inspect_prepared_inpainting_workflow(
+        prepared_data,
+        mask_path=mask_path,
+        source_path=source_path,
+        canonical_path=canonical_path,
+    )
+    result.diagnostic_details = inspection
+    result.messages.append("Diagnostic logging:")
+    result.messages.append(f"  workflow id: {inspection.get('workflow_id')}")
+    result.messages.append(f"  source filename: {inspection.get('source_filename')}")
+    result.messages.append(f"  mask filename: {inspection.get('mask_filename')}")
+    result.messages.append(f"  selected mask channel: {inspection.get('mask_channel')}")
+    result.messages.append(f"  checkpoint: {inspection.get('checkpoint')}")
+    result.messages.append(f"  workflow hash: {inspection.get('workflow_hash')}")
+    result.messages.append(f"  source hash: {inspection.get('source_hash')}")
+    result.messages.append(f"  mask hash: {inspection.get('mask_hash')}")
+    result.messages.append(format_inpainting_inspection(inspection))
+
+
 def prepare_workflow(
     repo_root: Path,
     runtime_dir: Path,
@@ -141,6 +172,7 @@ def prepare_workflow(
     expansion: dict[str, int] | None = None,
     dry_run: bool = False,
     operation_timestamp: str | None = None,
+    diagnostics: bool = False,
 ) -> WorkflowPreparationResult:
     workflow_id = _resolve_workflow_id(workflow)
     canonical_rel = CANONICAL_WORKFLOW_PATHS[workflow_id]
@@ -242,6 +274,16 @@ def prepare_workflow(
     prepared_path = _runtime_output_path(runtime_dir, workflow_id, operation_ts)
     result.prepared_path = str(prepared_path)
     result.messages.append(f"Canonical workflow (unchanged): {canonical_path}")
+    if workflow_id == BASE_INPAINTING_WORKFLOW_ID and diagnostics:
+        mask_for_diagnostics = Path(result.staged_mask_path) if result.staged_mask_path else mask_path
+        source_for_diagnostics = Path(result.staged_input_path) if result.staged_input_path else input_path
+        _append_inpainting_diagnostics(
+            result,
+            prepared_data=data,
+            canonical_path=canonical_path,
+            source_path=source_for_diagnostics,
+            mask_path=mask_for_diagnostics,
+        )
     if dry_run:
         result.messages.append("Dry run only — no ComfyUI input copies and no prepared workflow written.")
         _append_execution_sequence(result)

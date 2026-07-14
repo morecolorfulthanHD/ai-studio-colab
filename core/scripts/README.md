@@ -17,7 +17,11 @@ Cross-engine utility scripts for bootstrap, validation, and batch processing.
 | `dogfood_core_runtime.py` | Sprint 1 dogfooding checks (PASS/WARN/FAIL summary) | No |
 | `verify_generation.py` | Read-only local/Drive generation evidence (`--summary`, `--json`, `--workflow img2img\|inpainting\|outpainting`) | No |
 | `list_inputs.py` | List eligible Drive input images and masks (read-only) | No |
-| `prepare_workflow.py` | Prepare ephemeral runtime workflow JSON with selected inputs (`--dry-run`, `--json`) | No |
+| `prepare_workflow.py` | Prepare ephemeral runtime workflow JSON with selected inputs (`--dry-run`, `--json`, `--inspect`) | No |
+| `inspect_mask.py` | Read-only mask diagnostics for inpainting (`--channel`, `--summary`, `--json`; use `--channel alpha` for embedded ComfyUI MASK) | No |
+| `compare_inpainting_workflows.py` | Compare canonical and official reference inpainting workflows (`--summary`, `--json`) | No |
+| `create_inpainting_diagnostic_fixture.py` | Generate synthetic RGB/mask/RGBA inpainting fixtures in a runtime directory | No |
+| `prepare_inpainting_reference.py` | Prepare temporary official-reference workflow from one RGBA PNG (configured Colab paths; `--match-canonical-sampler`; `--positive-prompt` / `--negative-prompt`; `--dry-run`) | No |
 
 ## Runtime Verification (Phase 1b)
 

@@ -33,6 +33,7 @@ def main() -> int:
     parser.add_argument("--runtime-dir", type=Path, default=None)
     parser.add_argument("--comfyui-input-dir", type=Path, default=None)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--inspect", action="store_true", help="Print inpainting diagnostics after preparation.")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
@@ -58,6 +59,7 @@ def main() -> int:
             mask_path=args.mask.resolve() if args.mask else None,
             expansion=expansion if args.workflow == "outpainting" else None,
             dry_run=args.dry_run,
+            diagnostics=args.inspect and args.workflow == "inpainting",
         )
     except (FileNotFoundError, KeyError, json.JSONDecodeError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
@@ -87,6 +89,11 @@ def main() -> int:
             print(f"Note: {message}")
         for error in result.errors:
             print(f"Error: {error}", file=sys.stderr)
+        if args.inspect and result.diagnostic_details:
+            print("\nInspection:")
+            from core.runtime.inpainting_inspection import format_inpainting_inspection
+
+            print(format_inpainting_inspection(result.diagnostic_details))
 
     if not result.ok:
         print("\nRESULT: FAIL — workflow preparation failed.", file=sys.stderr)

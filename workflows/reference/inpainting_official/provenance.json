@@ -1,0 +1,27 @@
+{
+  "label": "official_comfyui_inpainting_workflow",
+  "status": "extracted_from_official_workflow_png",
+  "not_approximation": true,
+  "reconstruction": false,
+  "source_page": "https://github.com/comfyanonymous/ComfyUI_examples/tree/master/inpaint",
+  "source_page_alt": "https://docs.comfy.org/tutorials/basic/inpaint",
+  "source_image_url": "https://raw.githubusercontent.com/comfyanonymous/ComfyUI_examples/master/inpaint/inpain_model_cat.png",
+  "source_image_filename": "inpain_model_cat.png",
+  "source_image_sha256": "2194fe1be03106091dbe6cc9b8b1cb6018b2938b6576c3a68bfa01b488106d70",
+  "extracted_workflow_json": "workflow.json",
+  "extraction_method": "PNG tEXt workflow chunk",
+  "retrieval_date": "2026-07-13",
+  "mask_architecture": {
+    "mask_source_type": "embedded_alpha_from_load_image",
+    "mask_source_node_type": "LoadImage",
+    "separate_mask_file_required": false,
+    "source_image_provides_mask": true
+  },
+  "notes": [
+    "Mask comes from LoadImage MASK output (embedded alpha), not LoadImageMask.",
+    "Historical extracted graph does not serialize grow_mask_by; modern ComfyUI default is 6.",
+    "Source PNG is not committed; only extracted JSON and this provenance are committed.",
+    "Committed workflow.json is pretty-printed from the extracted JSON without changing node/link topology."
+  ],
+  "extracted_workflow_json_sha256": "2877a28f65c79e1e80e7b3c48215f97a378c2953f59655d2b493cc0549ca8f89"
+}

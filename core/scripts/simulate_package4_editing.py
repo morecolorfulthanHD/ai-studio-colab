@@ -24,9 +24,27 @@ _activate.activate(__file__)
 from core.runtime.capability_manager import CapabilityManager
 from core.runtime import input_utils
 from core.runtime import workflow_preparation
+from core.runtime.diagnostic_fixtures import RED_SQUARE, create_fixture_bundle
+from core.runtime.inpainting_reference_preparation import (
+    CONTROLLED_GROW_MASK_BY,
+    prepare_inpainting_reference,
+    prompt_texts,
+    resolve_reference_runtime_paths,
+    sampler_widgets,
+)
+from core.runtime.inpainting_workflow_compare import (
+    MASK_SOURCE_EMBEDDED_ALPHA,
+    MASK_SOURCE_SEPARATE_LOAD_IMAGE_MASK,
+    REFERENCE_INPAINTING_PATH,
+    REFERENCE_PROVENANCE_PATH,
+    compare_inpainting_workflows,
+    load_reference_provenance,
+)
+from core.runtime.mask_diagnostics import analyze_mask
 from core.runtime.registry_loader import RegistryBundle, RegistryLoader, find_repo_root
 from core.runtime.workflow_preparation import prepare_workflow
 from core.runtime.workflow_validation import (
+    DIAG_INPAINTING_MASK_PREVIEW_WORKFLOW_ID,
     INPAINTING_CANONICAL_CHECKPOINT,
     INPAINTING_CANONICAL_DENOISE,
     INPAINTING_CANONICAL_MASK_CHANNEL,
@@ -35,6 +53,7 @@ from core.runtime.workflow_validation import (
     validate_base_inpainting_workflow,
     validate_base_outpainting_workflow,
     validate_base_txt2img_workflow,
+    validate_diag_inpainting_mask_preview_workflow,
     validate_workflow_from_data,
 )
 
@@ -962,6 +981,396 @@ def run_mask_channel_regression_simulations() -> list[tuple[str, str]]:
     return results
 
 
+def _write_mask_fixture(path: Path, *, fill: tuple[int, int, int], box: tuple[int, int, int, int] | None) -> None:
+    from core.runtime.png_utils import write_rgb_png
+
+    width = height = 64
+    rows: list[list[tuple[int, int, int]]] = []
+    for y in range(height):
+        row: list[tuple[int, int, int]] = []
+        for x in range(width):
+            if box is not None and box[0] <= x <= box[2] and box[1] <= y <= box[3]:
+                row.append((255, 255, 255))
+            else:
+                row.append(fill)
+        rows.append(row)
+    write_rgb_png(path, width, height, rows)
+
+
+def run_mask_diagnostics_simulations() -> list[tuple[str, str]]:
+    results: list[tuple[str, str]] = []
+
+    with tempfile.TemporaryDirectory() as tmp_name:
+        tmp = Path(tmp_name)
+        partial = tmp / "partial.png"
+        all_black = tmp / "all_black.png"
+        all_white = tmp / "all_white.png"
+        inverted = tmp / "inverted.png"
+        red_channel = tmp / "red_channel.png"
+        alpha_channel = tmp / "alpha_channel.png"
+        tiny_brick = tmp / "tiny_brick.png"
+
+        _write_mask_fixture(partial, fill=(0, 0, 0), box=(24, 24, 39, 39))
+        _write_mask_fixture(all_black, fill=(0, 0, 0), box=None)
+        _write_mask_fixture(all_white, fill=(255, 255, 255), box=None)
+        inverted_rows = []
+        for y in range(64):
+            row = []
+            for x in range(64):
+                if 24 <= x <= 39 and 24 <= y <= 39:
+                    row.append((0, 0, 0))
+                else:
+                    row.append((255, 255, 255))
+            inverted_rows.append(row)
+        from core.runtime.png_utils import write_rgb_png
+
+        write_rgb_png(inverted, 64, 64, inverted_rows)
+
+        red_rows = [[(0, 0, 0) for _ in range(64)] for _ in range(64)]
+        for y in range(20, 30):
+            for x in range(20, 30):
+                red_rows[y][x] = (255, 0, 0)
+        write_rgb_png(red_channel, 64, 64, red_rows)
+
+        from core.runtime.png_utils import encode_rgba_png
+
+        alpha_rows = [[(0, 0, 0, 255) for _ in range(64)] for _ in range(64)]
+        for y in range(18, 28):
+            for x in range(18, 28):
+                # Transparent = ComfyUI inpaint region under LoadImage MASK semantics.
+                alpha_rows[y][x] = (0, 0, 0, 0)
+        alpha_channel.write_bytes(encode_rgba_png(64, 64, alpha_rows))
+
+        tiny_rows = [[(0, 0, 0) for _ in range(128)] for _ in range(128)]
+        for y in range(60, 68):
+            for x in range(60, 68):
+                tiny_rows[y][x] = (255, 255, 255)
+        write_rgb_png(tiny_brick, 128, 128, tiny_rows)
+
+        partial_report = analyze_mask(partial, channel="red")
+        _assert_equal("partial mask classification", partial_report.classification, "partially_masked")
+        _assert_true("partial mask has nonzero pixels", partial_report.nonzero_pixel_count > 0)
+        results.append(("partial mask statistics", "PASS"))
+
+        black_report = analyze_mask(all_black, channel="red")
+        _assert_equal("all-black mask classification", black_report.classification, "all_black")
+        results.append(("all-black mask", "PASS"))
+
+        white_report = analyze_mask(all_white, channel="red")
+        _assert_equal("all-white mask classification", white_report.classification, "all_white")
+        results.append(("all-white mask", "PASS"))
+
+        inverted_report = analyze_mask(inverted, channel="red", comparison_path=partial)
+        _assert_equal("inverted mask detection", inverted_report.inverted_relative_to, "inverted")
+        results.append(("inverted mask detection", "PASS"))
+
+        _assert_equal("partial mask bounding box", partial_report.bounding_box, (24, 24, 39, 39))
+        results.append(("bounding box accuracy", "PASS"))
+
+        red_report = analyze_mask(red_channel, channel="red")
+        _assert_true("red-channel extraction", red_report.nonzero_pixel_count == 100)
+        results.append(("red-channel extraction", "PASS"))
+
+        alpha_report = analyze_mask(alpha_channel, channel="alpha")
+        _assert_true("alpha-channel extraction", alpha_report.nonzero_pixel_count == 100)
+        _assert_equal("alpha channel bounding box", alpha_report.bounding_box, (18, 18, 27, 27))
+        results.append(("alpha-channel extraction", "PASS"))
+
+        tiny_report = analyze_mask(tiny_brick, channel="red")
+        _assert_true("tiny brick partially masked", tiny_report.classification == "partially_masked")
+        _assert_true("tiny brick percent small", tiny_report.masked_percent < 1.0)
+        results.append(("tiny brick mask statistics", "PASS"))
+
+        reference_data = _load_workflow("workflows/reference/inpainting_official/workflow.json")
+        reference_types = [node.get("type") for node in reference_data.get("nodes", [])]
+        _assert_equal("official reference LoadImage count", reference_types.count("LoadImage"), 1)
+        load_image = next(node for node in reference_data["nodes"] if node.get("type") == "LoadImage")
+        mask_links = None
+        for output in load_image.get("outputs", []):
+            if output.get("name") == "MASK":
+                mask_links = output.get("links")
+        _assert_true("official reference LoadImage MASK connected", bool(mask_links))
+        results.append(("official reference has one LoadImage providing IMAGE and MASK", "PASS"))
+
+        _assert_equal("official reference has no LoadImageMask", reference_types.count("LoadImageMask"), 0)
+        results.append(("official reference has no LoadImageMask node", "PASS"))
+
+        canonical_data = _load_workflow("workflows/base/inpainting/workflow.json")
+        canonical_mask = next(
+            node for node in canonical_data["nodes"] if node.get("type") == "LoadImageMask"
+        )
+        _assert_equal("canonical uses LoadImageMask red", canonical_mask.get("widgets_values", [None, None])[1], "red")
+        results.append(("canonical workflow uses separate LoadImageMask red channel", "PASS"))
+
+        comparison = compare_inpainting_workflows(
+            _REPO_ROOT / "workflows/base/inpainting/workflow.json",
+            _REPO_ROOT / "workflows/reference/inpainting_official/workflow.json",
+        )
+        _assert_equal("canonical/reference overall", comparison.overall, "materially_different")
+        _assert_equal(
+            "canonical mask source type",
+            comparison.canonical_mask_architecture.get("mask_source_type"),
+            MASK_SOURCE_SEPARATE_LOAD_IMAGE_MASK,
+        )
+        _assert_equal(
+            "reference mask source type",
+            comparison.reference_mask_architecture.get("mask_source_type"),
+            MASK_SOURCE_EMBEDDED_ALPHA,
+        )
+        arch_diff = next(
+            (item for item in comparison.differences if item.field == "mask_architecture"),
+            None,
+        )
+        _assert_true("mask architecture difference reported", arch_diff is not None)
+        results.append(("comparison reports mask architecture as materially different", "PASS"))
+
+        material_data = json.loads(json.dumps(reference_data))
+        for node in material_data["nodes"]:
+            if node.get("type") == "CheckpointLoaderSimple":
+                node["widgets_values"][0] = "sd15.safetensors"
+        material_path = tmp / "material_reference.json"
+        material_path.write_text(json.dumps(material_data), encoding="utf-8")
+        material_comparison = compare_inpainting_workflows(
+            _REPO_ROOT / "workflows/base/inpainting/workflow.json",
+            material_path,
+        )
+        _assert_equal("material workflow difference overall", material_comparison.overall, "materially_different")
+        results.append(("material workflow difference detection", "PASS"))
+
+        preview_validation = validate_diag_inpainting_mask_preview_workflow(
+            _REPO_ROOT / "workflows/diagnostics/inpainting_mask_preview/workflow.json"
+        )
+        _assert_equal("diagnostic mask preview workflow valid", preview_validation.valid, True)
+        results.append(("diagnostic mask preview workflow validation", "PASS"))
+
+        bundle = _create_dogfood_bundle(tmp)
+        repo = tmp / "repo"
+        runtime_dir = bundle.path("runtime_workflows")
+        comfy_input_dir = bundle.path("comfyui_runtime") / "input"
+        source = tmp / "inspect_source.png"
+        mask = tmp / "inspect_mask.png"
+        _write_valid_png(source, width=16, height=16, rgb=(10, 20, 30))
+        _write_valid_png(mask, width=16, height=16, rgb=(255, 255, 255))
+        inspect_result = prepare_workflow(
+            repo,
+            runtime_dir,
+            comfyui_input_dir=comfy_input_dir,
+            workflow="inpainting",
+            input_path=source,
+            mask_path=mask,
+            diagnostics=True,
+        )
+        _assert_true("prepared workflow inspection ok", inspect_result.ok)
+        _assert_true("prepared workflow inspection details", bool(inspect_result.diagnostic_details))
+        _assert_equal(
+            "prepared workflow inspection checkpoint",
+            inspect_result.diagnostic_details.get("checkpoint"),
+            INPAINTING_CANONICAL_CHECKPOINT,
+        )
+        results.append(("prepared workflow inspection", "PASS"))
+
+        fixture_dir = tmp / "fixture_runtime"
+        fixture_paths = create_fixture_bundle(fixture_dir)
+        _assert_true("fixture source exists", Path(fixture_paths["source"]).is_file())
+        _assert_true("fixture mask exists", Path(fixture_paths["mask"]).is_file())
+        _assert_true("fixture rgba exists", Path(fixture_paths["source_rgba"]).is_file())
+        fixture_mask = analyze_mask(Path(fixture_paths["mask"]), channel="red")
+        _assert_equal("fixture mask dimensions", fixture_mask.dimensions, (512, 512))
+        results.append(("diagnostic fixture generation", "PASS"))
+        results.append(("diagnostic fixture mask dimensions", "PASS"))
+
+        rgba_report = analyze_mask(Path(fixture_paths["source_rgba"]), channel="alpha")
+        _assert_equal("RGBA fixture classification", rgba_report.classification, "partially_masked")
+        _assert_equal("RGBA fixture alpha bounding box", rgba_report.bounding_box, RED_SQUARE["box"])
+        results.append(("RGBA fixture contains a valid alpha mask", "PASS"))
+        results.append(("alpha diagnostics identify the correct bounding box", "PASS"))
+
+        ref_prep = prepare_inpainting_reference(
+            _REPO_ROOT,
+            runtime_dir,
+            input_path=Path(fixture_paths["source_rgba"]),
+            comfyui_input_dir=comfy_input_dir,
+            match_canonical_sampler=True,
+            positive_prompt="a bright yellow square",
+            negative_prompt="blurry, low quality, distorted, seams, artifacts",
+        )
+        _assert_true("prepared official reference ok", ref_prep.ok)
+        prepared_ref = json.loads(Path(ref_prep.prepared_path).read_text(encoding="utf-8"))
+        staged_rgba = Path(ref_prep.staged_input_path)
+        _assert_true("prepared official reference stages rgba", staged_rgba.is_file())
+        _assert_equal(
+            "prepared official reference preserves alpha bytes",
+            staged_rgba.read_bytes(),
+            Path(fixture_paths["source_rgba"]).read_bytes(),
+        )
+        _assert_equal("prepared reference grow_mask_by", ref_prep.grow_mask_by, CONTROLLED_GROW_MASK_BY)
+        results.append(("prepared official reference preserves the embedded alpha mask", "PASS"))
+
+        canonical_prepared = json.loads(Path(inspect_result.prepared_path).read_text(encoding="utf-8"))
+        _assert_equal(
+            "canonical and reference prepared samplers match",
+            sampler_widgets(canonical_prepared),
+            sampler_widgets(prepared_ref),
+        )
+        results.append(("canonical and reference prepared workflows use identical sampler parameters", "PASS"))
+
+        provenance = load_reference_provenance(_REPO_ROOT)
+        _assert_true("reference provenance present", bool(provenance))
+        _assert_equal(
+            "reference provenance extracted status",
+            provenance.get("status"),
+            "extracted_from_official_workflow_png",
+        )
+        _assert_true("reference provenance has source image sha", bool(provenance.get("source_image_sha256")))
+        results.append(("reference provenance metadata is present", "PASS"))
+
+        repo_canonical = _REPO_ROOT / "workflows/base/inpainting/workflow.json"
+        repo_mtime_before = repo_canonical.stat().st_mtime
+        _assert_true("fixture path outside repo", not str(fixture_dir).startswith(str(_REPO_ROOT)))
+        _assert_equal("repo canonical unchanged mtime", repo_canonical.stat().st_mtime, repo_mtime_before)
+        results.append(("no repo writes from fixture generation", "PASS"))
+
+    return results
+
+
+def run_reference_preparation_hardening_simulations() -> list[tuple[str, str]]:
+    results: list[tuple[str, str]] = []
+
+    resolved = resolve_reference_runtime_paths(_REPO_ROOT)
+    _assert_equal("colab default comfyui input", resolved.comfyui_input_dir, Path("/content/ComfyUI/input"))
+    results.append(("Colab default ComfyUI input path resolves to /content/ComfyUI/input", "PASS"))
+    _assert_equal(
+        "colab default prepared workflows",
+        resolved.runtime_dir,
+        Path("/content/ai-studio-runtime/workflows"),
+    )
+    results.append(
+        ("Colab default prepared workflow path resolves beneath /content/ai-studio-runtime/workflows", "PASS")
+    )
+
+    with tempfile.TemporaryDirectory() as tmp_name:
+        tmp = Path(tmp_name)
+        override_runtime = tmp / "custom_runtime_workflows"
+        override_input = tmp / "custom_comfy" / "input"
+        overridden = resolve_reference_runtime_paths(
+            _REPO_ROOT,
+            runtime_dir=override_runtime,
+            comfyui_input_dir=override_input,
+        )
+        _assert_equal("explicit runtime override", overridden.runtime_dir, override_runtime.resolve())
+        _assert_equal("explicit input override", overridden.comfyui_input_dir, override_input.resolve())
+        results.append(("explicit directory overrides still work", "PASS"))
+
+        fixture_paths = create_fixture_bundle(tmp / "fixture")
+        rgba = Path(fixture_paths["source_rgba"])
+        extracted_prompts = prompt_texts(_load_workflow(REFERENCE_INPAINTING_PATH))
+        _assert_true("extracted prompts readable", extracted_prompts is not None)
+
+        prompt_prep = prepare_inpainting_reference(
+            _REPO_ROOT,
+            override_runtime,
+            input_path=rgba,
+            comfyui_input_dir=override_input,
+            positive_prompt="a bright yellow square",
+            negative_prompt="blurry, low quality, distorted, seams, artifacts",
+            match_canonical_sampler=True,
+            resolved_paths=overridden,
+        )
+        _assert_true("prompt override prep ok", prompt_prep.ok)
+        _assert_equal("positive prompt override", prompt_prep.positive_prompt, "a bright yellow square")
+        _assert_equal(
+            "negative prompt override",
+            prompt_prep.negative_prompt,
+            "blurry, low quality, distorted, seams, artifacts",
+        )
+        results.append(("positive prompt override is applied", "PASS"))
+        results.append(("negative prompt override is applied", "PASS"))
+
+        preserve_prep = prepare_inpainting_reference(
+            _REPO_ROOT,
+            override_runtime,
+            input_path=rgba,
+            comfyui_input_dir=override_input,
+        )
+        _assert_true("omitted prompt flags ok", preserve_prep.ok)
+        _assert_equal("preserved positive prompt", preserve_prep.positive_prompt, extracted_prompts[0])
+        _assert_equal("preserved negative prompt", preserve_prep.negative_prompt, extracted_prompts[1])
+        results.append(("omitted prompt flags preserve extracted prompts", "PASS"))
+
+        broken = _load_workflow(REFERENCE_INPAINTING_PATH)
+        clip_nodes = [node for node in broken["nodes"] if node.get("type") == "CLIPTextEncode"]
+        non_clip = [node for node in broken["nodes"] if node.get("type") != "CLIPTextEncode"]
+        broken["nodes"] = non_clip + clip_nodes[:1]
+        broken_path = tmp / "broken_reference.json"
+        broken_path.write_text(json.dumps(broken), encoding="utf-8")
+        malformed = prepare_inpainting_reference(
+            _REPO_ROOT,
+            override_runtime,
+            input_path=rgba,
+            comfyui_input_dir=override_input,
+            reference_workflow_path=broken_path,
+        )
+        _assert_true("malformed CLIP count rejected", not malformed.ok)
+        results.append(("malformed CLIP node count is rejected", "PASS"))
+
+        aligned = prepare_inpainting_reference(
+            _REPO_ROOT,
+            override_runtime,
+            input_path=rgba,
+            comfyui_input_dir=override_input,
+            match_canonical_sampler=True,
+        )
+        _assert_true("match-canonical-sampler ok", aligned.ok)
+        canonical = _load_workflow("workflows/base/inpainting/workflow.json")
+        _assert_equal(
+            "match-canonical-sampler widgets",
+            sampler_widgets(json.loads(Path(aligned.prepared_path).read_text(encoding="utf-8"))),
+            sampler_widgets(canonical),
+        )
+        results.append(("--match-canonical-sampler aligns seed and sampler parameters", "PASS"))
+
+        prepared = json.loads(Path(aligned.prepared_path).read_text(encoding="utf-8"))
+        _assert_true(
+            "prepared retains embedded-alpha topology",
+            any(
+                node.get("type") == "LoadImage"
+                and any(out.get("name") == "MASK" and out.get("links") for out in node.get("outputs", []))
+                for node in prepared["nodes"]
+            ),
+        )
+        _assert_equal(
+            "prepared has no LoadImageMask",
+            sum(1 for node in prepared["nodes"] if node.get("type") == "LoadImageMask"),
+            0,
+        )
+        results.append(("prepared reference retains embedded-alpha mask topology", "PASS"))
+
+        import hashlib
+
+        workflow_path = _REPO_ROOT / REFERENCE_INPAINTING_PATH
+        provenance = load_reference_provenance(_REPO_ROOT)
+        current_sha = hashlib.sha256(workflow_path.read_bytes()).hexdigest()
+        _assert_equal(
+            "extracted reference workflow hash unchanged",
+            current_sha,
+            provenance.get("extracted_workflow_json_sha256"),
+        )
+        _assert_equal(
+            "provenance source image hash present",
+            bool(provenance.get("source_image_sha256")),
+            True,
+        )
+        results.append(("extracted reference workflow and provenance hashes remain unchanged", "PASS"))
+
+        _assert_true(
+            "default prepared path under configured runtime",
+            str(Path("/content/ai-studio-runtime/workflows")) in str(resolved.runtime_dir)
+            or resolved.runtime_dir == Path("/content/ai-studio-runtime/workflows"),
+        )
+
+    return results
+
+
 def run_txt2img_regression_simulations() -> list[tuple[str, str]]:
     results: list[tuple[str, str]] = []
 
@@ -994,6 +1403,8 @@ def main() -> int:
         ("Capability Readiness", run_capability_readiness_simulations),
         ("Workflow Preparation", run_preparation_simulations),
         ("Mask Channel Regression", run_mask_channel_regression_simulations),
+        ("Mask Diagnostics", run_mask_diagnostics_simulations),
+        ("Reference Preparation Hardening", run_reference_preparation_hardening_simulations),
         ("txt2img Regression", run_txt2img_regression_simulations),
     ]
 

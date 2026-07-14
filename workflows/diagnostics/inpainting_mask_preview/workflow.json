@@ -1,0 +1,107 @@
+{
+  "last_node_id": 6,
+  "last_link_id": 5,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "LoadImage",
+      "pos": [60, 120],
+      "size": [315, 314],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {"name": "IMAGE", "type": "IMAGE", "links": [3], "slot_index": 0},
+        {"name": "MASK", "type": "MASK", "links": null, "slot_index": 1}
+      ],
+      "properties": {"Node name for S&R": "LoadImage"},
+      "widgets_values": ["source_image.png", "image"]
+    },
+    {
+      "id": 2,
+      "type": "LoadImageMask",
+      "pos": [60, 480],
+      "size": [315, 58],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {"name": "MASK", "type": "MASK", "links": [1], "slot_index": 0}
+      ],
+      "properties": {"Node name for S&R": "LoadImageMask"},
+      "widgets_values": ["mask_image.png", "red", "white"]
+    },
+    {
+      "id": 3,
+      "type": "MaskToImage",
+      "pos": [420, 480],
+      "size": [210, 26],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [{"name": "mask", "type": "MASK", "link": 1}],
+      "outputs": [
+        {"name": "IMAGE", "type": "IMAGE", "links": [2, 4], "slot_index": 0}
+      ],
+      "properties": {"Node name for S&R": "MaskToImage"},
+      "widgets_values": []
+    },
+    {
+      "id": 4,
+      "type": "SaveImage",
+      "pos": [720, 420],
+      "size": [315, 106],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [{"name": "images", "type": "IMAGE", "link": 2}],
+      "outputs": [],
+      "properties": {"Node name for S&R": "SaveImage"},
+      "widgets_values": ["ai_studio_diag_mask_preview"]
+    },
+    {
+      "id": 5,
+      "type": "ImageBlend",
+      "pos": [720, 120],
+      "size": [315, 102],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {"name": "image1", "type": "IMAGE", "link": 3},
+        {"name": "image2", "type": "IMAGE", "link": 4}
+      ],
+      "outputs": [
+        {"name": "IMAGE", "type": "IMAGE", "links": [5], "slot_index": 0}
+      ],
+      "properties": {"Node name for S&R": "ImageBlend"},
+      "widgets_values": [0.5, "normal"]
+    },
+    {
+      "id": 6,
+      "type": "SaveImage",
+      "pos": [1080, 120],
+      "size": [315, 106],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [{"name": "images", "type": "IMAGE", "link": 5}],
+      "outputs": [],
+      "properties": {"Node name for S&R": "SaveImage"},
+      "widgets_values": ["ai_studio_diag_mask_overlay"]
+    }
+  ],
+  "links": [
+    [1, 2, 0, 3, 0, "MASK"],
+    [2, 3, 0, 4, 0, "IMAGE"],
+    [3, 1, 0, 5, 0, "IMAGE"],
+    [4, 3, 0, 5, 1, "IMAGE"],
+    [5, 5, 0, 6, 0, "IMAGE"]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {"ds": {"scale": 1.0, "offset": [0, 0]}},
+  "version": 0.4
+}
