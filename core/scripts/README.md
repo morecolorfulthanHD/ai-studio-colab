@@ -13,9 +13,9 @@ Cross-engine utility scripts for bootstrap, validation, and batch processing.
 | `validate_paths.py` | Validate Colab/Drive/repo paths from manifest | No |
 | `validate_manifests.py` | Validate JSON schemas under `configs/` | No |
 | `list_workflows.py` | List workflow JSON files by category | No |
-| `sync_outputs.py` | Copy single newest ComfyUI output to Drive (`--dry-run`, `--fail-on-existing`; collision-safe rename; cwd-independent) | No |
+| `sync_outputs.py` | **Maintenance/diagnostic:** manual copy of newest ComfyUI output to Drive (`--dry-run`, collision-safe rename) — not required after Package 4.4 autosync | No |
 | `dogfood_core_runtime.py` | Sprint 1 dogfooding checks (PASS/WARN/FAIL summary) | No |
-| `verify_generation.py` | Read-only local/Drive generation evidence (`--summary`, `--json`, `--workflow img2img\|inpainting\|outpainting`) | No |
+| `verify_generation.py` | **Maintenance/diagnostic:** read-only local/Drive generation evidence — superseded by automatic ledger for normal workflow | No |
 | `list_inputs.py` | List eligible Drive input images and masks (read-only) | No |
 | `prepare_workflow.py` | Prepare ephemeral runtime workflow JSON with selected inputs (`--dry-run`, `--json`, `--inspect`) | No |
 | `inspect_mask.py` | Read-only mask diagnostics for inpainting (`--channel`, `--summary`, `--json`; use `--channel alpha` for embedded ComfyUI MASK) | No |
@@ -29,6 +29,15 @@ Cross-engine utility scripts for bootstrap, validation, and batch processing.
 | `report_editing_benchmark.py` | Report editing benchmark ledger | No |
 | `simulate_output_autosync.py` | Package 4.4 autosync simulations | No |
 | `simulate_modern_editing_benchmark.py` | Package 4.4 modern editing benchmark simulations | No |
+| `simulate_package45_provenance_workspace.py` | Package 4.5 provenance, truthfulness, workspace simulations | No |
+| `list_generations.py` | List recent generation evidence records (`--json`, `--verified-only`) | No |
+| `show_generation.py` | Show evidence for one prompt ID (`--json`) | No |
+| `report_generation_history.py` | Generation ledger summary and recent verified rows | No |
+| `create_project.py` | Create AI Studio project workspace on Drive | No |
+| `list_projects.py` | List projects and active project | No |
+| `show_project.py` | Show one project manifest | No |
+| `set_active_project.py` | Set or clear active project (`--slug`, `--clear`) | No |
+| `workflow_catalog.py` | User-facing workflow catalog with runtime/quality/production status | No |
 
 ## Runtime Verification (Phase 1b)
 

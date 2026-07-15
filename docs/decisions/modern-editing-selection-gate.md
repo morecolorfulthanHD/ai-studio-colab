@@ -28,7 +28,8 @@ Executing a workflow alone is **not** sufficient.
 
 ## Current decision
 
-- Keep **SD1.5** as the production inpainting capability
+- SD1.5 inpainting remains **technically available** (`runtime_status: ready`) but is **quality-unqualified** (`quality_status: benchmark_failed`, `production_status: experimental`) per `docs/decisions/sd15-inpainting-quality-gate.md`
+- Do **not** present SD1.5 inpainting as the recommended production editing model
 - Treat Qwen / FLUX Fill as **benchmark-only** capabilities
 - Do **not** promote FLUX Fill as a commercial production default under the current non-commercial weight license
 
@@ -37,5 +38,5 @@ Executing a workflow alone is **not** sufficient.
 | Field | Value |
 |-------|-------|
 | Decision | Deferred |
-| Selected default | `inpainting` (SD1.5) unchanged |
+| Selected default | `inpainting` capability retained for diagnostics; **not** quality-approved for production editing |
 | Next action | Complete live dogfood under `docs/dogfooding/modern-editing-benchmark-checklist.md` |

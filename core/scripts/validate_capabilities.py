@@ -59,6 +59,17 @@ def _to_human(data: dict, selected_id: str | None = None) -> str:
         if execution and execution != "not_applicable":
             execution_suffix = f" | input={execution}"
         lines.append(f"  [{cap['computed_status'].upper():11}] {cap['id']} ({cap['name']}){evidence_suffix}{execution_suffix}")
+        runtime_status = cap.get("runtime_status")
+        quality_status = cap.get("quality_status")
+        production_status = cap.get("production_status")
+        if runtime_status or quality_status or production_status:
+            lines.append(
+                f"      runtime={str(runtime_status or '').upper()} "
+                f"quality={str(quality_status or '').upper()} "
+                f"production={str(production_status or '').upper()}"
+            )
+        if cap.get("quality_reason"):
+            lines.append(f"      reason: {cap['quality_reason']}")
         if cap.get("reasons"):
             for reason in cap["reasons"]:
                 lines.append(f"      - {reason}")

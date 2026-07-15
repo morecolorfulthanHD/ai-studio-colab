@@ -34,7 +34,9 @@ _activate.activate(__file__)
 
 from core.runtime.comfyui_events import DEFAULT_COMFY_BASE, DEFAULT_COMFY_WS, HistoryFallbackWatcher
 from core.runtime.output_autosync import OutputAutoSyncService
+from core.runtime.project_workspace import ProjectWorkspace
 from core.runtime.registry_loader import RegistryLoader, find_repo_root
+from core.runtime.workflow_provenance import load_registered_workflow_hashes
 from core.runtime.watcher_lock import (
     PID_NAME,
     clear_stale_lock,
@@ -79,6 +81,8 @@ def _build_service(
     log_path: Path,
     comfy_base_url: str,
 ) -> OutputAutoSyncService:
+    registered = load_registered_workflow_hashes(bundle.repo_root, bundle.workflows)
+    active_project = ProjectWorkspace(bundle.path("drive_root")).get_active_project()
     return OutputAutoSyncService(
         comfy_output_dir=bundle.path("comfyui_output"),
         drive_output_dir=bundle.path("drive_outputs"),
@@ -87,6 +91,8 @@ def _build_service(
         status_path=status_path,
         base_url=comfy_base_url,
         log_fn=lambda message: _append_log(log_path, message),
+        registered_hashes=registered,
+        active_project=active_project,
     )
 
 

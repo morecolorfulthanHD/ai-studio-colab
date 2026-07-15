@@ -8,6 +8,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+import shutil
+
 from .inpainting_inspection import format_inpainting_inspection, inspect_prepared_inpainting_workflow
 from .input_staging import stage_inputs_batch
 from .input_utils import validate_input_path, validate_matching_dimensions
@@ -20,6 +22,7 @@ from .workflow_validation import (
     validate_workflow,
     validate_workflow_from_data,
 )
+from .workflow_provenance import WORKFLOW_ID_TO_IDENTIFIER
 
 WORKFLOW_ALIASES = {
     "img2img": BASE_IMG2IMG_WORKFLOW_ID,
@@ -40,6 +43,7 @@ class WorkflowPreparationResult:
     workflow_id: str
     canonical_path: str
     prepared_path: str = ""
+    drive_prepared_path: str = ""
     input_image: str = ""
     mask_image: str = ""
     staged_input_path: str = ""
@@ -173,6 +177,7 @@ def prepare_workflow(
     dry_run: bool = False,
     operation_timestamp: str | None = None,
     diagnostics: bool = False,
+    drive_prepared_dir: Path | None = None,
 ) -> WorkflowPreparationResult:
     workflow_id = _resolve_workflow_id(workflow)
     canonical_rel = CANONICAL_WORKFLOW_PATHS[workflow_id]
@@ -262,6 +267,15 @@ def prepare_workflow(
         expansion=expansion,
     )
 
+    identifier, source = WORKFLOW_ID_TO_IDENTIFIER.get(workflow_id, (f"registry/{workflow_id}", "registered"))
+    data.setdefault("extra", {})
+    if isinstance(data["extra"], dict):
+        data["extra"]["ai_studio"] = {
+            "workflow_identifier": identifier,
+            "workflow_id": workflow_id,
+            "workflow_source": source,
+        }
+
     patched_validation = validate_workflow_from_data(workflow_id, data)
     if not patched_validation.valid:
         result.errors.append(
@@ -294,5 +308,16 @@ def prepare_workflow(
         json.dump(data, handle, indent=2)
         handle.write("\n")
     result.messages.append("Prepared workflow written to ephemeral runtime directory.")
+    if drive_prepared_dir is not None:
+        drive_prepared_dir.mkdir(parents=True, exist_ok=True)
+        drive_copy = drive_prepared_dir / prepared_path.name
+        if drive_copy.exists():
+            suffix = 1
+            while drive_copy.exists():
+                drive_copy = drive_prepared_dir / f"{prepared_path.stem}.{suffix}{prepared_path.suffix}"
+                suffix += 1
+        shutil.copy2(prepared_path, drive_copy)
+        result.drive_prepared_path = str(drive_copy)
+        result.messages.append(f"Persistent Drive copy: {drive_copy}")
     _append_execution_sequence(result)
     return result

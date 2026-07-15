@@ -67,11 +67,18 @@ def dedupe_key_from_row(row: dict[str, Any]) -> str:
 @dataclass
 class EvidenceRecord:
     prompt_id: str
+    schema_version: int = 1
+    provenance_version: int = 0
     workflow_identifier: str = ""
     workflow_hash: str = ""
+    workflow_hash_type: str = ""
+    api_prompt_hash: str = ""
+    workflow_source: str = ""
     output_node_id: str = ""
     local_path: str = ""
     drive_path: str = ""
+    project_id: str = ""
+    project_output_path: str = ""
     local_sha256: str = ""
     drive_sha256: str = ""
     byte_size: int = 0
@@ -82,11 +89,33 @@ class EvidenceRecord:
     error_summary: str = ""
     candidate_model: str = ""
     capability: str = ""
+    model_family: str = ""
+    model_files: list[str] = field(default_factory=list)
+    positive_prompt: str = ""
+    negative_prompt: str = ""
+    seed: int | None = None
+    steps: int | None = None
+    cfg: float | None = None
+    sampler_name: str = ""
+    scheduler: str = ""
+    denoise: float | None = None
+    width: int | None = None
+    height: int | None = None
+    save_prefix: str = ""
+    source_image_filenames: list[str] = field(default_factory=list)
+    mask_filenames: list[str] = field(default_factory=list)
+    provenance_status: str = ""
+    missing_provenance_fields: list[str] = field(default_factory=list)
     messages: list[str] = field(default_factory=list)
     prior_error_summary: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        payload = asdict(self)
+        # Omit null optional ints for compact legacy-compatible rows when unset.
+        for key in ("seed", "steps", "cfg", "denoise", "width", "height"):
+            if payload.get(key) is None:
+                payload.pop(key, None)
+        return payload
 
     @property
     def dedupe_key(self) -> str:

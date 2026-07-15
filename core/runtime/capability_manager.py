@@ -63,6 +63,10 @@ class CapabilityEvaluation:
     execution_input_status: str = "not_applicable"
     execution_input_details: dict[str, Any] = field(default_factory=dict)
     runtime_checks: list[str] = field(default_factory=list)
+    runtime_status: str = "unavailable"
+    quality_status: str = "untested"
+    production_status: str = "experimental"
+    quality_reason: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -351,6 +355,12 @@ class CapabilityManager:
 
         evidence_status, evidence_details = self._evaluate_generation_evidence(cap["id"])
 
+        runtime_status = str(cap.get("runtime_status") or computed_status)
+        quality_status = str(cap.get("quality_status") or "untested")
+        production_status = str(cap.get("production_status") or "experimental")
+        quality_assessment = cap.get("quality_assessment") if isinstance(cap.get("quality_assessment"), dict) else {}
+        quality_reason = str(cap.get("quality_reason") or quality_assessment.get("reason") or "")
+
         evaluation = CapabilityEvaluation(
             id=cap["id"],
             name=cap["name"],
@@ -372,6 +382,10 @@ class CapabilityManager:
             execution_input_status=execution_input_status,
             execution_input_details=execution_input_details,
             runtime_checks=runtime_checks,
+            runtime_status=runtime_status,
+            quality_status=quality_status,
+            production_status=production_status,
+            quality_reason=quality_reason,
         )
         self._eval_cache[capability_id] = evaluation
         return evaluation

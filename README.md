@@ -120,11 +120,14 @@ Base txt2img workflow:
 
 `/content/ai-studio-colab/workflows/base/txt2img/workflow.json`
 
-After generating an image:
+After clicking **Run** in ComfyUI (Package 4.4+), outputs are **automatically** synchronized to Drive and verified — no manual sync command is required.
+
+**Maintenance / diagnostic only** (recovery, troubleshooting):
 
 ```bash
 python core/scripts/sync_outputs.py --dry-run
-python core/scripts/sync_outputs.py
+python core/scripts/verify_generation.py --summary
+python core/scripts/report_generation_history.py --summary
 ```
 
 ### Image Editing (Package 4)
@@ -157,7 +160,7 @@ Inpainting requires a dedicated checkpoint at:
 
 `sd15.safetensors` is not sufficient for reliable base inpainting object replacement. No automatic download occurs; place the model manually and review licensing/source before use.
 
-**Dogfooding sequence:** Drive inputs → `list_inputs.py` → `prepare_workflow.py` (stages into `/content/ComfyUI/input`) → import prepared workflow → generate → `sync_outputs.py` → `verify_generation.py`.
+**Dogfooding sequence:** Launch Full mode → import workflow → click **Run** → confirm automatic Drive copy and `generation_evidence.jsonl`. For editing: Drive inputs → `list_inputs.py` → `prepare_workflow.py` → import prepared workflow → Run. Use `sync_outputs.py` / `verify_generation.py` only for maintenance.
 
 **Implementation readiness** (ComfyUI + SD1.5 + valid workflow) is computed separately from **execution input readiness** (whether the user has selected source/mask files). A capability can be `READY` before any Drive input is placed.
 
@@ -179,7 +182,7 @@ Dogfooding: [docs/dogfooding/img2img-checklist.md](docs/dogfooding/img2img-check
 | `core/scripts/verify_models.py` | Report present vs. missing model files |
 | `core/scripts/validate_assets.py` | Asset registry validation |
 | `core/scripts/validate_capabilities.py` | Capability readiness validation |
-| `core/scripts/sync_outputs.py` | Copy latest ComfyUI output to Drive (`--dry-run`) |
+| `core/scripts/sync_outputs.py` | **Maintenance:** manual copy of latest ComfyUI output to Drive (`--dry-run`) |
 | `core/scripts/dogfood_core_runtime.py` | Read-only dogfooding checks (PASS/WARN/FAIL) |
 | `core/scripts/verify_generation.py` | Read-only generation evidence (`--summary`, `--json`) |
 
@@ -210,8 +213,8 @@ Validate core runtime + base txt2img in Colab before adding advanced workflows:
 1. Run `control_panel()` → **1. Launch** → choose `minimal` for first image readiness.
 2. Confirm SD1.5 at `/content/drive/MyDrive/AI_Studio/models/shared/checkpoints/sd15.safetensors`.
 3. Import `workflows/base/txt2img/workflow.json` in ComfyUI and queue a baseline prompt.
-4. Copy latest output with `python core/scripts/sync_outputs.py`.
-5. Re-run `python core/scripts/runtime_report.py --summary` and `python core/scripts/verify_generation.py --summary` to confirm txt2img readiness and generation evidence.
+4. Confirm automatic output persistence (Drive copy + `generation_evidence.jsonl`) — no manual sync required.
+5. Re-run `python core/scripts/runtime_report.py --summary` and `python core/scripts/report_generation_history.py --summary`.
 
 ## Base Generation Workflow
 

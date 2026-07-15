@@ -190,6 +190,18 @@ def to_human(report: dict) -> str:
                 f"evidence={cap.get('evidence_status', 'not_evaluated')} "
                 f"input={cap.get('execution_input_status', 'not_applicable')}"
             )
+            cap_eval = next(
+                (c for c in report.get("capabilities", {}).get("capabilities", []) if c.get("id") == cap_id),
+                None,
+            )
+            if cap_eval and cap_eval.get("quality_status"):
+                lines.append(
+                    f"             runtime={str(cap_eval.get('runtime_status', '')).upper()} "
+                    f"quality={str(cap_eval.get('quality_status', '')).upper()} "
+                    f"production={str(cap_eval.get('production_status', '')).upper()}"
+                )
+                if cap_eval.get("quality_reason"):
+                    lines.append(f"             reason: {cap_eval['quality_reason']}")
     nodes = report.get("nodes", {})
     if nodes:
         lines.extend(

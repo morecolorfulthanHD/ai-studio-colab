@@ -40,7 +40,16 @@ from .generation_evidence_ledger import (
 )
 from .output_evidence import ELIGIBLE_OUTPUT_SUFFIXES, is_eligible_output
 from .output_sync import resolve_sync_destination
+from .project_workspace import ProjectManifest
 from .watcher_lock import pid_alive
+from .workflow_provenance import (
+    SCHEMA_VERSION,
+    ExecutionProvenance,
+    PROVENANCE_VERSION,
+    extract_execution_provenance,
+    extract_ui_workflow_from_history,
+    load_registered_workflow_hashes,
+)
 
 AUTOSYNC_TEMP_PREFIX = ".ai_studio_autosync_tmp."
 
@@ -327,6 +336,8 @@ class OutputAutoSyncService:
         max_copy_retries: int = 3,
         sleep_fn: Callable[[float], None] | None = None,
         copy_fn: Callable[[Path, Path], None] | None = None,
+        registered_hashes: dict[str, tuple[str, str, str]] | None = None,
+        active_project: ProjectManifest | None = None,
     ) -> None:
         self.comfy_output_dir = comfy_output_dir
         self.drive_output_dir = drive_output_dir
@@ -338,6 +349,8 @@ class OutputAutoSyncService:
         self.max_copy_retries = max_copy_retries
         self.sleep_fn = sleep_fn or time.sleep
         self.copy_fn = copy_fn
+        self.registered_hashes = registered_hashes or {}
+        self.active_project = active_project
         # Permanent processed set = verified keys only.
         self.processed = self.index.load()
         self.processed.update(self.ledger.verified_keys())
@@ -345,6 +358,63 @@ class OutputAutoSyncService:
         self.unrecoverable_missing_source: set[str] = set()
         self.status = AutoSyncStatus()
         self.recompute_counters()
+
+    def _apply_provenance(self, record: EvidenceRecord, provenance: ExecutionProvenance | None) -> None:
+        if provenance is None:
+            return
+        payload = provenance.to_dict()
+        record.schema_version = SCHEMA_VERSION
+        record.provenance_version = PROVENANCE_VERSION
+        record.workflow_identifier = str(payload.get("workflow_identifier") or record.workflow_identifier)
+        record.workflow_hash = str(payload.get("workflow_hash") or record.workflow_hash)
+        record.workflow_hash_type = str(payload.get("workflow_hash_type") or record.workflow_hash_type)
+        record.api_prompt_hash = str(payload.get("api_prompt_hash") or record.api_prompt_hash)
+        record.workflow_source = str(payload.get("workflow_source") or record.workflow_source)
+        record.capability = str(payload.get("capability") or record.capability)
+        record.model_family = str(payload.get("model_family") or record.model_family)
+        record.model_files = list(payload.get("model_files") or record.model_files)
+        record.candidate_model = str(payload.get("candidate_model") or record.candidate_model)
+        record.positive_prompt = str(payload.get("positive_prompt") or record.positive_prompt)
+        record.negative_prompt = str(payload.get("negative_prompt") or record.negative_prompt)
+        record.seed = payload.get("seed")
+        record.steps = payload.get("steps")
+        record.cfg = payload.get("cfg")
+        record.sampler_name = str(payload.get("sampler_name") or record.sampler_name)
+        record.scheduler = str(payload.get("scheduler") or record.scheduler)
+        record.denoise = payload.get("denoise")
+        record.width = payload.get("width")
+        record.height = payload.get("height")
+        record.save_prefix = str(payload.get("save_prefix") or record.save_prefix)
+        record.source_image_filenames = list(payload.get("source_image_filenames") or [])
+        record.mask_filenames = list(payload.get("mask_filenames") or [])
+        record.provenance_status = str(payload.get("provenance_status") or "")
+        record.missing_provenance_fields = list(payload.get("missing_provenance_fields") or [])
+
+    def _mirror_verified_to_project(self, source: Path, global_destination: Path) -> str:
+        if self.active_project is None:
+            return ""
+        project_outputs = Path(self.active_project.outputs_dir)
+        project_outputs.mkdir(parents=True, exist_ok=True)
+        source_hash = file_sha256(source)
+        for existing in project_outputs.iterdir():
+            if existing.is_file() and file_sha256(existing) == source_hash:
+                return str(existing)
+        destination, _status, _retries, _error = copy_with_verification(
+            source,
+            project_outputs,
+            max_retries=1,
+            sleep_fn=self.sleep_fn,
+            copy_fn=self.copy_fn,
+        )
+        if destination is not None:
+            record = EvidenceRecord(
+                prompt_id="",
+                project_id=self.active_project.project_id,
+                project_output_path=str(destination),
+            )
+            self.log(f"Project mirror verified:\n{destination}")
+            return str(destination)
+        return ""
 
     def initialize_owned_state(
         self,
@@ -408,6 +478,7 @@ class OutputAutoSyncService:
         workflow_hash: str = "",
         candidate_model: str = "",
         capability: str = "",
+        provenance: ExecutionProvenance | None = None,
         recovery: bool = False,
     ) -> EvidenceRecord | None:
         if not is_eligible_output(local_path):
@@ -439,6 +510,7 @@ class OutputAutoSyncService:
 
         pending = EvidenceRecord(
             prompt_id=prompt_id,
+            schema_version=SCHEMA_VERSION if provenance else 1,
             workflow_identifier=workflow_identifier,
             workflow_hash=workflow_hash,
             output_node_id=output_node_id,
@@ -453,6 +525,7 @@ class OutputAutoSyncService:
             capability=capability,
             messages=["recovery_attempt"] if recovery else [],
         )
+        self._apply_provenance(pending, provenance)
         self.ledger.append(pending)
         self.recompute_counters()
         self.write_status()
@@ -468,6 +541,7 @@ class OutputAutoSyncService:
         if sync_status == "verified" and destination is not None:
             record = EvidenceRecord(
                 prompt_id=prompt_id,
+                schema_version=SCHEMA_VERSION if provenance else 1,
                 workflow_identifier=workflow_identifier,
                 workflow_hash=workflow_hash,
                 output_node_id=output_node_id,
@@ -485,6 +559,12 @@ class OutputAutoSyncService:
                 capability=capability,
                 messages=["recovered_after_failure"] if recovery and prior_error else [],
             )
+            self._apply_provenance(record, provenance)
+            if self.active_project is not None:
+                record.project_id = self.active_project.project_id
+                project_path = self._mirror_verified_to_project(local_path, destination)
+                if project_path:
+                    record.project_output_path = project_path
             self.ledger.append(record)
             self.processed.add(key)
             self.index.save(self.processed)
@@ -502,6 +582,7 @@ class OutputAutoSyncService:
 
         record = EvidenceRecord(
             prompt_id=prompt_id,
+            schema_version=SCHEMA_VERSION if provenance else 1,
             workflow_identifier=workflow_identifier,
             workflow_hash=workflow_hash,
             output_node_id=output_node_id,
@@ -517,6 +598,7 @@ class OutputAutoSyncService:
             capability=capability,
             messages=["recovery_attempt_failed"] if recovery else [],
         )
+        self._apply_provenance(record, provenance)
         self.ledger.append(record)
         # Intentionally do NOT add failed keys to self.processed.
         self.status.last_verification = "failed"
@@ -538,6 +620,11 @@ class OutputAutoSyncService:
             self.write_status()
             return []
 
+        provenance = extract_execution_provenance(
+            entry,
+            registered_hashes=self.registered_hashes,
+        )
+
         output_metas = extract_output_files(entry)
         records: list[EvidenceRecord] = []
         if not output_metas:
@@ -547,16 +634,29 @@ class OutputAutoSyncService:
             self.write_status()
             return records
 
+        ui_workflow = extract_ui_workflow_from_history(entry)
         for meta in output_metas:
             local_path = resolve_comfy_output_path(
                 self.comfy_output_dir,
                 filename=meta["filename"],
                 subfolder=meta.get("subfolder") or "",
             )
+            node_id = str(meta.get("node_id") or "")
+            provenance = extract_execution_provenance(
+                entry,
+                registered_hashes=self.registered_hashes,
+                ui_workflow=ui_workflow,
+                output_node_id=node_id,
+            )
             record = self.sync_local_output(
                 prompt_id=prompt_id,
-                output_node_id=str(meta.get("node_id") or ""),
+                output_node_id=node_id,
                 local_path=local_path,
+                workflow_identifier=provenance.workflow_identifier,
+                workflow_hash=provenance.workflow_hash,
+                candidate_model=provenance.candidate_model,
+                capability=provenance.capability,
+                provenance=provenance,
             )
             if record is not None:
                 records.append(record)
@@ -659,10 +759,22 @@ class OutputAutoSyncService:
                     continue
                 if key_probe in self.processed:
                     continue
+                ui_workflow = extract_ui_workflow_from_history(entry)
+                provenance = extract_execution_provenance(
+                    entry,
+                    registered_hashes=self.registered_hashes,
+                    ui_workflow=ui_workflow,
+                    output_node_id=str(meta.get("node_id") or ""),
+                )
                 synched = self.sync_local_output(
                     prompt_id=str(prompt_id),
                     output_node_id=str(meta.get("node_id") or ""),
                     local_path=local_path,
+                    workflow_identifier=provenance.workflow_identifier,
+                    workflow_hash=provenance.workflow_hash,
+                    candidate_model=provenance.candidate_model,
+                    capability=provenance.capability,
+                    provenance=provenance,
                     recovery=False,
                 )
                 if synched is not None:

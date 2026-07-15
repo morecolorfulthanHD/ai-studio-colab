@@ -60,6 +60,7 @@ def main() -> int:
             expansion=expansion if args.workflow == "outpainting" else None,
             dry_run=args.dry_run,
             diagnostics=args.inspect and args.workflow == "inpainting",
+            drive_prepared_dir=bundle.path("drive_workflows") / "prepared",
         )
     except (FileNotFoundError, KeyError, json.JSONDecodeError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
@@ -83,6 +84,8 @@ def main() -> int:
             print(f"Staged mask:       {result.staged_mask_path}")
         if result.prepared_path:
             print(f"Prepared workflow: {result.prepared_path}")
+        if result.drive_prepared_path:
+            print(f"Drive prepared:    {result.drive_prepared_path}")
         if result.expansion:
             print(f"Expansion:         {result.expansion}")
         for message in result.messages:

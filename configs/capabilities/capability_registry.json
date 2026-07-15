@@ -93,7 +93,16 @@
         "all_required_models_registered"
       ],
       "notes": "Base inpainting requires the dedicated SD1.5 inpainting checkpoint (512-inpainting-ema.safetensors).",
-      "implementation_status": "implemented"
+      "implementation_status": "implemented",
+      "runtime_status": "ready",
+      "quality_status": "benchmark_failed",
+      "production_status": "experimental",
+      "quality_assessment": {
+        "reason": "Mask execution verified, but real-world object removal and replacement did not meet acceptance criteria.",
+        "technical_runtime": "ready",
+        "instruction_adherence": "failed",
+        "assessment_date": "2026-07-14"
+      }
     },
     {
       "id": "outpainting",
@@ -536,7 +545,9 @@
         "all_required_models_registered"
       ],
       "notes": "Not the production inpainting default. Apache-2.0 weights. Manual model placement required.",
-      "implementation_status": "benchmark"
+      "implementation_status": "benchmark",
+      "production_status": "benchmark_only",
+      "quality_status": "untested"
     },
     {
       "id": "flux_fill_benchmark",
@@ -567,7 +578,9 @@
         "all_required_models_registered"
       ],
       "notes": "Not production default. FLUX.1-dev non-commercial weight license. Gated download.",
-      "implementation_status": "benchmark"
+      "implementation_status": "benchmark",
+      "production_status": "benchmark_only",
+      "quality_status": "untested"
     }
   ]
 }

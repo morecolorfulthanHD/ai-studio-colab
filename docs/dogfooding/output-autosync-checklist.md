@@ -1,6 +1,6 @@
 # Dogfooding Checklist — Output Autosync (Package 4.4)
 
-Zero-command acceptance: after Launch + ComfyUI Run, outputs appear on Drive with verified hashes and evidence — no manual `sync_outputs.py` / `verify_generation.py`.
+Zero-command acceptance: after Launch + ComfyUI Run, outputs appear on Drive with verified hashes and evidence — **no manual** `sync_outputs.py` / `verify_generation.py` in the normal operator flow.
 
 ## Operator flow
 
