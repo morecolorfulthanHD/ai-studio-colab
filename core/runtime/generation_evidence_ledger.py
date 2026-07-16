@@ -77,6 +77,8 @@ class EvidenceRecord:
     output_node_id: str = ""
     local_path: str = ""
     drive_path: str = ""
+    source_filename: str = ""
+    drive_filename: str = ""
     project_id: str = ""
     project_output_path: str = ""
     local_sha256: str = ""

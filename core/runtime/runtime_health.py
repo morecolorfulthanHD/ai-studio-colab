@@ -403,12 +403,58 @@ def check_output_watcher(bundle: RegistryBundle) -> HealthCheck:
         status = HealthStatus.WARN
     elif watcher == "FAIL":
         status = HealthStatus.FAIL
+
+    lock_held = lock_path.exists()
+    holder = None
+    if lock_held:
+        try:
+            from .watcher_lock import pid_alive, read_lock_pid
+
+            holder = read_lock_pid(lock_path)
+            alive = holder is not None and pid_alive(holder)
+        except Exception:  # noqa: BLE001
+            alive = False
+            holder = None
+    else:
+        alive = False
+
+    heartbeat = str(payload.get("heartbeat") or "")
+    stale_heartbeat = False
+    if heartbeat:
+        try:
+            from datetime import datetime, timezone
+
+            hb = datetime.fromisoformat(heartbeat.replace("Z", "+00:00"))
+            age = (datetime.now(timezone.utc) - hb.astimezone(timezone.utc)).total_seconds()
+            stale_heartbeat = age > 60
+        except ValueError:
+            stale_heartbeat = True
+
+    if lock_held and not alive:
+        status = HealthStatus.FAIL
+        liveness = "started-but-dead"
+    elif alive and stale_heartbeat:
+        status = HealthStatus.WARN
+        liveness = "alive-stale-heartbeat"
+    elif alive:
+        liveness = "alive"
+    elif status_path.is_file():
+        liveness = "started-not-alive"
+        if status == HealthStatus.OK:
+            status = HealthStatus.WARN
+    else:
+        liveness = "not-started"
+
     message = (
-        f"Watcher={watcher}; last_prompt={payload.get('last_completed_prompt') or 'none'}; "
+        f"Watcher={watcher}; liveness={liveness}; pid={payload.get('watcher_pid') or holder or 'none'}; "
+        f"heartbeat={heartbeat or 'none'}; last_prompt={payload.get('last_completed_prompt') or 'none'}; "
         f"pending={payload.get('pending_sync_count', 0)}; failed={payload.get('failed_sync_count', 0)}; "
-        f"lock={'yes' if lock_path.exists() else 'no'}"
+        f"lock={'yes' if lock_held else 'no'}"
     )
-    return HealthCheck("output_watcher", status, message, payload)
+    details = dict(payload)
+    details["liveness"] = liveness
+    details["lock_held"] = lock_held
+    return HealthCheck("output_watcher", status, message, details)
 
 
 def build_health_report(bundle: RegistryBundle) -> HealthReport:

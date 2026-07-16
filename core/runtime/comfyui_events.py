@@ -46,6 +46,20 @@ def poll_completed_prompt_ids(
     return completed
 
 
+def history_entry_completed(entry: dict[str, Any]) -> bool:
+    """True when ComfyUI reports the prompt finished (success or error)."""
+    status = entry.get("status")
+    if isinstance(status, dict):
+        if status.get("completed") is True:
+            return True
+        status_str = str(status.get("status_str") or "").lower()
+        if status_str in {"success", "error", "interrupted"}:
+            return True
+    # History entries without status but with outputs are treated as complete.
+    outputs = entry.get("outputs")
+    return isinstance(outputs, dict) and bool(outputs)
+
+
 def extract_output_files(history_entry: dict[str, Any]) -> list[dict[str, Any]]:
     """Return final output metadata from a single prompt history entry."""
     outputs = history_entry.get("outputs") or {}
@@ -100,19 +114,28 @@ def parse_ws_message(payload: dict[str, Any]) -> ExecutionCompleteEvent | None:
 
 
 class HistoryFallbackWatcher:
-    """Bounded history polling fallback when WebSocket is unavailable."""
+    """History polling safety net.
+
+    Prompt IDs are only marked seen after the caller confirms successful resolution.
+    Marking seen before sync was the Package 4.5 live-failure root cause: a transient
+    miss permanently dropped the generation.
+    """
 
     def __init__(self, *, base_url: str = DEFAULT_COMFY_BASE) -> None:
         self.base_url = base_url
         self.seen: set[str] = set()
 
     def bootstrap(self) -> None:
-        try:
-            self.seen = set(fetch_history(base_url=self.base_url).keys())
-        except RuntimeError:
-            self.seen = set()
+        """Do not pre-mark history. Startup reconcile + processed index prevent duplicates."""
+        self.seen = set()
+
+    def mark_seen(self, prompt_id: str) -> None:
+        if prompt_id:
+            self.seen.add(str(prompt_id))
+
+    def unmark(self, prompt_id: str) -> None:
+        self.seen.discard(str(prompt_id))
 
     def poll(self) -> list[str]:
-        completed = poll_completed_prompt_ids(self.seen, base_url=self.base_url)
-        self.seen.update(completed)
-        return completed
+        """Return unseen prompt IDs without marking them seen."""
+        return poll_completed_prompt_ids(self.seen, base_url=self.base_url)

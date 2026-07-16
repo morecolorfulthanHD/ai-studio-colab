@@ -366,11 +366,11 @@ def _run_e2e_watcher_simulation(results: list[tuple[str, str]], registered: dict
         original_fetch = output_autosync.fetch_history
         output_autosync.fetch_history = lambda base_url, prompt_id=None: {prompt_id: entry}
         try:
-            records = service.handle_prompt_id(prompt_id)
+            records, resolved = service.handle_prompt_id(prompt_id)
         finally:
             output_autosync.fetch_history = original_fetch
 
-        _assert_true("E2E produced a record", len(records) == 1, results)
+        _assert_true("E2E produced a record", len(records) == 1 and resolved, results)
         record = records[0].to_dict()
         _assert_equal("E2E sync_status verified", record.get("sync_status"), "verified", results)
         _assert_equal("E2E workflow_identifier base/txt2img", record.get("workflow_identifier"), "base/txt2img", results)
@@ -386,6 +386,17 @@ def _run_e2e_watcher_simulation(results: list[tuple[str, str]], registered: dict
         _assert_equal("E2E provenance_status complete", record.get("provenance_status"), "complete", results)
         _assert_true("E2E api_prompt_hash present", bool(record.get("api_prompt_hash")), results)
         _assert_true("E2E drive copy verified", file_sha256(output_file) == record.get("drive_sha256"), results)
+        _assert_true(
+            "E2E permanent drive_filename",
+            str(record.get("drive_filename") or "").startswith("txt2img_"),
+            results,
+        )
+        _assert_equal(
+            "E2E source_filename preserved",
+            record.get("source_filename"),
+            "ai_studio_base_txt2img_00001_.png",
+            results,
+        )
 
 
 def _run_launch_and_truthfulness(results: list[tuple[str, str]], bundle) -> None:

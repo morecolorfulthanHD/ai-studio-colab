@@ -39,7 +39,7 @@ from .generation_evidence_ledger import (
     utc_now,
 )
 from .output_evidence import ELIGIBLE_OUTPUT_SUFFIXES, is_eligible_output
-from .output_sync import resolve_sync_destination
+from .permanent_output_naming import resolve_permanent_destination
 from .project_workspace import ProjectManifest
 from .watcher_lock import pid_alive
 from .workflow_provenance import (
@@ -80,6 +80,10 @@ def make_autosync_temp_path(
 @dataclass
 class AutoSyncStatus:
     watcher: str = "OK"
+    watcher_pid: int = 0
+    heartbeat: str = ""
+    last_websocket_event: str = ""
+    last_history_poll: str = ""
     last_completed_prompt: str = ""
     last_detected_output: str = ""
     last_drive_copy: str = ""
@@ -207,20 +211,23 @@ def _safe_unlink(path: Path | None) -> str:
 
 def copy_with_verification(
     source: Path,
-    drive_output_dir: Path,
+    destination: Path,
     *,
     max_retries: int = 3,
     sleep_fn: Callable[[float], None] = time.sleep,
     copy_fn: Callable[[Path, Path], None] | None = None,
     owner_pid: int | None = None,
 ) -> tuple[Path | None, str, int, str]:
-    """Copy source to Drive via temp + verify + rename; one destination per operation."""
-    drive_output_dir.mkdir(parents=True, exist_ok=True)
-    copier = copy_fn or (lambda src, dst: shutil.copy2(src, dst))
-    destination, _collision, preexisting = resolve_sync_destination(drive_output_dir, source.name)
-    if preexisting is not None and preexisting.exists() and destination == preexisting:
-        return None, "failed", 0, "refusing to overwrite preexisting destination"
+    """Copy source to an explicit Drive destination via temp + verify + rename.
 
+    Destination must be a brand-new permanent asset path. Never overwrite.
+    """
+    drive_output_dir = destination.parent
+    drive_output_dir.mkdir(parents=True, exist_ok=True)
+    if destination.exists():
+        return None, "failed", 0, f"refusing to overwrite preexisting destination: {destination.name}"
+
+    copier = copy_fn or (lambda src, dst: shutil.copy2(src, dst))
     retries = 0
     last_error = ""
     while retries <= max_retries:
@@ -231,6 +238,11 @@ def copy_with_verification(
         )
         created_destination = False
         try:
+            if destination.exists():
+                last_error = f"destination appeared during sync: {destination.name}"
+                retries += 1
+                sleep_fn(min(2 ** retries, 8))
+                continue
             if not source.is_file():
                 last_error = f"source missing: {source}"
                 retries += 1
@@ -269,7 +281,6 @@ def copy_with_verification(
                 os.replace(temp_path, destination)
                 created_destination = True
             except OSError as rename_exc:
-                # Drive may not support atomic rename; fallback copy only if dest absent.
                 last_error = f"rename failed ({rename_exc}); attempting fallback copy"
                 try:
                     if destination.exists():
@@ -390,7 +401,7 @@ class OutputAutoSyncService:
         record.provenance_status = str(payload.get("provenance_status") or "")
         record.missing_provenance_fields = list(payload.get("missing_provenance_fields") or [])
 
-    def _mirror_verified_to_project(self, source: Path, global_destination: Path) -> str:
+    def _mirror_verified_to_project(self, source: Path, capability: str) -> str:
         if self.active_project is None:
             return ""
         project_outputs = Path(self.active_project.outputs_dir)
@@ -399,22 +410,34 @@ class OutputAutoSyncService:
         for existing in project_outputs.iterdir():
             if existing.is_file() and file_sha256(existing) == source_hash:
                 return str(existing)
-        destination, _status, _retries, _error = copy_with_verification(
+        try:
+            destination = resolve_permanent_destination(
+                project_outputs,
+                capability=capability or "unknown",
+                source_path=source,
+            )
+        except RuntimeError:
+            return ""
+        dest, status, _retries, _error = copy_with_verification(
             source,
-            project_outputs,
+            destination,
             max_retries=1,
             sleep_fn=self.sleep_fn,
             copy_fn=self.copy_fn,
         )
-        if destination is not None:
-            record = EvidenceRecord(
-                prompt_id="",
-                project_id=self.active_project.project_id,
-                project_output_path=str(destination),
-            )
-            self.log(f"Project mirror verified:\n{destination}")
-            return str(destination)
+        if dest is not None and status == "verified":
+            self.log(f"Project mirror verified:\n{dest}")
+            return str(dest)
         return ""
+
+    def touch_heartbeat(self, *, source: str = "poll") -> None:
+        self.status.watcher_pid = os.getpid()
+        self.status.heartbeat = utc_now()
+        if source == "websocket":
+            self.status.last_websocket_event = self.status.heartbeat
+        elif source == "history":
+            self.status.last_history_poll = self.status.heartbeat
+        self.write_status()
 
     def initialize_owned_state(
         self,
@@ -481,23 +504,53 @@ class OutputAutoSyncService:
         provenance: ExecutionProvenance | None = None,
         recovery: bool = False,
     ) -> EvidenceRecord | None:
+        source_filename = local_path.name
         if not is_eligible_output(local_path):
             return None
         if local_path.suffix.lower() not in ELIGIBLE_OUTPUT_SUFFIXES:
             return None
         if not wait_until_stable(local_path, timeout_seconds=30, checks=2, interval_seconds=0.05):
-            self.status.last_error = f"Timed out waiting for stable file: {local_path}"
+            # Detected but not yet copyable — leave pending evidence so nothing vanishes.
+            now = utc_now()
+            pending_fail = EvidenceRecord(
+                prompt_id=prompt_id,
+                schema_version=SCHEMA_VERSION if provenance else 1,
+                workflow_identifier=workflow_identifier,
+                workflow_hash=workflow_hash,
+                output_node_id=output_node_id,
+                local_path=str(local_path),
+                source_filename=source_filename,
+                local_sha256="",
+                byte_size=0,
+                created_timestamp=now,
+                sync_status="pending",
+                error_summary=f"Timed out waiting for stable file: {local_path}",
+                candidate_model=candidate_model,
+                capability=capability,
+                messages=["awaiting_stable_file"],
+            )
+            self._apply_provenance(pending_fail, provenance)
+            self.ledger.append(pending_fail)
+            self.status.last_error = pending_fail.error_summary
             self.status.messages.append(self.status.last_error)
+            self.status.last_completed_prompt = prompt_id
+            self.status.last_detected_output = str(local_path)
             self.recompute_counters()
             self.write_status()
-            return None
+            return pending_fail
 
         local_hash = file_sha256(local_path)
+        # Dedupe by execution identity + content hash (not Drive filename).
         key = dedupe_key_from_parts(prompt_id, output_node_id, str(local_path), local_hash)
         if key in self.processed:
-            self.log(f"Skipping already verified output: {local_path.name}")
+            self.log(f"Skipping already verified output: {local_path.name} (prompt {prompt_id})")
             return None
 
+        effective_capability = (
+            capability
+            or (provenance.capability if provenance else "")
+            or "unknown"
+        )
         prior_error = self._prior_error_for_key(key)
         prior_retries = self._prior_retry_count(key)
         now = utc_now()
@@ -515,6 +568,7 @@ class OutputAutoSyncService:
             workflow_hash=workflow_hash,
             output_node_id=output_node_id,
             local_path=str(local_path),
+            source_filename=source_filename,
             local_sha256=local_hash,
             byte_size=local_path.stat().st_size,
             created_timestamp=now,
@@ -522,7 +576,7 @@ class OutputAutoSyncService:
             retry_count=prior_retries,
             prior_error_summary=prior_error,
             candidate_model=candidate_model,
-            capability=capability,
+            capability=effective_capability,
             messages=["recovery_attempt"] if recovery else [],
         )
         self._apply_provenance(pending, provenance)
@@ -530,15 +584,13 @@ class OutputAutoSyncService:
         self.recompute_counters()
         self.write_status()
 
-        destination, sync_status, retries, error = copy_with_verification(
-            local_path,
-            self.drive_output_dir,
-            max_retries=self.max_copy_retries,
-            sleep_fn=self.sleep_fn,
-            copy_fn=self.copy_fn,
-        )
-        attempt_retries = prior_retries + retries
-        if sync_status == "verified" and destination is not None:
+        try:
+            destination = resolve_permanent_destination(
+                self.drive_output_dir,
+                capability=effective_capability,
+                source_path=local_path,
+            )
+        except RuntimeError as exc:
             record = EvidenceRecord(
                 prompt_id=prompt_id,
                 schema_version=SCHEMA_VERSION if provenance else 1,
@@ -546,9 +598,47 @@ class OutputAutoSyncService:
                 workflow_hash=workflow_hash,
                 output_node_id=output_node_id,
                 local_path=str(local_path),
-                drive_path=str(destination),
+                source_filename=source_filename,
                 local_sha256=local_hash,
-                drive_sha256=file_sha256(destination),
+                byte_size=local_path.stat().st_size,
+                created_timestamp=now,
+                sync_status="failed",
+                retry_count=prior_retries,
+                error_summary=str(exc),
+                prior_error_summary=prior_error,
+                candidate_model=candidate_model,
+                capability=effective_capability,
+            )
+            self._apply_provenance(record, provenance)
+            self.ledger.append(record)
+            self.status.last_verification = "failed"
+            self.status.evidence_status = "failed"
+            self.status.last_error = record.error_summary
+            self.recompute_counters()
+            self.write_status()
+            return record
+
+        destination_result, sync_status, retries, error = copy_with_verification(
+            local_path,
+            destination,
+            max_retries=self.max_copy_retries,
+            sleep_fn=self.sleep_fn,
+            copy_fn=self.copy_fn,
+        )
+        attempt_retries = prior_retries + retries
+        if sync_status == "verified" and destination_result is not None:
+            record = EvidenceRecord(
+                prompt_id=prompt_id,
+                schema_version=SCHEMA_VERSION if provenance else 1,
+                workflow_identifier=workflow_identifier,
+                workflow_hash=workflow_hash,
+                output_node_id=output_node_id,
+                local_path=str(local_path),
+                drive_path=str(destination_result),
+                source_filename=source_filename,
+                drive_filename=destination_result.name,
+                local_sha256=local_hash,
+                drive_sha256=file_sha256(destination_result),
                 byte_size=local_path.stat().st_size,
                 created_timestamp=now,
                 synchronized_timestamp=utc_now(),
@@ -556,25 +646,25 @@ class OutputAutoSyncService:
                 retry_count=attempt_retries,
                 prior_error_summary=prior_error,
                 candidate_model=candidate_model,
-                capability=capability,
+                capability=effective_capability,
                 messages=["recovered_after_failure"] if recovery and prior_error else [],
             )
             self._apply_provenance(record, provenance)
             if self.active_project is not None:
                 record.project_id = self.active_project.project_id
-                project_path = self._mirror_verified_to_project(local_path, destination)
+                project_path = self._mirror_verified_to_project(local_path, effective_capability)
                 if project_path:
                     record.project_output_path = project_path
             self.ledger.append(record)
             self.processed.add(key)
             self.index.save(self.processed)
-            self.status.last_drive_copy = str(destination)
+            self.status.last_drive_copy = str(destination_result)
             self.status.last_verification = "verified"
             self.status.evidence_status = "verified"
             self.status.last_error = ""
             if recovery:
                 self.status.last_recovered_prompt = prompt_id
-            self.log(f"Drive copy verified:\n{destination}")
+            self.log(f"Drive copy verified:\n{destination_result}")
             self.log(f"Evidence updated:\n{prompt_id}")
             self.recompute_counters()
             self.write_status()
@@ -587,6 +677,7 @@ class OutputAutoSyncService:
             workflow_hash=workflow_hash,
             output_node_id=output_node_id,
             local_path=str(local_path),
+            source_filename=source_filename,
             local_sha256=local_hash,
             byte_size=local_path.stat().st_size,
             created_timestamp=now,
@@ -595,12 +686,11 @@ class OutputAutoSyncService:
             error_summary=error or "copy verification failed",
             prior_error_summary=prior_error,
             candidate_model=candidate_model,
-            capability=capability,
+            capability=effective_capability,
             messages=["recovery_attempt_failed"] if recovery else [],
         )
         self._apply_provenance(record, provenance)
         self.ledger.append(record)
-        # Intentionally do NOT add failed keys to self.processed.
         self.status.last_verification = "failed"
         self.status.evidence_status = "failed"
         self.status.last_error = record.error_summary
@@ -608,33 +698,43 @@ class OutputAutoSyncService:
         self.write_status()
         return record
 
-    def handle_prompt_id(self, prompt_id: str) -> list[EvidenceRecord]:
-        history = fetch_history(base_url=self.base_url, prompt_id=prompt_id)
+    def handle_prompt_id(self, prompt_id: str) -> tuple[list[EvidenceRecord], bool]:
+        """Process one prompt. Returns (records, fully_resolved).
+
+        fully_resolved=False means the caller must retry later (do not mark seen).
+        """
+        try:
+            history = fetch_history(base_url=self.base_url, prompt_id=prompt_id)
+        except RuntimeError as exc:
+            self.status.messages.append(str(exc))
+            self.status.last_error = str(exc)
+            self.write_status()
+            return [], False
+
         if prompt_id in history and isinstance(history[prompt_id], dict):
             entry = history[prompt_id]
         elif "outputs" in history:
             entry = history
         else:
             self.status.messages.append(f"No history entry for prompt {prompt_id}")
-            self.recompute_counters()
             self.write_status()
-            return []
+            return [], False
 
-        provenance = extract_execution_provenance(
-            entry,
-            registered_hashes=self.registered_hashes,
-        )
+        from .comfyui_events import history_entry_completed
 
         output_metas = extract_output_files(entry)
         records: list[EvidenceRecord] = []
         if not output_metas:
-            self.status.messages.append(f"Prompt {prompt_id} produced no eligible outputs.")
-            self.status.last_completed_prompt = prompt_id
-            self.recompute_counters()
-            self.write_status()
-            return records
+            if history_entry_completed(entry):
+                self.status.messages.append(f"Prompt {prompt_id} produced no eligible outputs.")
+                self.status.last_completed_prompt = prompt_id
+                self.recompute_counters()
+                self.write_status()
+                return records, True
+            return records, False
 
         ui_workflow = extract_ui_workflow_from_history(entry)
+        needs_retry = False
         for meta in output_metas:
             local_path = resolve_comfy_output_path(
                 self.comfy_output_dir,
@@ -648,6 +748,9 @@ class OutputAutoSyncService:
                 ui_workflow=ui_workflow,
                 output_node_id=node_id,
             )
+            if not local_path.is_file():
+                needs_retry = True
+                continue
             record = self.sync_local_output(
                 prompt_id=prompt_id,
                 output_node_id=node_id,
@@ -660,14 +763,19 @@ class OutputAutoSyncService:
             )
             if record is not None:
                 records.append(record)
-        return records
+                if record.sync_status == "pending" and "awaiting_stable_file" in (record.messages or []):
+                    needs_retry = True
+        return records, not needs_retry
 
-    def handle_ws_payload(self, payload: dict[str, Any]) -> list[EvidenceRecord]:
+    def handle_ws_payload(self, payload: dict[str, Any]) -> tuple[list[EvidenceRecord], bool]:
+        """Handle a websocket payload. Returns (records, fully_resolved)."""
         event = parse_ws_message(payload)
         if event is None:
-            return []
+            return [], True
         if payload.get("type") == "executed":
-            return []
+            # Per-node progress; wait for execution_success before syncing.
+            return [], True
+        self.status.last_websocket_event = utc_now()
         return self.handle_prompt_id(event.prompt_id)
 
     def retry_unverified_from_ledger(self) -> list[EvidenceRecord]:
@@ -704,12 +812,17 @@ class OutputAutoSyncService:
                 self.unrecoverable_missing_source.add(key)
                 continue
             if expected_hash and actual_hash != expected_hash:
+                # Local file was overwritten by a newer generation — old key is dead.
                 msg = (
                     f"Recovery skipped: local hash changed for {local_path} "
                     f"(evidence {expected_hash[:12]}… vs current {actual_hash[:12]}…)"
                 )
                 self.status.messages.append(msg)
+                self.unrecoverable_missing_source.add(key)
                 continue
+            if not expected_hash and "awaiting_stable_file" in list(row.get("messages") or []):
+                # Pending stability wait — re-attempt sync of current file.
+                pass
             recovered = self.sync_local_output(
                 prompt_id=str(row.get("prompt_id") or ""),
                 output_node_id=str(row.get("output_node_id") or ""),
@@ -720,14 +833,16 @@ class OutputAutoSyncService:
                 capability=str(row.get("capability") or ""),
                 recovery=True,
             )
-            if recovered is not None:
+            if recovered is not None and recovered.sync_status != "pending":
+                records.append(recovered)
+            elif recovered is not None and recovered.sync_status == "pending":
                 records.append(recovered)
         self.recompute_counters()
         self.write_status()
         return records
 
     def reconcile_pending(self) -> list[EvidenceRecord]:
-        """Startup recovery: retry unverified ledger rows, then discover unrecorded history."""
+        """Retry unverified ledger rows, then discover unrecorded history (safety net)."""
         records = self.retry_unverified_from_ledger()
         try:
             history = fetch_history(base_url=self.base_url)
@@ -737,48 +852,12 @@ class OutputAutoSyncService:
             self.recompute_counters()
             self.write_status()
             return records
+        self.status.last_history_poll = utc_now()
         for prompt_id, entry in history.items():
             if not isinstance(entry, dict):
                 continue
-            for meta in extract_output_files(entry):
-                local_path = resolve_comfy_output_path(
-                    self.comfy_output_dir,
-                    filename=meta["filename"],
-                    subfolder=meta.get("subfolder") or "",
-                )
-                if not local_path.is_file():
-                    continue
-                try:
-                    key_probe = dedupe_key_from_parts(
-                        str(prompt_id),
-                        str(meta.get("node_id") or ""),
-                        str(local_path),
-                        file_sha256(local_path),
-                    )
-                except OSError:
-                    continue
-                if key_probe in self.processed:
-                    continue
-                ui_workflow = extract_ui_workflow_from_history(entry)
-                provenance = extract_execution_provenance(
-                    entry,
-                    registered_hashes=self.registered_hashes,
-                    ui_workflow=ui_workflow,
-                    output_node_id=str(meta.get("node_id") or ""),
-                )
-                synched = self.sync_local_output(
-                    prompt_id=str(prompt_id),
-                    output_node_id=str(meta.get("node_id") or ""),
-                    local_path=local_path,
-                    workflow_identifier=provenance.workflow_identifier,
-                    workflow_hash=provenance.workflow_hash,
-                    candidate_model=provenance.candidate_model,
-                    capability=provenance.capability,
-                    provenance=provenance,
-                    recovery=False,
-                )
-                if synched is not None:
-                    records.append(synched)
+            synched, _resolved = self.handle_prompt_id(str(prompt_id))
+            records.extend(synched)
         self.recompute_counters()
         self.write_status()
         return records

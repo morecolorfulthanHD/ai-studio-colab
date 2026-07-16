@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
-"""ComfyUI output watcher — event-driven autosync with history polling fallback.
+"""ComfyUI output watcher — event-driven autosync with history polling safety net.
 
 Startup order (normal / --once):
   1. Resolve paths
   2. Acquire exclusive watcher lock (atomic)
   3. Construct OutputAutoSyncService
   4. initialize_owned_state() — temp cleanup, index/status (lock holder only)
-  5. Reconcile / run loop
+  5. Reconcile / run loop (WebSocket primary + periodic history reconciliation)
   6. Release lock on exit
 
 --status: read status file only (no lock, no service, no mutation).
 --stop: inspect lock/PID; clear only confirmed stale lock (no service, no temp cleanup).
+
+The notebook control panel may remain open at an interactive prompt indefinitely.
+This watcher runs as an independent subprocess and must continue operating without
+further notebook interaction after ComfyUI Run.
 """
 
 from __future__ import annotations
@@ -38,7 +42,6 @@ from core.runtime.project_workspace import ProjectWorkspace
 from core.runtime.registry_loader import RegistryLoader, find_repo_root
 from core.runtime.workflow_provenance import load_registered_workflow_hashes
 from core.runtime.watcher_lock import (
-    PID_NAME,
     clear_stale_lock,
     pid_alive,
     read_lock_pid,
@@ -49,6 +52,7 @@ from core.runtime.watcher_lock import (
 LOCK_NAME = "output_watcher.lock"
 STATUS_NAME = "output_watcher_status.json"
 INDEX_NAME = "output_watcher_processed.json"
+DEFAULT_RECONCILE_SECONDS = 15.0
 
 
 def _runtime_state_dir(bundle) -> Path:
@@ -100,14 +104,18 @@ def run_watcher_loop(
     service: OutputAutoSyncService,
     *,
     poll_seconds: float,
+    reconcile_seconds: float,
     stop_event: threading.Event,
     prefer_websocket: bool,
     ws_url: str,
     log_path: Path,
 ) -> None:
+    # Full history reconcile first — recovers generations present before the watcher loop.
     service.reconcile_pending()
     fallback = HistoryFallbackWatcher(base_url=service.base_url)
+    # Do NOT pre-mark all history as seen (that permanently dropped transient misses).
     fallback.bootstrap()
+    service.touch_heartbeat(source="history")
 
     ws_thread_started = False
     if prefer_websocket:
@@ -119,28 +127,59 @@ def run_watcher_loop(
                     payload = json.loads(message)
                 except json.JSONDecodeError:
                     return
-                service.handle_ws_payload(payload)
+                try:
+                    _records, resolved = service.handle_ws_payload(payload)
+                except Exception as exc:  # noqa: BLE001 — keep WS thread alive
+                    _append_log(log_path, f"WebSocket payload error (will retry via history): {exc}")
+                    resolved = False
+                    _records = []
+                event_type = payload.get("type")
+                if event_type == "execution_success":
+                    data = payload.get("data") or {}
+                    prompt_id = str(data.get("prompt_id") or "")
+                    if prompt_id and resolved:
+                        fallback.mark_seen(prompt_id)
+                    # If not resolved, leave unseen so history poll / reconcile recovers.
+                service.touch_heartbeat(source="websocket")
 
             def _ws_runner() -> None:
                 while not stop_event.is_set():
                     try:
                         ws = websocket.WebSocketApp(ws_url, on_message=_on_message)
+                        _append_log(log_path, f"WebSocket connecting: {ws_url}")
                         ws.run_forever(ping_interval=20, ping_timeout=10)
                     except Exception as exc:  # noqa: BLE001 — keep watcher alive
-                        _append_log(log_path, f"WebSocket error; falling back to poll: {exc}")
+                        _append_log(log_path, f"WebSocket error; history reconciliation continues: {exc}")
                         time.sleep(2)
 
             thread = threading.Thread(target=_ws_runner, name="comfyui-ws-autosync", daemon=True)
             thread.start()
             ws_thread_started = True
-            _append_log(log_path, f"WebSocket watcher connected preference: {ws_url}")
+            _append_log(log_path, f"WebSocket watcher preferred: {ws_url}")
         except ImportError:
-            _append_log(log_path, "websocket-client unavailable; using history polling fallback.")
+            _append_log(log_path, "websocket-client unavailable; using history polling safety net.")
 
+    last_reconcile = time.time()
     while not stop_event.is_set():
         try:
+            service.touch_heartbeat(source="history")
             for prompt_id in fallback.poll():
-                service.handle_prompt_id(prompt_id)
+                try:
+                    _records, resolved = service.handle_prompt_id(prompt_id)
+                except Exception as exc:  # noqa: BLE001
+                    _append_log(log_path, f"Prompt {prompt_id} handling error (will retry): {exc}")
+                    resolved = False
+                if resolved:
+                    fallback.mark_seen(prompt_id)
+                # else: leave unseen so the next poll retries
+
+            now = time.time()
+            if now - last_reconcile >= reconcile_seconds:
+                # Safety net: catch missed websocket events and unfinished prompts.
+                recovered = service.reconcile_pending()
+                if recovered:
+                    _append_log(log_path, f"History reconcile recovered/processed {len(recovered)} record(s).")
+                last_reconcile = now
         except Exception as exc:  # noqa: BLE001
             service.status.watcher = "WARN"
             service.status.messages.append(str(exc))
@@ -165,6 +204,7 @@ def main() -> int:
     parser.add_argument("--status", action="store_true", help="Print watcher status JSON and exit.")
     parser.add_argument("--stop", action="store_true", help="Clear stale lock if process is dead.")
     parser.add_argument("--poll-seconds", type=float, default=2.0)
+    parser.add_argument("--reconcile-seconds", type=float, default=DEFAULT_RECONCILE_SECONDS)
     parser.add_argument("--comfy-base-url", default=DEFAULT_COMFY_BASE)
     parser.add_argument("--ws-url", default=DEFAULT_COMFY_WS)
     parser.add_argument("--no-websocket", action="store_true")
@@ -211,6 +251,8 @@ def main() -> int:
             comfy_base_url=args.comfy_base_url,
         )
         service.initialize_owned_state()
+        service.status.watcher_pid = os.getpid()
+        service.touch_heartbeat(source="poll")
 
         if args.once:
             records = service.reconcile_pending()
@@ -230,10 +272,11 @@ def main() -> int:
 
         service.status.watcher = "OK"
         service.write_status()
-        _append_log(log_path, "Output watcher started.")
+        _append_log(log_path, f"Output watcher started (pid {os.getpid()}). Independent of notebook menu.")
         run_watcher_loop(
             service,
             poll_seconds=max(0.5, args.poll_seconds),
+            reconcile_seconds=max(5.0, args.reconcile_seconds),
             stop_event=stop_event,
             prefer_websocket=not args.no_websocket,
             ws_url=args.ws_url,

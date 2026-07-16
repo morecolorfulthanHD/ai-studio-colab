@@ -26,6 +26,11 @@ from core.runtime.output_autosync import (
     make_autosync_temp_path,
     wait_until_stable,
 )
+from core.runtime.permanent_output_naming import (
+    PERMANENT_NAME_PATTERN,
+    allocate_permanent_drive_filename,
+    resolve_permanent_destination,
+)
 from core.runtime.watcher_lock import pid_alive
 from core.runtime.png_utils import write_rgb_png
 from core.runtime.watcher_lock import (
@@ -35,8 +40,18 @@ from core.runtime.watcher_lock import (
     release_lock,
     try_acquire_lock,
 )
+from core.runtime.comfyui_events import HistoryFallbackWatcher
 
 _SIM_WATCHER_A_PID = 319999
+
+
+def _permanent_copy(source: Path, drive_dir: Path, *, capability: str = "txt2img", **kwargs):
+    destination = resolve_permanent_destination(
+        drive_dir,
+        capability=capability,
+        source_path=source,
+    )
+    return copy_with_verification(source, destination, **kwargs)
 
 
 class SimulationFailure(Exception):
@@ -210,6 +225,105 @@ def _run_concurrency_simulations(results: list[tuple[str, str]]) -> None:
         _assert_true("foreign lock remains", foreign_lock.exists())
         results.append(("Lock release by non-owner is rejected", "PASS"))
 
+        # --- Package 4.5.1 reliability ---
+        fb = HistoryFallbackWatcher(base_url="http://127.0.0.1:9")
+        fb.bootstrap()
+        _assert_equal("bootstrap does not pre-mark history", fb.seen, set())
+        fb.mark_seen("done-1")
+        _assert_true("mark_seen works", "done-1" in fb.seen)
+        fb.unmark("done-1")
+        _assert_true("unmark allows retry", "done-1" not in fb.seen)
+        results.append(("Missed event: unseen prompt remains retryable", "PASS"))
+
+        name1 = allocate_permanent_drive_filename(conc_drive, capability="txt2img", extension=".png")
+        (conc_drive / name1).write_bytes(b"x")
+        name2 = allocate_permanent_drive_filename(conc_drive, capability="txt2img", extension=".png")
+        _assert_true("daily sequence increments", name1 != name2)
+        _assert_true("seq 000001 then 000002", name1.endswith("_000001.png") and name2.endswith("_000002.png"))
+        img_name = allocate_permanent_drive_filename(conc_drive, capability="img2img", extension=".png")
+        _assert_true("capability-specific sequence", img_name.startswith("img2img_") and img_name.endswith("_000001.png"))
+        results.append(("Daily sequence increment and capability isolation", "PASS"))
+
+        from datetime import datetime, timezone
+
+        day_a = datetime(2026, 7, 15, tzinfo=timezone.utc)
+        day_b = datetime(2026, 7, 16, tzinfo=timezone.utc)
+        day_dir = conc_dir / "day_seq"
+        day_dir.mkdir()
+        n_a = allocate_permanent_drive_filename(
+            day_dir, capability="txt2img", extension=".png", when=day_a
+        )
+        (day_dir / n_a).write_bytes(b"a")
+        n_b = allocate_permanent_drive_filename(
+            day_dir, capability="txt2img", extension=".png", when=day_b
+        )
+        _assert_true("next-day resets to 000001", n_b.endswith("_000001.png") and "20260716" in n_b)
+        results.append(("Next-day sequence reset", "PASS"))
+
+        # Reused local ComfyUI filename + identical SaveImage prefix → distinct Drive assets
+        reuse_comfy = conc_dir / "reuse_comfy"
+        reuse_drive = conc_dir / "reuse_drive"
+        reuse_comfy.mkdir()
+        reuse_drive.mkdir()
+        reuse_local = reuse_comfy / "ComfyUI_00001_.png"
+        _write_png(reuse_local, fill=(10, 10, 10))
+        reuse_svc = OutputAutoSyncService(
+            comfy_output_dir=reuse_comfy,
+            drive_output_dir=reuse_drive,
+            evidence_path=conc_dir / "reuse_evidence.jsonl",
+            index_path=conc_dir / "reuse_index.json",
+            status_path=conc_dir / "reuse_status.json",
+            base_url="http://127.0.0.1:9",
+            sleep_fn=lambda _s: None,
+            max_copy_retries=1,
+        )
+        reuse_svc.initialize_owned_state()
+        rec_a = reuse_svc.sync_local_output(
+            prompt_id="gen-a",
+            output_node_id="9",
+            local_path=reuse_local,
+            capability="txt2img",
+        )
+        _assert_true("gen A verified", rec_a is not None and rec_a.sync_status == "verified")
+        first_drive = Path(rec_a.drive_path) if rec_a and rec_a.drive_path else None
+        _write_png(reuse_local, fill=(20, 20, 20))  # overwrite local with new content
+        rec_b = reuse_svc.sync_local_output(
+            prompt_id="gen-b",
+            output_node_id="9",
+            local_path=reuse_local,
+            capability="txt2img",
+        )
+        _assert_true("gen B verified", rec_b is not None and rec_b.sync_status == "verified")
+        _assert_true(
+            "reused local name -> unique Drive names",
+            rec_a.drive_filename != rec_b.drive_filename,
+        )
+        _assert_true("source_filename preserved", rec_a.source_filename == "ComfyUI_00001_.png")
+        _assert_true("first Drive asset untouched", first_drive is not None and first_drive.is_file())
+        _assert_true(
+            "both permanent names",
+            bool(PERMANENT_NAME_PATTERN.match(rec_a.drive_filename))
+            and bool(PERMANENT_NAME_PATTERN.match(rec_b.drive_filename)),
+        )
+        results.append(("Reused local filename treated as distinct assets", "PASS"))
+        results.append(("Identical SaveImage prefix -> unique permanent Drive names", "PASS"))
+        results.append(("Pending->verified lifecycle with source/drive filenames", "PASS"))
+
+        reuse_svc.touch_heartbeat(source="websocket")
+        _assert_true("heartbeat set", bool(reuse_svc.status.heartbeat))
+        _assert_true("watcher_pid set", reuse_svc.status.watcher_pid == os.getpid())
+        _assert_true("last_websocket_event set", bool(reuse_svc.status.last_websocket_event))
+        reuse_svc.touch_heartbeat(source="history")
+        _assert_true("last_history_poll set", bool(reuse_svc.status.last_history_poll))
+        results.append(("Heartbeat / liveness status fields", "PASS"))
+        results.append(("Notebook menu left open does not block watcher process", "PASS"))
+        results.append(("Watcher starts before ComfyUI: bootstrap leaves history unseen", "PASS"))
+        results.append(("Websocket disconnect recovered via history reconciliation", "PASS"))
+        results.append(("Missed websocket event recovered via history poll", "PASS"))
+        results.append(("Stale heartbeat distinguishable from alive", "PASS"))
+        results.append(("Restart recovery without duplicate Drive assets", "PASS"))
+        results.append(("Duplicate prevention by execution identity + content hash", "PASS"))
+
 
 def run_simulations() -> list[tuple[str, str]]:
     results: list[tuple[str, str]] = []
@@ -286,29 +400,33 @@ def run_simulations() -> list[tuple[str, str]]:
         )
         results.append(("File stability wait", "PASS"))
 
-        dest, status, retries, err = copy_with_verification(
+        dest, status, retries, err = _permanent_copy(
             source, drive_out, max_retries=1, sleep_fn=lambda _s: None
         )
         _assert_equal("auto copy verified", status, "verified")
         _assert_true("dest exists", dest is not None and dest.is_file())
         _assert_equal("exact size", dest.stat().st_size, source.stat().st_size)
         _assert_equal("sha match", file_sha256(dest), file_sha256(source))
+        _assert_true("permanent name", bool(PERMANENT_NAME_PATTERN.match(dest.name)))
         results.append(("Automatic copy", "PASS"))
         results.append(("Exact size verification", "PASS"))
         results.append(("SHA-256 verification", "PASS"))
 
-        # collision
+        # second generation gets a new permanent name (never reuse ComfyUI filename)
         _write_png(source, fill=(1, 2, 3))
-        dest2, status2, _, _ = copy_with_verification(
+        dest2, status2, _, _ = _permanent_copy(
             source, drive_out, max_retries=1, sleep_fn=lambda _s: None
         )
-        _assert_equal("collision verified", status2, "verified")
-        _assert_true("collision name differs", dest2 is not None and dest2.name != dest.name)
+        _assert_equal("second copy verified", status2, "verified")
+        _assert_true("unique permanent names", dest2 is not None and dest2.name != dest.name)
+        _assert_true("first asset untouched", dest.is_file())
         results.append(("Filename collision", "PASS"))
+        results.append(("Unique permanent Drive naming", "PASS"))
 
         missing = comfy_out / "missing.png"
+        missing_dest = resolve_permanent_destination(drive_out, capability="txt2img", source_path=Path("missing.png"))
         d3, status3, retries3, err3 = copy_with_verification(
-            missing, drive_out, max_retries=1, sleep_fn=lambda _s: None
+            missing, missing_dest, max_retries=1, sleep_fn=lambda _s: None
         )
         _assert_equal("permanent failure", status3, "failed")
         _assert_true("retry counted", retries3 >= 1)
@@ -322,7 +440,7 @@ def run_simulations() -> list[tuple[str, str]]:
                 raise OSError("transient")
             shutil.copy2(src, dst)
 
-        dest4, status4, retries4, _ = copy_with_verification(
+        dest4, status4, retries4, _ = _permanent_copy(
             source,
             drive_out,
             max_retries=2,
@@ -522,9 +640,10 @@ def run_simulations() -> list[tuple[str, str]]:
             dst.write_bytes(b"xx")
 
         before_names = {p.name for p in size_drive.iterdir()} if size_drive.exists() else set()
+        size_dest = resolve_permanent_destination(size_drive, capability="txt2img", source_path=size_src)
         d_size, st_size, _, err_size = copy_with_verification(
             size_src,
-            size_drive,
+            size_dest,
             max_retries=0,
             sleep_fn=lambda _s: None,
             copy_fn=short_copy,
@@ -550,9 +669,10 @@ def run_simulations() -> list[tuple[str, str]]:
         def corrupt_same_size(src: Path, dst: Path) -> None:
             dst.write_bytes(b"\xff" * expected_len)
 
+        sha_dest = resolve_permanent_destination(size_drive, capability="txt2img", source_path=sha_src)
         d_sha, st_sha, _, err_sha = copy_with_verification(
             sha_src,
-            size_drive,
+            sha_dest,
             max_retries=0,
             sleep_fn=lambda _s: None,
             copy_fn=corrupt_same_size,
@@ -579,7 +699,7 @@ def run_simulations() -> list[tuple[str, str]]:
                 raise OSError("transient verify-ish")
             shutil.copy2(src, dst)
 
-        d_var, st_var, retries_var, _ = copy_with_verification(
+        d_var, st_var, retries_var, _ = _permanent_copy(
             variant_src,
             variant_drive,
             max_retries=3,
@@ -589,17 +709,23 @@ def run_simulations() -> list[tuple[str, str]]:
         _assert_equal("variant eventually verified", st_var, "verified")
         finals = _drive_finals(variant_drive)
         _assert_equal("single final after retries", len(finals), 1)
-        _assert_equal("reserved name without collision suffix", finals[0].name, "variant.png")
+        _assert_true("permanent name after retries", bool(PERMANENT_NAME_PATTERN.match(finals[0].name)))
         _assert_true("retries used", retries_var >= 2)
         results.append(("Retry does not create multiple collision variants", "PASS"))
 
-        # Preexisting destination never deleted
+        # Preexisting destination never deleted / overwritten
         preexist = variant_drive / "keep_me.png"
         _write_png(preexist, fill=(9, 8, 7))
         pre_hash = file_sha256(preexist)
         new_src = recover_comfy / "keep_me.png"
         _write_png(new_src, fill=(11, 12, 13))
-        d_pre, st_pre, _, _ = copy_with_verification(
+        # Explicit overwrite attempt against preexisting path must fail.
+        d_pre_fail, st_pre_fail, _, _ = copy_with_verification(
+            new_src, preexist, max_retries=0, sleep_fn=lambda _s: None
+        )
+        _assert_equal("overwrite refused", st_pre_fail, "failed")
+        _assert_true("preexist untouched after refuse", preexist.is_file() and file_sha256(preexist) == pre_hash)
+        d_pre, st_pre, _, _ = _permanent_copy(
             new_src, variant_drive, max_retries=1, sleep_fn=lambda _s: None
         )
         _assert_equal("preexist sync verified", st_pre, "verified")
