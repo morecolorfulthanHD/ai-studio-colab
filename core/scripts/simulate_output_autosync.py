@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Simulations for Package 4.4 output autosync and evidence ledger recovery."""
+"""Simulations for Package 4.5.2 autosync, runtime ownership, and recovery."""
 
 from __future__ import annotations
 
@@ -7,8 +7,10 @@ import json
 import os
 import shutil
 import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import importlib.util
+from unittest.mock import patch
 
 _activate_path = Path(__file__).resolve().parent / "cli_activate.py"
 _spec = importlib.util.spec_from_file_location("ai_studio_cli_activate", _activate_path)
@@ -31,6 +33,18 @@ from core.runtime.permanent_output_naming import (
     allocate_permanent_drive_filename,
     resolve_permanent_destination,
 )
+from core.runtime.project_workspace import ProjectManifest
+from core.runtime.registry_loader import RegistryBundle
+from core.runtime.runtime_health import HealthStatus, check_output_watcher
+from core.runtime.runtime_identity import (
+    OwnershipValidation,
+    RuntimeIdentity,
+    WatcherOwnership,
+    runtime_identity_path,
+    validate_watcher_ownership,
+    watcher_lock_path,
+    watcher_status_path,
+)
 from core.runtime.watcher_lock import pid_alive
 from core.runtime.png_utils import write_rgb_png
 from core.runtime.watcher_lock import (
@@ -38,9 +52,11 @@ from core.runtime.watcher_lock import (
     clear_stale_lock,
     read_lock_pid,
     release_lock,
+    remove_ownership_files,
     try_acquire_lock,
 )
 from core.runtime.comfyui_events import HistoryFallbackWatcher
+from core.scripts.run_output_watcher import _replace_invalid_ownership
 
 _SIM_WATCHER_A_PID = 319999
 
@@ -325,6 +341,286 @@ def _run_concurrency_simulations(results: list[tuple[str, str]]) -> None:
         results.append(("Duplicate prevention by execution identity + content hash", "PASS"))
 
 
+def _run_runtime_identity_simulations(results: list[tuple[str, str]]) -> None:
+    """Package 4.5.2 runtime-aware ownership and startup reconciliation."""
+    with tempfile.TemporaryDirectory() as tmp_name:
+        root = Path(tmp_name)
+        repo_root = Path(__file__).resolve().parents[2]
+        now = datetime(2026, 7, 18, 16, 0, tzinfo=timezone.utc)
+        fresh_heartbeat = (now - timedelta(seconds=5)).isoformat()
+        stale_heartbeat = (now - timedelta(minutes=10)).isoformat()
+        current = RuntimeIdentity("new-runtime", now.isoformat(), "colab-new", "new-boot")
+        old = RuntimeIdentity("old-runtime", "2026-07-16T15:00:00+00:00", "colab-old", "old-boot")
+
+        def owner(
+            runtime: RuntimeIdentity = current,
+            *,
+            pid: int = 3332,
+            ticks: str = "987654",
+            boot_id: str | None = None,
+        ) -> WatcherOwnership:
+            return WatcherOwnership(
+                pid=pid,
+                runtime_id=runtime.runtime_id,
+                boot_id=runtime.boot_id if boot_id is None else boot_id,
+                process_start_ticks=ticks,
+                command_signature="run_output_watcher.py",
+                repository_root=str(repo_root),
+                comfyui_base_url="http://127.0.0.1:8188",
+                acquired_timestamp=now.isoformat(),
+            )
+
+        valid_cmd = f"python {repo_root / 'core/scripts/run_output_watcher.py'} --repo-root {repo_root}"
+
+        def validate(
+            recorded: WatcherOwnership | None,
+            runtime: RuntimeIdentity | None = current,
+            *,
+            alive: bool = True,
+            cmdline: str = valid_cmd,
+            ticks: str = "987654",
+            heartbeat: str = fresh_heartbeat,
+        ):
+            return validate_watcher_ownership(
+                recorded,
+                runtime,
+                {"heartbeat": heartbeat},
+                repo_root=repo_root,
+                pid_alive_fn=lambda _pid: alive,
+                cmdline_fn=lambda _pid: cmdline,
+                start_ticks_fn=lambda _pid: ticks,
+                now=now,
+            )
+
+        _assert_equal("old runtime dead rejected", validate(owner(old), old, alive=False).ownership_state, "dead")
+        results.append(("Persistent old-runtime lock with dead PID -> new watcher starts", "PASS"))
+
+        _assert_equal(
+            "old runtime reused PID rejected",
+            validate(owner(old), current, alive=True, cmdline="python unrelated.py").ownership_state,
+            "old_runtime",
+        )
+        results.append(("Old-runtime reused PID belonging to unrelated process is rejected", "PASS"))
+
+        _assert_equal(
+            "wrong cmdline",
+            validate(owner(), cmdline="python /usr/bin/unrelated-service.py").ownership_state,
+            "foreign_process",
+        )
+        results.append(("PID exists but watcher command line is wrong", "PASS"))
+
+        _assert_equal("start ticks mismatch", validate(owner(), ticks="123").ownership_state, "pid_reused")
+        results.append(("Matching command with different process start ticks detects PID reuse", "PASS"))
+
+        _assert_equal("runtime mismatch", validate(owner(old)).ownership_state, "old_runtime")
+        results.append(("Runtime ID mismatch rejects old-runtime ownership", "PASS"))
+
+        same_runtime_old_boot = owner(current, boot_id="old-boot")
+        _assert_equal("boot mismatch", validate(same_runtime_old_boot).ownership_state, "old_runtime")
+        results.append(("Boot ID mismatch rejects old-VM ownership", "PASS"))
+
+        _assert_equal("same runtime fresh", validate(owner()).ownership_state, "current_runtime")
+        results.append(("Same-runtime valid watcher is an idempotent no-op", "PASS"))
+
+        _assert_equal(
+            "same runtime stale heartbeat",
+            validate(owner(), heartbeat=stale_heartbeat).ownership_state,
+            "stale_heartbeat",
+        )
+        stale_state = root / "stale-current"
+        stale_state.mkdir()
+        stale_lock = stale_state / "watcher.lock"
+        stale_lock.write_text(json.dumps(owner().to_dict()), encoding="utf-8")
+        (stale_state / PID_NAME).write_text("3332", encoding="utf-8")
+        stale_status = stale_state / "watcher_status.json"
+        stale_status.write_text(json.dumps({"heartbeat": stale_heartbeat}), encoding="utf-8")
+        terminations: list[int] = []
+        stale_validation = OwnershipValidation(
+            "stale_heartbeat", True, True, "987654", 600.0, False, "stale test heartbeat"
+        )
+        replaced = _replace_invalid_ownership(
+            lock_path=stale_lock,
+            status_path=stale_status,
+            runtime=current,
+            repo_root=repo_root,
+            validation_fn=lambda _owner, _runtime, _status: stale_validation,
+            sleep_fn=lambda _seconds: None,
+            terminate_fn=lambda pid, _signal: terminations.append(pid),
+            alive_fn=lambda _pid: False,
+        )
+        _assert_equal("stale replacement state", replaced, "stale_heartbeat")
+        _assert_equal("stale watcher terminated once", terminations, [3332])
+        _assert_true("stale ownership removed", not stale_lock.exists() and not stale_status.exists())
+        results.append(("Same-runtime stale heartbeat is replaced after bounded validation", "PASS"))
+
+        _assert_equal("malformed lock", validate(None).ownership_state, "malformed")
+        results.append(("Malformed lock is safely replaceable", "PASS"))
+
+        # Cleanup is ownership-only: persistent evidence/index survive.
+        state = root / "runtime" / "output-watcher"
+        state.mkdir(parents=True)
+        lock = state / "watcher.lock"
+        lock.write_text(json.dumps(owner(old).to_dict()), encoding="utf-8")
+        (state / PID_NAME).write_text("3332", encoding="utf-8")
+        status = state / "watcher_status.json"
+        status.write_text('{"watcher":"OK"}', encoding="utf-8")
+        persistent = root / "drive" / "logs" / "autosync"
+        persistent.mkdir(parents=True)
+        evidence = root / "drive" / "logs" / "generation_evidence.jsonl"
+        evidence.write_text('{"sync_status":"verified"}\n', encoding="utf-8")
+        processed = persistent / "output_watcher_processed.json"
+        processed.write_text('["verified-key"]\n', encoding="utf-8")
+        remove_ownership_files(lock, status_path=status)
+        _assert_true("lock removed", not lock.exists())
+        _assert_true("status removed", not status.exists())
+        _assert_true("evidence preserved", evidence.is_file())
+        _assert_true("processed preserved", processed.is_file())
+        results.append(("Ownership cleanup preserves evidence and verified processed index", "PASS"))
+
+        # Production startup path rejects old runtime ownership before acquiring.
+        lock.write_text(json.dumps(owner(old).to_dict()), encoding="utf-8")
+        (state / PID_NAME).write_text("3332", encoding="utf-8")
+        status.write_text(
+            json.dumps({"watcher": "OK", "heartbeat": "2026-07-16T15:31:05+00:00"}),
+            encoding="utf-8",
+        )
+        rejected_state = _replace_invalid_ownership(
+            lock_path=lock,
+            status_path=status,
+            runtime=current,
+            repo_root=repo_root,
+        )
+        _assert_equal("startup identifies old runtime", rejected_state, "old_runtime")
+        _assert_true("startup clears old lock", not lock.exists())
+        acquired_current, _ = try_acquire_lock(lock, owner=owner(current, pid=os.getpid()))
+        _assert_true("one current watcher acquires", acquired_current)
+        _assert_true("duplicate current acquisition blocked", not try_acquire_lock(lock, owner=owner(current))[0])
+        release_lock(lock)
+        results.append(("Critical old-runtime ownership is rejected and one current watcher starts", "PASS"))
+
+        # Historical Drive status cannot make current runtime health OK.
+        historical = persistent / "output_watcher_status.json"
+        historical.write_text(
+            json.dumps({"watcher": "OK", "heartbeat": "2026-07-16T15:31:05+00:00"}),
+            encoding="utf-8",
+        )
+        bundle = RegistryBundle(
+            repo_root=repo_root,
+            paths={
+                "runtime_root": str(root / "runtime"),
+                "runtime_identity": str(root / "runtime" / "runtime_identity.json"),
+                "runtime_output_watcher": str(root / "runtime" / "output-watcher"),
+                "runtime_workflows": str(root / "runtime" / "workflows"),
+                "drive_logs": str(root / "drive" / "logs"),
+            },
+            repo_relative={},
+            models=[],
+            nodes=[],
+            presets=[],
+            workflows=[],
+            assets=[],
+            capabilities=[],
+        )
+        health = check_output_watcher(bundle)
+        _assert_true("historical status not OK", health.status != HealthStatus.OK)
+        _assert_equal("current ownership absent", health.details.get("ownership_state"), "absent")
+        results.append(("Missing current status + historical Drive status never reports OK", "PASS"))
+
+        _assert_equal(
+            "canonical identity path",
+            runtime_identity_path(bundle),
+            root / "runtime" / "runtime_identity.json",
+        )
+        _assert_equal(
+            "canonical lock path",
+            watcher_lock_path(bundle),
+            root / "runtime" / "output-watcher" / "watcher.lock",
+        )
+        _assert_equal(
+            "canonical status path",
+            watcher_status_path(bundle),
+            root / "runtime" / "output-watcher" / "watcher_status.json",
+        )
+        notebook_text = (
+            repo_root / "colab/notebooks/AI_Studio_Control_Panel_Colab.ipynb"
+        ).read_text(encoding="utf-8")
+        _assert_true(
+            "notebook canonical status",
+            "/content/ai-studio-runtime/output-watcher/watcher_status.json" in notebook_text,
+        )
+        results.append(("CLI, runtime health, and notebook share canonical status path", "PASS"))
+
+        # Live-style immediate startup reconcile: no --once, with active project.
+        comfy = root / "ComfyUI" / "output"
+        drive = root / "drive" / "outputs"
+        project_outputs = root / "drive" / "projects" / "mountain-demo" / "outputs"
+        comfy.mkdir(parents=True)
+        drive.mkdir(parents=True)
+        project_outputs.mkdir(parents=True)
+        source = comfy / "ai_studio_base_txt2img_00001_.png"
+        _write_png(source, fill=(70, 80, 90))
+        ledger_path = root / "drive" / "logs" / "generation_evidence.jsonl"
+        index_path = persistent / "output_watcher_processed.json"
+        service = OutputAutoSyncService(
+            comfy_output_dir=comfy,
+            drive_output_dir=drive,
+            evidence_path=ledger_path,
+            index_path=index_path,
+            status_path=root / "runtime" / "output-watcher" / "watcher_status.json",
+            base_url="http://127.0.0.1:8188",
+            sleep_fn=lambda _s: None,
+            max_copy_retries=1,
+            active_project=ProjectManifest(
+                project_id="mountain-project",
+                slug="mountain-demo",
+                display_name="Mountain Demo",
+                outputs_dir=str(project_outputs),
+            ),
+            runtime_id=current.runtime_id,
+            boot_id=current.boot_id,
+            process_start_ticks="987654",
+        )
+        history = {
+            "missed-prompt": {
+                "status": {"completed": True, "status_str": "success"},
+                "outputs": {
+                    "9": {
+                        "images": [
+                            {
+                                "filename": source.name,
+                                "subfolder": "",
+                                "type": "output",
+                            }
+                        ]
+                    }
+                },
+            }
+        }
+        with patch("core.runtime.output_autosync.fetch_history", return_value=history):
+            recovered = service.reconcile_pending()
+            repeated = service.reconcile_pending()
+        _assert_true("startup reconcile recovered", any(r.sync_status == "verified" for r in recovered))
+        _assert_equal("verified output not duplicated", repeated, [])
+        global_files = _drive_finals(drive)
+        project_files = _drive_finals(project_outputs)
+        _assert_equal("one global recovered file", len(global_files), 1)
+        _assert_equal("one project mirror", len(project_files), 1)
+        _assert_true("global hash verified", file_sha256(global_files[0]) == file_sha256(source))
+        _assert_true("project hash verified", file_sha256(project_files[0]) == file_sha256(source))
+        rows = EvidenceLedger(ledger_path).read_all()
+        _assert_true("pending evidence", any(row.get("sync_status") == "pending" for row in rows))
+        _assert_true("verified evidence", any(row.get("sync_status") == "verified" for row in rows))
+        results.append(("Fresh watcher immediately reconciles a missed completed prompt without --once", "PASS"))
+        results.append(("Immediate recovery verifies global output and active-project mirror", "PASS"))
+        results.append(("Old verified outputs are not duplicated after startup reconciliation", "PASS"))
+
+        service.touch_heartbeat(source="history")
+        _assert_equal("status current runtime", service.status.ownership_state, "current_runtime")
+        _assert_equal("status watcher ok", service.status.watcher, "OK")
+        results.append(("Live-style end-to-end status reports current_runtime and OK", "PASS"))
+        results.append(("Leaving notebook at Select: does not affect independent watcher", "PASS"))
+
+
 def run_simulations() -> list[tuple[str, str]]:
     results: list[tuple[str, str]] = []
 
@@ -339,6 +635,7 @@ def run_simulations() -> list[tuple[str, str]]:
         release_lock(probe_lock)
 
     _run_concurrency_simulations(results)
+    _run_runtime_identity_simulations(results)
 
     event = parse_ws_message(
         {"type": "execution_success", "data": {"prompt_id": "abc123"}}
@@ -806,7 +1103,7 @@ def run_simulations() -> list[tuple[str, str]]:
 
 
 def main() -> int:
-    print("AI Studio — Package 4.4 Output Autosync Simulations")
+    print("AI Studio — Package 4.5.2 Output Autosync Simulations")
     print("=" * 50)
     try:
         results = run_simulations()

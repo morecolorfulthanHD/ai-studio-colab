@@ -24,10 +24,10 @@ Cross-engine utility scripts for bootstrap, validation, and batch processing.
 | `prepare_inpainting_reference.py` | Prepare temporary official-reference workflow from one RGBA PNG (configured Colab paths; `--match-canonical-sampler`; `--positive-prompt` / `--negative-prompt`; `--dry-run`) | No |
 | `prepare_qwen_image_edit.py` | Prepare temporary Qwen-Image-Edit-2511 benchmark workflow (`--allow-missing-models`, `--dry-run`) | No |
 | `prepare_flux_fill.py` | Prepare temporary FLUX.1 Fill [dev] benchmark workflow (non-commercial license warning) | No |
-| `run_output_watcher.py` | Event-driven output autosync watcher (`--status`, `--once`, `--no-websocket`) | No |
+| `run_output_watcher.py` | Runtime-aware event-driven autosync watcher (`--status`, read-only `--diagnose`, `--once`, `--no-websocket`) | No |
 | `run_editing_benchmark.py` | Append editing benchmark ledger records | No |
 | `report_editing_benchmark.py` | Report editing benchmark ledger | No |
-| `simulate_output_autosync.py` | Package 4.4 autosync simulations | No |
+| `simulate_output_autosync.py` | Package 4.5.2 autosync, runtime-ownership, stale-lock, and recovery simulations | No |
 | `simulate_modern_editing_benchmark.py` | Package 4.4 modern editing benchmark simulations | No |
 | `simulate_package45_provenance_workspace.py` | Package 4.5 provenance, truthfulness, workspace simulations | No |
 | `list_generations.py` | List recent generation evidence records (`--json`, `--verified-only`) | No |

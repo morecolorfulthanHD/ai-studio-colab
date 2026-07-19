@@ -40,6 +40,7 @@ from .generation_evidence_ledger import (
 )
 from .output_evidence import ELIGIBLE_OUTPUT_SUFFIXES, is_eligible_output
 from .permanent_output_naming import resolve_permanent_destination
+from .runtime_identity import STATUS_SCHEMA_VERSION
 from .project_workspace import ProjectManifest
 from .watcher_lock import pid_alive
 from .workflow_provenance import (
@@ -79,9 +80,18 @@ def make_autosync_temp_path(
 
 @dataclass
 class AutoSyncStatus:
-    watcher: str = "OK"
+    status_schema_version: int = STATUS_SCHEMA_VERSION
+    watcher: str = "FAIL"
+    runtime_id: str = ""
+    boot_id: str = ""
     watcher_pid: int = 0
+    process_start_ticks: str = ""
+    process_command_valid: bool = False
+    process_alive: bool = False
     heartbeat: str = ""
+    heartbeat_age_seconds: float | None = None
+    heartbeat_fresh: bool = False
+    ownership_state: str = "absent"
     last_websocket_event: str = ""
     last_history_poll: str = ""
     last_completed_prompt: str = ""
@@ -349,6 +359,9 @@ class OutputAutoSyncService:
         copy_fn: Callable[[Path, Path], None] | None = None,
         registered_hashes: dict[str, tuple[str, str, str]] | None = None,
         active_project: ProjectManifest | None = None,
+        runtime_id: str = "",
+        boot_id: str = "",
+        process_start_ticks: str = "",
     ) -> None:
         self.comfy_output_dir = comfy_output_dir
         self.drive_output_dir = drive_output_dir
@@ -368,6 +381,9 @@ class OutputAutoSyncService:
         # Keys whose local source is gone — report once, avoid hot-looping.
         self.unrecoverable_missing_source: set[str] = set()
         self.status = AutoSyncStatus()
+        self.status.runtime_id = runtime_id
+        self.status.boot_id = boot_id
+        self.status.process_start_ticks = process_start_ticks
         self.recompute_counters()
 
     def _apply_provenance(self, record: EvidenceRecord, provenance: ExecutionProvenance | None) -> None:
@@ -433,6 +449,12 @@ class OutputAutoSyncService:
     def touch_heartbeat(self, *, source: str = "poll") -> None:
         self.status.watcher_pid = os.getpid()
         self.status.heartbeat = utc_now()
+        self.status.heartbeat_age_seconds = 0.0
+        self.status.heartbeat_fresh = True
+        self.status.process_alive = True
+        self.status.process_command_valid = True
+        self.status.ownership_state = "current_runtime"
+        self.status.watcher = "OK"
         if source == "websocket":
             self.status.last_websocket_event = self.status.heartbeat
         elif source == "history":

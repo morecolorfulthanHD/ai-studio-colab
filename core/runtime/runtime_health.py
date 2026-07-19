@@ -372,88 +372,84 @@ def check_capabilities(bundle: RegistryBundle) -> HealthCheck:
 
 
 def check_output_watcher(bundle: RegistryBundle) -> HealthCheck:
-    try:
-        logs_dir = bundle.path("drive_logs") / "autosync"
-    except KeyError:
-        return HealthCheck(
-            "output_watcher",
-            HealthStatus.WARN,
-            "drive_logs path not configured.",
-        )
-    status_path = logs_dir / "output_watcher_status.json"
-    lock_path = logs_dir / "output_watcher.lock"
-    if not status_path.is_file():
-        return HealthCheck(
-            "output_watcher",
-            HealthStatus.WARN,
-            "Output watcher status not found (starts automatically after ComfyUI launch).",
-            {"status_path": str(status_path)},
-        )
-    try:
-        payload = json.loads(status_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        return HealthCheck(
-            "output_watcher",
-            HealthStatus.FAIL,
-            f"Unable to read watcher status: {exc}",
-        )
-    watcher = str(payload.get("watcher") or "UNKNOWN").upper()
-    status = HealthStatus.OK
-    if watcher == "WARN":
-        status = HealthStatus.WARN
-    elif watcher == "FAIL":
-        status = HealthStatus.FAIL
-
-    lock_held = lock_path.exists()
-    holder = None
-    if lock_held:
-        try:
-            from .watcher_lock import pid_alive, read_lock_pid
-
-            holder = read_lock_pid(lock_path)
-            alive = holder is not None and pid_alive(holder)
-        except Exception:  # noqa: BLE001
-            alive = False
-            holder = None
-    else:
-        alive = False
-
-    heartbeat = str(payload.get("heartbeat") or "")
-    stale_heartbeat = False
-    if heartbeat:
-        try:
-            from datetime import datetime, timezone
-
-            hb = datetime.fromisoformat(heartbeat.replace("Z", "+00:00"))
-            age = (datetime.now(timezone.utc) - hb.astimezone(timezone.utc)).total_seconds()
-            stale_heartbeat = age > 60
-        except ValueError:
-            stale_heartbeat = True
-
-    if lock_held and not alive:
-        status = HealthStatus.FAIL
-        liveness = "started-but-dead"
-    elif alive and stale_heartbeat:
-        status = HealthStatus.WARN
-        liveness = "alive-stale-heartbeat"
-    elif alive:
-        liveness = "alive"
-    elif status_path.is_file():
-        liveness = "started-not-alive"
-        if status == HealthStatus.OK:
-            status = HealthStatus.WARN
-    else:
-        liveness = "not-started"
-
-    message = (
-        f"Watcher={watcher}; liveness={liveness}; pid={payload.get('watcher_pid') or holder or 'none'}; "
-        f"heartbeat={heartbeat or 'none'}; last_prompt={payload.get('last_completed_prompt') or 'none'}; "
-        f"pending={payload.get('pending_sync_count', 0)}; failed={payload.get('failed_sync_count', 0)}; "
-        f"lock={'yes' if lock_held else 'no'}"
+    from .runtime_identity import (
+        read_runtime_identity,
+        read_watcher_ownership,
+        runtime_identity_path,
+        validate_watcher_ownership,
+        watcher_lock_path,
+        watcher_status_path,
     )
+    from .watcher_lock import pid_alive
+
+    status_path = watcher_status_path(bundle)
+    lock_path = watcher_lock_path(bundle)
+    identity_path = runtime_identity_path(bundle)
+    runtime = read_runtime_identity(identity_path)
+    owner = read_watcher_ownership(lock_path)
+    payload: dict[str, Any] = {}
+    if status_path.is_file():
+        try:
+            payload = json.loads(status_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            return HealthCheck(
+                "output_watcher",
+                HealthStatus.FAIL,
+                f"Unable to read canonical current-runtime watcher status: {exc}",
+                {"status_path": str(status_path)},
+            )
+    if not lock_path.exists():
+        historical = bundle.path("drive_logs") / "autosync" / "output_watcher_status.json"
+        return HealthCheck(
+            "output_watcher",
+            HealthStatus.WARN,
+            "Watcher not active in the current runtime (canonical ownership absent).",
+            {
+                "status_path": str(status_path),
+                "ownership_state": "absent",
+                "historical_status_ignored": historical.is_file(),
+            },
+        )
+    validation = validate_watcher_ownership(
+        owner,
+        runtime,
+        payload,
+        repo_root=bundle.repo_root,
+        pid_alive_fn=pid_alive,
+    )
+    state = validation.ownership_state
+    if state == "current_runtime":
+        operational = str(payload.get("watcher") or "OK").upper()
+        status = HealthStatus.WARN if operational == "WARN" else HealthStatus.OK
+        watcher = "WARN" if status == HealthStatus.WARN else "OK"
+        liveness = "alive-current-heartbeat"
+    elif state == "stale_heartbeat":
+        status = HealthStatus.WARN
+        watcher = "WARN"
+        liveness = "alive-stale-heartbeat"
+    else:
+        status = HealthStatus.FAIL
+        watcher = "FAIL"
+        liveness = {
+            "dead": "started-but-dead",
+            "old_runtime": "old-runtime",
+            "pid_reused": "pid-reused",
+            "foreign_process": "foreign-process",
+            "malformed": "malformed",
+        }.get(state, state)
     details = dict(payload)
+    details.update(validation.to_dict())
+    details["watcher"] = watcher
     details["liveness"] = liveness
-    details["lock_held"] = lock_held
+    details["lock_held"] = lock_path.exists()
+    details["status_path"] = str(status_path)
+    heartbeat = str(payload.get("heartbeat") or "")
+    holder = owner.pid if owner else None
+    message = (
+        f"Watcher={watcher}; ownership={state}; liveness={liveness}; pid={holder or 'none'}; "
+        f"heartbeat={heartbeat or 'none'}; last_prompt={payload.get('last_completed_prompt') or 'none'}; "
+        f"pending={payload.get('pending_sync_count', 0)}; failed={payload.get('failed_sync_count', 0)}"
+    )
     return HealthCheck("output_watcher", status, message, details)
 
 

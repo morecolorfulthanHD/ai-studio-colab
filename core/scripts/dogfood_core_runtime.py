@@ -256,7 +256,9 @@ def check_generation_evidence(repo_root: Path) -> DogfoodCheck:
 
 def check_output_autosync(repo_root: Path) -> DogfoodCheck:
     bundle = RegistryLoader(repo_root).load_all()
-    status_path = bundle.path("drive_logs") / "autosync" / "output_watcher_status.json"
+    from core.runtime.runtime_identity import watcher_status_path
+
+    status_path = watcher_status_path(bundle)
     if not status_path.is_file():
         return DogfoodCheck(
             "output_autosync",
@@ -268,16 +270,18 @@ def check_output_autosync(repo_root: Path) -> DogfoodCheck:
     except (OSError, json.JSONDecodeError) as exc:
         return DogfoodCheck("output_autosync", "FAIL", f"Watcher status unreadable: {exc}")
     watcher = str(payload.get("watcher") or "unknown").upper()
-    if watcher == "OK":
+    ownership = str(payload.get("ownership_state") or "absent")
+    heartbeat_fresh = bool(payload.get("heartbeat_fresh"))
+    if watcher == "OK" and ownership == "current_runtime" and heartbeat_fresh:
         return DogfoodCheck(
             "output_autosync",
             "PASS",
             (
-                f"Watcher OK; last_prompt={payload.get('last_completed_prompt') or 'none'}; "
+                f"Watcher OK; ownership=current_runtime; last_prompt={payload.get('last_completed_prompt') or 'none'}; "
                 f"failed={payload.get('failed_sync_count', 0)}"
             ),
         )
-    if watcher == "WARN":
+    if watcher == "WARN" or ownership == "stale_heartbeat":
         messages = payload.get("messages") or ["watcher warn"]
         return DogfoodCheck("output_autosync", "WARN", str(messages[-1]))
     return DogfoodCheck("output_autosync", "FAIL", f"Watcher state {watcher}")

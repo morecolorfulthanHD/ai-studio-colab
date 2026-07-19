@@ -1,13 +1,22 @@
 #!/usr/bin/env python3
-"""Exclusive watcher lock — atomic acquisition and PID-scoped release."""
+"""Exclusive watcher lock with runtime-aware process ownership.
+
+Legacy PID-only locks remain readable for diagnosis, but current ownership is a
+JSON process identity and is never accepted based on numeric PID alone.
+"""
 
 from __future__ import annotations
 
 import os
+import json
 import sys
 from pathlib import Path
+from typing import Any
 
-PID_NAME = "output_watcher.pid"
+from .runtime_identity import WatcherOwnership, read_watcher_ownership
+
+PID_NAME = "watcher.pid"
+LEGACY_PID_NAME = "output_watcher.pid"
 
 
 def pid_alive(pid: int) -> bool:
@@ -41,32 +50,56 @@ def read_lock_pid(lock_path: Path) -> int | None:
     try:
         raw = lock_path.read_text(encoding="utf-8").strip()
         if raw:
+            if raw.startswith("{"):
+                payload = json.loads(raw)
+                return int(payload.get("pid") or 0) or None
             return int(raw)
-    except (OSError, ValueError):
+    except (OSError, ValueError, json.JSONDecodeError):
         pass
-    pid_path = lock_path.parent / PID_NAME
-    if pid_path.is_file():
+    for pid_name in (PID_NAME, LEGACY_PID_NAME):
+        pid_path = lock_path.parent / pid_name
+        if not pid_path.is_file():
+            continue
         try:
             return int(pid_path.read_text(encoding="utf-8").strip())
         except (OSError, ValueError):
-            return None
+            continue
     return None
 
 
-def _write_lock_pid(lock_path: Path, pid: int) -> None:
-    lock_path.write_text(str(pid), encoding="utf-8")
-    (lock_path.parent / PID_NAME).write_text(str(pid), encoding="utf-8")
+def _owner_payload(owner: WatcherOwnership | dict[str, Any] | None, pid: int) -> str:
+    if isinstance(owner, WatcherOwnership):
+        return json.dumps(owner.to_dict(), indent=2) + "\n"
+    if isinstance(owner, dict):
+        return json.dumps(owner, indent=2) + "\n"
+    return str(pid)
 
 
 def _remove_lock_files(lock_path: Path) -> None:
     lock_path.unlink(missing_ok=True)
     (lock_path.parent / PID_NAME).unlink(missing_ok=True)
+    (lock_path.parent / LEGACY_PID_NAME).unlink(missing_ok=True)
 
 
-def try_acquire_lock(lock_path: Path) -> tuple[bool, int | None]:
-    """Atomically acquire the watcher lock. Returns (acquired, holder_pid_if_held)."""
+def remove_ownership_files(lock_path: Path, *, status_path: Path | None = None) -> None:
+    """Remove active ownership only; never evidence, processed index, logs, or outputs."""
+    _remove_lock_files(lock_path)
+    if status_path is not None:
+        status_path.unlink(missing_ok=True)
+
+
+def try_acquire_lock(
+    lock_path: Path,
+    *,
+    owner: WatcherOwnership | dict[str, Any] | None = None,
+) -> tuple[bool, int | None]:
+    """Atomically acquire. Caller must validate an existing identity before retry.
+
+    PID-only fallback behavior is retained for legacy unit simulations. Production
+    callers pass ``owner`` and never auto-accept or auto-clear an existing lock.
+    """
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    pid = os.getpid()
+    pid = int(owner.pid if isinstance(owner, WatcherOwnership) else os.getpid())
 
     def _atomic_create() -> bool:
         try:
@@ -74,16 +107,18 @@ def try_acquire_lock(lock_path: Path) -> tuple[bool, int | None]:
         except FileExistsError:
             return False
         try:
-            os.write(fd, str(pid).encode("ascii"))
+            os.write(fd, _owner_payload(owner, pid).encode("utf-8"))
         finally:
             os.close(fd)
-        _write_lock_pid(lock_path, pid)
+        (lock_path.parent / PID_NAME).write_text(str(pid), encoding="utf-8")
         return True
 
     if _atomic_create():
         return True, None
 
     holder = read_lock_pid(lock_path)
+    if owner is not None:
+        return False, holder
     if holder is not None and pid_alive(holder):
         return False, holder
 
@@ -105,6 +140,10 @@ def release_lock(lock_path: Path, *, owner_pid: int | None = None) -> bool:
         return False
     _remove_lock_files(lock_path)
     return True
+
+
+def read_lock_ownership(lock_path: Path) -> WatcherOwnership | None:
+    return read_watcher_ownership(lock_path)
 
 
 def clear_stale_lock(lock_path: Path) -> bool:

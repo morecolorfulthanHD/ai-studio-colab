@@ -1,4 +1,4 @@
-# Dogfooding Checklist — Output Autosync (Package 4.5.1)
+# Dogfooding Checklist — Output Autosync (Package 4.5.2)
 
 Zero-command acceptance: after Launch + ComfyUI Run, outputs appear on Drive with verified hashes and evidence — **no manual** `sync_outputs.py` / `verify_generation.py` in the normal operator flow.
 
@@ -10,20 +10,56 @@ Leaving the control panel at `Select:` after Full mode launch is **correct** and
 - WebSocket, history reconciliation, Drive copy, and evidence updates continue without further notebook interaction.
 - Do **not** exit the menu (option `0`) solely to “make sync work.”
 
-## Operator flow (acceptance)
+## Runtime-aware ownership
+
+Numeric PIDs are not watcher identities across Colab VM restarts. A valid watcher
+must match the current ephemeral runtime ID, Linux boot ID, process start ticks,
+repository watcher command line, and a fresh heartbeat.
+
+Authoritative current-runtime state is ephemeral:
+
+```text
+/content/ai-studio-runtime/runtime_identity.json
+/content/ai-studio-runtime/output-watcher/watcher.lock
+/content/ai-studio-runtime/output-watcher/watcher.pid
+/content/ai-studio-runtime/output-watcher/watcher_status.json
+```
+
+Persistent history remains on Drive:
+
+```text
+/content/drive/MyDrive/AI_Studio/logs/generation_evidence.jsonl
+/content/drive/MyDrive/AI_Studio/logs/autosync/output_watcher_processed.json
+/content/drive/MyDrive/AI_Studio/logs/autosync/output_watcher.log
+```
+
+Legacy Drive lock/PID/status files are historical only. They cannot suppress
+startup or make a fresh runtime report `watcher: OK`.
+
+## Fresh-runtime regression acceptance
 
 1. Fresh runtime. Launch AI Studio (Full mode).
-2. Confirm watcher start message (`Output autosync watcher started`).
-3. Leave the notebook at `Select:` — do nothing else in the notebook.
-4. Open ComfyUI in another tab.
-5. Generate **txt2img image A**. Do nothing.
-6. Confirm Drive receives `txt2img_YYYYMMDD_000001.png` (permanent name, not the ComfyUI SaveImage name).
-7. Confirm `generation_evidence.jsonl` has a `verified` row with `source_filename`, `drive_filename`, matching SHA-256.
-8. Generate **txt2img image B** with the **same SaveImage prefix**. Do nothing.
-9. Confirm Drive receives `txt2img_YYYYMMDD_000002.png`.
-10. Confirm image A remains untouched on Drive.
-11. Confirm evidence has **two** verified rows.
-12. Repeat for img2img (`img2img_YYYYMMDD_000001.png`) and inpainting (`inpainting_YYYYMMDD_000001.png`).
+2. Confirm launch prints `OutputWatcher: OK`, not merely “started.”
+3. Option 8 must show current `runtime_id`, `boot_id`, heartbeat,
+   `ownership_state=current_runtime`, and `watcher=OK`.
+4. Leave the notebook at `Select:` — do not enter `0`.
+5. Create/activate project `mountain-demo`, then open ComfyUI in another tab.
+6. Generate **txt2img image A**. Do nothing after Run.
+7. Within the reconciliation interval, confirm both:
+   - `AI_Studio/outputs/txt2img_YYYYMMDD_000001.png` (UTC date)
+   - `AI_Studio/projects/mountain-demo/outputs/txt2img_YYYYMMDD_000001.png`
+8. Confirm `generation_evidence.jsonl` has pending then verified rows with
+   `source_filename`, `drive_filename`, and matching local/Drive SHA-256.
+9. Generate image B with the same SaveImage prefix. Confirm sequence `000002`;
+   image A remains unchanged.
+10. Restart the entire Colab runtime and launch Full mode again.
+11. Confirm no July-16-style persistent lock/PID/status suppresses the new watcher.
+12. Generate image C and confirm automatic global/project persistence without
+    any manual recovery command.
+
+**Do not run `--once` during acceptance.** It masks background watcher startup
+defects. Also do not run `sync_outputs.py`, `verify_generation.py`, or manual
+copy commands.
 
 ## Permanent Drive naming
 
@@ -36,17 +72,29 @@ Leaving the control panel at `Select:` after Full mode launch is **correct** and
 
 ```bash
 python /content/ai-studio-colab/core/scripts/run_output_watcher.py --status
+python /content/ai-studio-colab/core/scripts/run_output_watcher.py --diagnose
 python /content/ai-studio-colab/core/scripts/runtime_report.py --summary
 python /content/ai-studio-colab/core/scripts/dogfood_core_runtime.py
 ```
 
-`runtime_report` must distinguish **Watcher started** from **Watcher currently alive** (`liveness=alive` vs `started-but-dead` / `alive-stale-heartbeat`).
+`--diagnose` is read-only. It inspects runtime/lock/process identity, heartbeat,
+ComfyUI/history/local outputs, latest evidence, Drive, and active project without
+syncing, clearing locks, or starting/stopping a watcher.
+
+`runtime_report` distinguishes current healthy ownership from `old_runtime`,
+`pid_reused`, `foreign_process`, `dead`, `stale_heartbeat`, `malformed`, and
+`absent`. A stale or historical heartbeat never reports `watcher: OK`.
 
 ## Watcher concurrency
 
 - Exclusive lock is acquired **before** constructing `OutputAutoSyncService` or cleaning temps.
 - Duplicate starts are idempotent no-ops (no temp cleanup, no evidence/index mutation).
-- `--status` is read-only; `--stop` clears only confirmed stale locks; `--once` uses the same exclusive lock.
+- `--status` and `--diagnose` are read-only.
+- Startup self-heals stale, foreign, old-runtime, PID-reused, malformed, or
+  heartbeat-stale ownership while preserving evidence, processed history,
+  outputs, project outputs, and logs.
+- A newly started watcher reconciles completed history immediately, before
+  claiming `OutputWatcher: OK`.
 
 ## Detection reliability
 
@@ -58,7 +106,7 @@ python /content/ai-studio-colab/core/scripts/dogfood_core_runtime.py
 
 Failed or pending evidence rows are **retryable**. Only verified outputs enter the permanent processed index.
 
-On watcher restart / `--once` reconciliation:
+On watcher startup / periodic reconciliation:
 1. Retry ledger rows that are pending/failed when the local ComfyUI file still exists and SHA-256 matches.
 2. Append a new verified evidence row on success (append-only status transition).
 3. If the local source is missing, keep the failed evidence and stop retrying that key (no infinite loop).
