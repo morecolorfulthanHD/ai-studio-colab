@@ -590,15 +590,26 @@ def main() -> int:
             prefer_websocket=not args.no_websocket,
             ws_url=args.ws_url,
             log_path=log_path,
-            refresh_active_project=lambda: ProjectWorkspace(
-                bundle.path("drive_root")
-            ).get_active_project(),
+            refresh_active_project=lambda: _safe_active_project(bundle),
         )
     finally:
         release_lock(lock_path)
         if not args.once:
             _append_log(log_path, "Output watcher stopped; lock released.")
     return 0
+
+
+def _safe_active_project(bundle):
+    """Resolve active project for mirroring; never recreate archived/deleted projects."""
+    workspace = ProjectWorkspace(bundle.path("drive_root"))
+    active = workspace.get_active_project()
+    if active is None:
+        return None
+    if active.is_archived() or not active.can_receive_mirrors():
+        return None
+    if not Path(active.outputs_dir).parent.is_dir():
+        return None
+    return active
 
 
 if __name__ == "__main__":

@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 import importlib.util
 
@@ -22,6 +21,8 @@ from core.runtime.registry_loader import RegistryLoader, find_repo_root
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="List AI Studio projects.")
+    parser.add_argument("--include-archived", action="store_true")
+    parser.add_argument("--summary", action="store_true")
     parser.add_argument("--repo-root", type=Path, default=None)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
@@ -30,11 +31,16 @@ def main() -> int:
     bundle = RegistryLoader(repo_root).load_all()
     workspace = ProjectWorkspace(bundle.path("drive_root"))
     active = workspace.get_active_project()
-    projects = workspace.list_projects()
+    projects = workspace.list_projects(include_archived=args.include_archived)
+    archived_count = len(workspace.list_projects(include_archived=True)) - len(
+        workspace.list_projects(include_archived=False)
+    )
 
     payload = {
+        "mode": workspace.current_mode(),
         "active_project": active.to_dict() if active else None,
         "projects": [project.to_dict() for project in projects],
+        "archived_projects": archived_count,
     }
     if args.json:
         print(json.dumps(payload, indent=2))
@@ -42,16 +48,27 @@ def main() -> int:
 
     print("AI Studio — Projects")
     print("=" * 40)
-    if active:
-        print(f"Active: {active.slug} ({active.display_name})")
-    else:
-        print("Active: (none)")
+    print(f"Current mode: {workspace.current_mode()}")
+    if args.summary:
+        print(f"Projects shown: {len(projects)} | Archived: {archived_count}")
+        return 0
     if not projects:
         print("No projects found.")
+        if archived_count:
+            print(f"Archived projects: {archived_count}")
+            print('Use "Restore archived project" to view or restore them.')
         return 0
     for project in projects:
         marker = "*" if active and active.slug == project.slug else " "
-        print(f"{marker} {project.slug:20} {project.display_name}")
+        print(f"{marker} {project.slug}")
+        print(f"  Name: {project.display_name}")
+        print(f"  Status: {project.status}")
+        print(f"  Generations: {project.generation_count}")
+        print(f"  Updated: {project.updated_at or project.created_at}")
+    if not args.include_archived:
+        print(f"Archived projects: {archived_count}")
+        if archived_count:
+            print('Use "Restore archived project" to view or restore them.')
     return 0
 
 

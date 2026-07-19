@@ -16,33 +16,41 @@ assert _spec is not None and _spec.loader is not None
 _spec.loader.exec_module(_activate)
 _activate.activate(__file__)
 
-from core.runtime.project_workspace import ProjectWorkspace, slugify
+from core.runtime.project_workspace import ProjectWorkspace
 from core.runtime.registry_loader import RegistryLoader, find_repo_root
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Create an AI Studio project workspace.")
-    parser.add_argument("--name", required=True, help="Display name for the project.")
-    parser.add_argument("--slug", default=None, help="Optional slug (collision-safe if omitted).")
+    parser.add_argument("--name", default=None, help="Human-readable project name.")
+    parser.add_argument("--slug", default=None, help="Optional slug (auto-generated from name when omitted).")
     parser.add_argument("--description", default="")
+    parser.add_argument("--tag", action="append", default=[], dest="tags")
     parser.add_argument("--default-workflow", default="")
+    parser.add_argument("--set-active", action="store_true", help="Activate the new project.")
     parser.add_argument("--repo-root", type=Path, default=None)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
+    if not args.name and not args.slug:
+        print("ERROR: Provide --name and/or --slug.", file=sys.stderr)
+        return 1
+    display_name = args.name or args.slug
+
     repo_root = args.repo_root.resolve() if args.repo_root else find_repo_root(script_file=Path(__file__))
     bundle = RegistryLoader(repo_root).load_all()
     workspace = ProjectWorkspace(bundle.path("drive_root"))
-    slug = slugify(args.slug or args.name)
 
     try:
         manifest = workspace.create_project(
-            display_name=args.name,
-            slug=slug,
+            display_name=display_name,
+            slug=args.slug,
             description=args.description,
             default_workflow=args.default_workflow,
+            tags=args.tags,
+            set_active=args.set_active,
         )
-    except FileExistsError as exc:
+    except (FileExistsError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
@@ -51,9 +59,13 @@ def main() -> int:
     else:
         print("AI Studio — Project Created")
         print("=" * 40)
+        print(f"name:   {manifest.display_name}")
         print(f"slug:   {manifest.slug}")
         print(f"id:     {manifest.project_id}")
+        print(f"status: {manifest.status}")
         print(f"outputs:{manifest.outputs_dir}")
+        if args.set_active:
+            print("Active project set to this project.")
     return 0
 
 

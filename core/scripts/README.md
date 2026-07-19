@@ -30,13 +30,22 @@ Cross-engine utility scripts for bootstrap, validation, and batch processing.
 | `simulate_output_autosync.py` | Package 4.5.2 autosync, runtime-ownership, stale-lock, and recovery simulations | No |
 | `simulate_modern_editing_benchmark.py` | Package 4.4 modern editing benchmark simulations | No |
 | `simulate_package45_provenance_workspace.py` | Package 4.5 provenance, truthfulness, workspace simulations | No |
-| `list_generations.py` | List recent generation evidence records (`--json`, `--verified-only`) | No |
+| `simulate_package46_workspace_management.py` | Package 4.6 project lifecycle, stats, filters, watcher refresh simulations | No |
+| `list_generations.py` | Search generation evidence (`--project`, `--capability`, `--prompt-contains`, `--date-from`/`--to`, `--json`) | No |
+| `list_project_assets.py` | List project assets with canonical + mirror paths | No |
 | `show_generation.py` | Show evidence for one prompt ID (`--json`) | No |
 | `report_generation_history.py` | Generation ledger summary and recent verified rows | No |
-| `create_project.py` | Create AI Studio project workspace on Drive | No |
-| `list_projects.py` | List projects and active project | No |
-| `show_project.py` | Show one project manifest | No |
-| `set_active_project.py` | Set or clear active project (`--slug`, `--clear`) | No |
+| `create_project.py` | Create project (`--name`, `--slug`, `--description`, `--tag`, `--set-active`) | No |
+| `list_projects.py` | List projects (`--include-archived`, `--summary`, `--json`) | No |
+| `show_project.py` | Show one project (`--project` / `--slug`) | No |
+| `set_active_project.py` | Switch or clear active project (`--slug`, `--clear`) | No |
+| `deactivate_project.py` | Clear active project; return to global-only mode | No |
+| `rename_project.py` | Rename display name and/or project slug/folder | No |
+| `archive_project.py` | Archive project (hides from default list; deactivates if active) | No |
+| `restore_project.py` | Restore archived project (`--set-active` optional) | No |
+| `delete_project.py` | Delete managed project folder (`--confirm-slug`, `--dry-run`); preserves global outputs/evidence | No |
+| `project_statistics.py` | Authoritative project statistics from files + evidence | No |
+| `migrate_projects.py` | Preview/apply Package 4.6 metadata migration (`--dry-run`, `--apply`) | No |
 | `workflow_catalog.py` | User-facing workflow catalog with runtime/quality/production status | No |
 
 ## Runtime Verification (Phase 1b)

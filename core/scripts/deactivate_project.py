@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Set, show, or clear the active AI Studio project."""
+"""Deactivate the active AI Studio project (global-only mode)."""
 
 from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 import importlib.util
 
@@ -21,9 +20,7 @@ from core.runtime.registry_loader import RegistryLoader, find_repo_root
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Set or clear the active AI Studio project.")
-    parser.add_argument("--slug", default=None, help="Project slug or project_id to activate.")
-    parser.add_argument("--clear", action="store_true", help="Clear active project (global-only mode).")
+    parser = argparse.ArgumentParser(description="Deactivate the active AI Studio project.")
     parser.add_argument("--repo-root", type=Path, default=None)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
@@ -31,33 +28,18 @@ def main() -> int:
     repo_root = args.repo_root.resolve() if args.repo_root else find_repo_root(script_file=Path(__file__))
     bundle = RegistryLoader(repo_root).load_all()
     workspace = ProjectWorkspace(bundle.path("drive_root"))
-
-    try:
-        if args.clear:
-            payload = workspace.deactivate_active_project()
-        elif args.slug:
-            payload = workspace.set_active_project(args.slug)
-        else:
-            active = workspace.get_active_project()
-            payload = {
-                "mode": workspace.current_mode(),
-                "active_project": active.to_dict() if active else None,
-            }
-    except (FileNotFoundError, ValueError) as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        return 1
+    before = workspace.get_active_project()
+    payload = workspace.deactivate_active_project()
+    payload["cleared"] = before.slug if before else None
 
     if args.json:
         print(json.dumps(payload, indent=2))
         return 0
-    if args.clear:
+    if before is None:
+        print("No active project; already in global mode.")
+    else:
         print("Active project cleared.")
         print("Future outputs will be saved globally only.")
-    elif args.slug:
-        print(f"Active project set to: {payload.get('slug')}")
-        print(f"Current mode: Project — {payload.get('slug')}")
-    else:
-        print(f"Current mode: {payload.get('mode')}")
     return 0
 
 

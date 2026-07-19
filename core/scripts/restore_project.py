@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Show one AI Studio project workspace."""
+"""Restore an archived AI Studio project."""
 
 from __future__ import annotations
 
@@ -16,52 +16,36 @@ assert _spec is not None and _spec.loader is not None
 _spec.loader.exec_module(_activate)
 _activate.activate(__file__)
 
-from core.runtime.project_workspace import ProjectWorkspace, validate_manifest
+from core.runtime.project_workspace import ProjectWorkspace
 from core.runtime.registry_loader import RegistryLoader, find_repo_root
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Show an AI Studio project.")
-    parser.add_argument("--project", default=None, help="Project slug or project_id.")
-    parser.add_argument("--slug", default=None, help="Alias for --project (legacy).")
+    parser = argparse.ArgumentParser(description="Restore an archived AI Studio project.")
+    parser.add_argument("--project", required=True, help="Project slug or project_id.")
+    parser.add_argument("--set-active", action="store_true")
     parser.add_argument("--repo-root", type=Path, default=None)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
-
-    identifier = args.project or args.slug
-    if not identifier:
-        print("ERROR: Provide --project or --slug.", file=sys.stderr)
-        return 1
 
     repo_root = args.repo_root.resolve() if args.repo_root else find_repo_root(script_file=Path(__file__))
     bundle = RegistryLoader(repo_root).load_all()
     workspace = ProjectWorkspace(bundle.path("drive_root"))
     try:
-        manifest = workspace.resolve_project(identifier)
+        restored = workspace.restore_project(args.project, set_active=args.set_active)
     except (FileNotFoundError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
-    data = manifest.to_dict()
-    errors = validate_manifest(data)
-    payload = {
-        "mode": workspace.current_mode(),
-        "manifest": data,
-        "validation_errors": errors,
-    }
-
     if args.json:
-        print(json.dumps(payload, indent=2))
+        print(json.dumps(restored.to_dict(), indent=2))
         return 0
-
-    print("AI Studio — Project")
-    print("=" * 40)
-    print(f"Current mode: {workspace.current_mode()}")
-    print(json.dumps(data, indent=2))
-    if errors:
-        print("\nValidation errors:")
-        for error in errors:
-            print(f"  - {error}")
+    print(f"Restored project: {restored.slug}")
+    print(f"Status: {restored.status}")
+    if args.set_active:
+        print("Project activated.")
+    else:
+        print("Project remains inactive until activated.")
     return 0
 
 

@@ -1,37 +1,106 @@
-# Dogfooding Checklist — Workspace Foundation (Package 4.5)
+# Dogfooding Checklist — Workspace & Asset Management (Package 4.6)
 
-## Project workspace
+## Operating model
+
+**Global mode** (no active project):
+
+- verified outputs go only to `AI_Studio/outputs/`
+
+**Project mode** (active project selected):
+
+- verified outputs go to `AI_Studio/outputs/` (canonical archive)
+- a managed mirror is written to `AI_Studio/projects/<slug>/outputs/`
+
+Active project selection persists across fresh Colab runtimes via
+`AI_Studio/settings/active_project.json` until you:
+
+- switch to another project
+- deactivate the active project
+- archive the active project
+- delete the active project
+
+Do **not** manually delete project folders in Google Drive unless recovering a
+damaged workspace and following documented recovery steps. Use AI Studio delete
+instead.
+
+## Project lifecycle
 
 1. `python core/scripts/create_project.py --name "Dogfood Test"`
 2. `python core/scripts/list_projects.py`
 3. `python core/scripts/set_active_project.py --slug dogfood-test`
-4. `python core/scripts/show_project.py --slug dogfood-test`
+4. `python core/scripts/show_project.py --project dogfood-test`
+5. `python core/scripts/deactivate_project.py` — confirm global-only mode
+6. Reactivate, then rename display name only:
+   `python core/scripts/rename_project.py --project dogfood-test --name "Dogfood Renamed"`
+7. Optional slug rename:
+   `python core/scripts/rename_project.py --project dogfood-test --name "Alpine" --new-slug alpine-demo`
+8. Archive / restore:
+   `python core/scripts/archive_project.py --project alpine-demo --yes`
+   `python core/scripts/restore_project.py --project alpine-demo`
+9. Statistics:
+   `python core/scripts/project_statistics.py --project alpine-demo`
+10. Delete dry-run, then exact confirmation:
+    `python core/scripts/delete_project.py --project alpine-demo --dry-run`
+    `python core/scripts/delete_project.py --project alpine-demo --confirm-slug alpine-demo`
+
+Deleting a project:
+
+- removes the managed project folder and project mirrors
+- does **not** delete canonical files under `AI_Studio/outputs/`
+- does **not** erase historical generation evidence
+- appends a lifecycle audit row to `AI_Studio/logs/project_lifecycle.jsonl`
+
+## Migration (Package 4.5 projects)
+
+11. `python core/scripts/migrate_projects.py --dry-run`
+12. `python core/scripts/migrate_projects.py --apply`
+
+Dry-run is fully read-only. Apply adds schema fields / project_id defaults
+without renaming folders or touching assets. Malformed metadata is reported,
+not silently overwritten.
 
 ## Project-aware outputs
 
-5. With active project set, generate txt2img (no manual sync).
-6. Confirm global Drive output under `AI_Studio/outputs/` still written.
-7. Confirm evidence records `project_id` and `project_output_path` when project mirror succeeds.
-8. Confirm no unnecessary duplicate when project output already contains same SHA-256.
+13. With active project set, generate txt2img (no manual sync).
+14. Confirm global Drive output under `AI_Studio/outputs/` still written.
+15. Confirm evidence records `project_id` and `project_output_path` when project mirror succeeds.
+16. Deactivate, generate again — confirm global-only (no project mirror).
+17. Confirm watcher picks up activate/deactivate/rename without restart.
 
-## Workflow catalog and export
+## Generation history & assets
 
-9. `python core/scripts/workflow_catalog.py --summary`
-10. Prepare inpainting workflow — confirm Drive copy under `AI_Studio/workflows/prepared/`.
-11. Confirm canonical reference workflows in repo remain unchanged.
+18. `python core/scripts/list_generations.py --project alpine-demo --capability txt2img`
+19. `python core/scripts/list_generations.py --prompt-contains mountain --date-from 2026-07-01`
+20. `python core/scripts/list_project_assets.py --project alpine-demo`
+21. `python core/scripts/workflow_catalog.py --summary`
 
-## Generation history
+## Control Panel menu (option 9)
 
-12. `python core/scripts/report_generation_history.py --summary`
-13. `python core/scripts/list_generations.py`
-
-## No-project mode (backward compatibility)
-
-14. Clear active project: `python core/scripts/set_active_project.py --clear`
-15. Generate again — confirm global-only persistence still works.
+```
+=== Workspace / Projects ===
+1. List projects
+2. Create project
+3. Switch active project
+4. Show active project
+5. Deactivate active project
+6. Rename project
+7. Archive project
+8. Restore archived project
+9. Delete project
+10. Project statistics
+11. Workflow catalog
+12. Recent generations
+13. Search generations
+0. Back
+```
 
 ## Pass / Fail
 
-**PASS:** projects create/list/activate cleanly, catalog shows runtime/quality/production, prepared workflows export to Drive, no-project mode unchanged.
+**PASS:** create/switch/deactivate/rename/archive/restore/delete work safely;
+global outputs and evidence survive project deletion; default list hides archived
+projects; watcher does not recreate archived/deleted project folders; Package
+4.5.2 autosync/runtime ownership remains green.
 
-**FAIL:** silent project overwrite, automatic Drive migration/deletion, or broken global output path.
+**FAIL:** silent project overwrite, automatic folder rename on migrate, deletion
+of `AI_Studio/outputs/` or evidence, path traversal, or watcher recreating
+deleted/archived projects.

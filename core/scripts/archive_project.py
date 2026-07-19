@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Set, show, or clear the active AI Studio project."""
+"""Archive an AI Studio project."""
 
 from __future__ import annotations
 
@@ -21,9 +21,9 @@ from core.runtime.registry_loader import RegistryLoader, find_repo_root
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Set or clear the active AI Studio project.")
-    parser.add_argument("--slug", default=None, help="Project slug or project_id to activate.")
-    parser.add_argument("--clear", action="store_true", help="Clear active project (global-only mode).")
+    parser = argparse.ArgumentParser(description="Archive an AI Studio project.")
+    parser.add_argument("--project", required=True, help="Project slug or project_id.")
+    parser.add_argument("--yes", action="store_true", help="Skip interactive confirmation.")
     parser.add_argument("--repo-root", type=Path, default=None)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
@@ -31,33 +31,34 @@ def main() -> int:
     repo_root = args.repo_root.resolve() if args.repo_root else find_repo_root(script_file=Path(__file__))
     bundle = RegistryLoader(repo_root).load_all()
     workspace = ProjectWorkspace(bundle.path("drive_root"))
+    try:
+        manifest = workspace.resolve_project(args.project)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    active = workspace.get_active_project()
+    if active and active.slug == manifest.slug and not args.yes:
+        print(f"Archiving {manifest.slug} will deactivate it.")
+        print("Existing assets will remain in Drive.")
+        print("Future outputs will not be mirrored to this project.")
+        confirm = input("Type YES to continue: ").strip()
+        if confirm != "YES":
+            print("Archive cancelled.")
+            return 1
 
     try:
-        if args.clear:
-            payload = workspace.deactivate_active_project()
-        elif args.slug:
-            payload = workspace.set_active_project(args.slug)
-        else:
-            active = workspace.get_active_project()
-            payload = {
-                "mode": workspace.current_mode(),
-                "active_project": active.to_dict() if active else None,
-            }
+        archived = workspace.archive_project(args.project)
     except (FileNotFoundError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
     if args.json:
-        print(json.dumps(payload, indent=2))
+        print(json.dumps(archived.to_dict(), indent=2))
         return 0
-    if args.clear:
-        print("Active project cleared.")
-        print("Future outputs will be saved globally only.")
-    elif args.slug:
-        print(f"Active project set to: {payload.get('slug')}")
-        print(f"Current mode: Project — {payload.get('slug')}")
-    else:
-        print(f"Current mode: {payload.get('mode')}")
+    print(f"Archived project: {archived.slug}")
+    if active and active.slug == manifest.slug:
+        print("Active project cleared. Future outputs will be saved globally only.")
     return 0
 
 

@@ -420,7 +420,15 @@ class OutputAutoSyncService:
     def _mirror_verified_to_project(self, source: Path, capability: str) -> str:
         if self.active_project is None:
             return ""
+        # Archived/deleted projects must never receive new mirrors.
+        if hasattr(self.active_project, "can_receive_mirrors") and not self.active_project.can_receive_mirrors():
+            return ""
+        if hasattr(self.active_project, "is_archived") and self.active_project.is_archived():
+            return ""
         project_outputs = Path(self.active_project.outputs_dir)
+        if not project_outputs.parent.is_dir():
+            # Do not recreate a deleted project folder from stale watcher state.
+            return ""
         project_outputs.mkdir(parents=True, exist_ok=True)
         source_hash = file_sha256(source)
         for existing in project_outputs.iterdir():
