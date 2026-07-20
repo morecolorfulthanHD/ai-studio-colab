@@ -101,6 +101,10 @@ def main() -> int:
     print(f"Deleted project: {result['slug']}")
     print(f"Removed {result['files']} files / {result['directories']} directories.")
     print("Canonical global outputs and generation evidence were preserved.")
+    print(
+        "Project deleted successfully. Google Drive's web interface may take "
+        "a short time to reflect folder deletion."
+    )
     return 0
 
 

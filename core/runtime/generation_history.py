@@ -87,19 +87,45 @@ def generation_key(row: dict[str, Any]) -> str:
     )
 
 
+def snapshot_status_label(row: dict[str, Any]) -> str:
+    status = str(row.get("snapshot_status") or "")
+    if status == "snapshot_complete":
+        return "complete"
+    if status == "snapshot_failed":
+        return "failed"
+    if status:
+        return status.replace("snapshot_", "")
+    if row.get("generation_id"):
+        return "legacy"
+    return "none"
+
+
+def generation_display_id(row: dict[str, Any]) -> str:
+    gid = str(row.get("generation_id") or "")
+    if gid:
+        return gid
+    return "legacy"
+
+
 def collapse_generations(
     path: Path,
     *,
+    generation_id: str = "",
     project: str = "",
     project_id: str = "",
     capability: str = "",
     workflow: str = "",
     model_family: str = "",
+    model_file: str = "",
+    seed: str = "",
     date_from: str = "",
     date_to: str = "",
     prompt_contains: str = "",
     sync_status: str = "verified",
     provenance_status: str = "",
+    snapshot_status: str = "",
+    image_sha256: str = "",
+    drive_filename: str = "",
     verified_only: bool = True,
     raw: bool = False,
     limit: int = 50,
@@ -116,11 +142,14 @@ def collapse_generations(
 
     filtered: list[dict[str, Any]] = []
     needle = prompt_contains.lower().strip()
+    seed_needle = seed.strip()
     for row in selected:
         status = str(row.get("sync_status") or "")
         if verified_only and status != "verified":
             continue
         if sync_status and status != sync_status:
+            continue
+        if generation_id and str(row.get("generation_id") or "") != generation_id:
             continue
         if project or project_id:
             row_project_id = str(row.get("project_id") or "")
@@ -142,6 +171,24 @@ def collapse_generations(
         if workflow and str(row.get("workflow_identifier") or "") != workflow:
             continue
         if model_family and str(row.get("model_family") or "") != model_family:
+            continue
+        if model_file:
+            files = [str(item) for item in (row.get("model_files") or [])]
+            if model_file not in files:
+                continue
+        if seed_needle:
+            row_seed = row.get("seed")
+            if row_seed is None or str(row_seed) != seed_needle:
+                continue
+        if snapshot_status:
+            label = snapshot_status_label(row)
+            if label != snapshot_status and str(row.get("snapshot_status") or "") != snapshot_status:
+                continue
+        if image_sha256:
+            digest = str(row.get("drive_sha256") or row.get("local_sha256") or "")
+            if digest != image_sha256:
+                continue
+        if drive_filename and str(row.get("drive_filename") or "") != drive_filename:
             continue
         if provenance_status and provenance_label(row) != provenance_status:
             continue

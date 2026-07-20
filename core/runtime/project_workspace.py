@@ -50,7 +50,7 @@ RESERVED_SLUGS = frozenset(
         "temp",
     }
 )
-PROJECT_SUBDIRS = ("inputs", "masks", "references", "outputs", "workflows", "metadata")
+PROJECT_SUBDIRS = ("inputs", "masks", "references", "outputs", "workflows", "metadata", "generations")
 
 
 def utc_now() -> str:

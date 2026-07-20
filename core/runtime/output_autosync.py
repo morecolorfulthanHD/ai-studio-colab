@@ -43,11 +43,13 @@ from .permanent_output_naming import resolve_permanent_destination
 from .runtime_identity import STATUS_SCHEMA_VERSION
 from .project_workspace import ProjectManifest
 from .watcher_lock import pid_alive
+from .generation_snapshot import create_generation_snapshot
 from .workflow_provenance import (
     SCHEMA_VERSION,
     ExecutionProvenance,
     PROVENANCE_VERSION,
     extract_execution_provenance,
+    extract_prompt_dict,
     extract_ui_workflow_from_history,
     load_registered_workflow_hashes,
 )
@@ -362,9 +364,17 @@ class OutputAutoSyncService:
         runtime_id: str = "",
         boot_id: str = "",
         process_start_ticks: str = "",
+        drive_root: Path | None = None,
+        generation_index_path: Path | None = None,
+        repo_root: Path | None = None,
     ) -> None:
         self.comfy_output_dir = comfy_output_dir
         self.drive_output_dir = drive_output_dir
+        self.drive_root = drive_root or drive_output_dir.parent
+        self.generation_index_path = generation_index_path or (
+            evidence_path.parent / "generation_index.jsonl"
+        )
+        self.repo_root = repo_root
         self.ledger = EvidenceLedger(evidence_path)
         self.index = ProcessedIndex(index_path)
         self.status_path = status_path
@@ -533,6 +543,8 @@ class OutputAutoSyncService:
         capability: str = "",
         provenance: ExecutionProvenance | None = None,
         recovery: bool = False,
+        ui_workflow: dict[str, Any] | None = None,
+        api_prompt: dict[str, Any] | None = None,
     ) -> EvidenceRecord | None:
         source_filename = local_path.name
         if not is_eligible_output(local_path):
@@ -685,6 +697,27 @@ class OutputAutoSyncService:
                 project_path = self._mirror_verified_to_project(local_path, effective_capability)
                 if project_path:
                     record.project_output_path = project_path
+            snapshot = create_generation_snapshot(
+                drive_root=self.drive_root,
+                record=record,
+                dedupe_key=key,
+                provenance=provenance,
+                active_project=self.active_project,
+                index_path=self.generation_index_path,
+                ui_workflow=ui_workflow,
+                api_prompt=api_prompt,
+                runtime_id=self.status.runtime_id,
+                repo_root=self.repo_root,
+            )
+            record.generation_id = snapshot.generation_id
+            record.snapshot_status = snapshot.snapshot_status
+            record.snapshot_root = str(snapshot.snapshot_root)
+            record.snapshot_manifest_path = str(snapshot.manifest_path)
+            record.snapshot_metadata_path = str(snapshot.metadata_path)
+            record.snapshot_workflow_path = str(snapshot.workflow_path)
+            record.workflow_snapshot_status = snapshot.workflow_snapshot_status
+            if snapshot.error:
+                record.messages.append(f"snapshot_error:{snapshot.error}")
             self.ledger.append(record)
             self.processed.add(key)
             self.index.save(self.processed)
@@ -778,6 +811,7 @@ class OutputAutoSyncService:
                 ui_workflow=ui_workflow,
                 output_node_id=node_id,
             )
+            api_prompt = extract_prompt_dict(entry)
             if not local_path.is_file():
                 needs_retry = True
                 continue
@@ -790,6 +824,8 @@ class OutputAutoSyncService:
                 candidate_model=provenance.candidate_model,
                 capability=provenance.capability,
                 provenance=provenance,
+                ui_workflow=ui_workflow,
+                api_prompt=api_prompt,
             )
             if record is not None:
                 records.append(record)

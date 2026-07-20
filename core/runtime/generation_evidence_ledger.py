@@ -110,6 +110,14 @@ class EvidenceRecord:
     missing_provenance_fields: list[str] = field(default_factory=list)
     messages: list[str] = field(default_factory=list)
     prior_error_summary: str = ""
+    # Package 4.7 generation snapshots
+    generation_id: str = ""
+    snapshot_status: str = ""
+    snapshot_root: str = ""
+    snapshot_manifest_path: str = ""
+    snapshot_metadata_path: str = ""
+    snapshot_workflow_path: str = ""
+    workflow_snapshot_status: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)

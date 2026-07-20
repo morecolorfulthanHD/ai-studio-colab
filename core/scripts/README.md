@@ -32,7 +32,14 @@ Cross-engine utility scripts for bootstrap, validation, and batch processing.
 | `simulate_package45_provenance_workspace.py` | Package 4.5 provenance, truthfulness, workspace simulations | No |
 | `simulate_package46_workspace_management.py` | Package 4.6 project lifecycle, stats, filters, watcher refresh simulations | No |
 | `simulate_package461_delete_confirmation.py` | Package 4.6.1 notebook-safe delete/archive confirmation simulations | No |
-| `list_generations.py` | Search generation evidence (`--project`, `--capability`, `--prompt-contains`, `--date-from`/`--to`, `--json`) | No |
+| `simulate_package47_generation_snapshots.py` | Package 4.7 generation snapshot and reproducibility simulations | No |
+| `generation_info.py` | Show generation snapshot details (`--generation-id`, `--json`) | No |
+| `export_generation.py` | Export generation snapshot to ZIP (`--generation-id`) | No |
+| `validate_generation_snapshot.py` | Validate snapshot integrity (`--generation-id`, `--all`) | No |
+| `repair_generation_snapshot.py` | Repair missing manifest from metadata/workflow (`--dry-run`) | No |
+| `rebuild_generation_index.py` | Rebuild generation index from evidence/snapshots | No |
+| `migrate_generation_snapshots.py` | Migrate legacy verified rows to metadata snapshots | No |
+| `list_generations.py` | Search generation evidence (`--generation-id`, filters, `--json`) | No |
 | `list_project_assets.py` | List project assets with canonical + mirror paths | No |
 | `show_generation.py` | Show evidence for one prompt ID (`--json`) | No |
 | `report_generation_history.py` | Generation ledger summary and recent verified rows | No |

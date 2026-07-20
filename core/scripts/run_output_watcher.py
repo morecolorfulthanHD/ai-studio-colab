@@ -193,6 +193,9 @@ def _build_service(
         runtime_id=runtime.runtime_id,
         boot_id=runtime.boot_id,
         process_start_ticks=owner_start_ticks,
+        drive_root=bundle.path("drive_root"),
+        generation_index_path=bundle.path("drive_logs") / "generation_index.jsonl",
+        repo_root=bundle.repo_root,
     )
 
 

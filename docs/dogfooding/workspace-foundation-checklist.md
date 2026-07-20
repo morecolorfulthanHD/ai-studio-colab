@@ -50,6 +50,27 @@ does not forward it. Direct shell usage may still omit `--confirm-slug` and
 confirm interactively when stdin is a TTY.
 
 Deleting a project:
+- removes the managed project folder and project mirrors (including `projects/<slug>/generations/`)
+- does **not** delete canonical files under `AI_Studio/outputs/`
+- does **not** erase historical generation evidence or global snapshots under `AI_Studio/generations/`
+- Google Drive's web interface may take a short time to reflect folder deletion
+
+## Generation snapshots (Package 4.7)
+
+Verified outputs automatically create immutable snapshots under:
+- Global: `AI_Studio/generations/<generation_id>/`
+- Project: `AI_Studio/projects/<slug>/generations/<generation_id>/`
+
+Each snapshot contains `metadata.json`, `workflow.json`, and `manifest.json` (written last).
+The canonical image remains under `AI_Studio/outputs/`.
+
+1. `python core/scripts/list_generations.py` — shows generation ID and snapshot status
+2. `python core/scripts/generation_info.py --generation-id gen_<uuid>`
+3. `python core/scripts/export_generation.py --generation-id gen_<uuid>`
+4. `python core/scripts/validate_generation_snapshot.py --generation-id gen_<uuid>`
+5. `python core/scripts/migrate_generation_snapshots.py --dry-run`
+
+Deleting a project:
 
 - removes the managed project folder and project mirrors
 - does **not** delete canonical files under `AI_Studio/outputs/`
