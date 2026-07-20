@@ -20,6 +20,35 @@ from core.runtime.project_workspace import ProjectWorkspace
 from core.runtime.registry_loader import RegistryLoader, find_repo_root
 
 
+def _prompt_exact_slug(manifest_slug: str, project_dir: Path) -> str | None:
+    """Prompt for exact slug when stdin is interactive; otherwise require --confirm-slug."""
+    print(f"Delete project: {manifest_slug}")
+    print("This permanently removes the managed project folder:")
+    print(f"  {project_dir}")
+    print("This includes project metadata, outputs, inputs, masks, references, and workflows.")
+    print("The canonical files in AI_Studio/outputs/ will NOT be deleted.")
+    # Notebook subprocesses often leave stdin non-interactive even when isatty()
+    # reports True (e.g. Windows + DEVNULL). Prefer --confirm-slug whenever input fails.
+    try:
+        interactive = sys.stdin is not None and sys.stdin.isatty()
+    except Exception:
+        interactive = False
+    if not interactive:
+        print(
+            "ERROR: Noninteractive delete requires --confirm-slug <exact-slug>.",
+            file=sys.stderr,
+        )
+        return None
+    try:
+        return input("Type the exact project slug to confirm: ").strip()
+    except EOFError:
+        print(
+            "ERROR: Confirmation input unavailable. Re-run with --confirm-slug <exact-slug>.",
+            file=sys.stderr,
+        )
+        return None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Delete a managed AI Studio project folder. Canonical global outputs are preserved."
@@ -46,12 +75,9 @@ def main() -> int:
 
     confirm = args.confirm_slug
     if not args.dry_run and not confirm:
-        print(f"Delete project: {manifest.slug}")
-        print(f"This permanently removes the managed project folder:")
-        print(f"  {workspace.project_dir(manifest.slug)}")
-        print("This includes project metadata, outputs, inputs, masks, references, and workflows.")
-        print("The canonical files in AI_Studio/outputs/ will NOT be deleted.")
-        confirm = input("Type the exact project slug to confirm: ").strip()
+        confirm = _prompt_exact_slug(manifest.slug, workspace.project_dir(manifest.slug))
+        if confirm is None:
+            return 1
 
     try:
         result = workspace.delete_project(

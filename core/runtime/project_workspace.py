@@ -646,7 +646,7 @@ class ProjectWorkspace:
         dry_run: bool = False,
     ) -> dict[str, Any]:
         manifest = self.resolve_project(identifier)
-        if confirm_slug != manifest.slug:
+        if not dry_run and confirm_slug != manifest.slug:
             raise PermissionError(
                 f"Confirmation slug mismatch: expected {manifest.slug!r}, got {confirm_slug!r}"
             )

@@ -42,7 +42,20 @@ def main() -> int:
         print(f"Archiving {manifest.slug} will deactivate it.")
         print("Existing assets will remain in Drive.")
         print("Future outputs will not be mirrored to this project.")
-        confirm = input("Type YES to continue: ").strip()
+        if not sys.stdin.isatty():
+            print(
+                "ERROR: Noninteractive archive of the active project requires --yes.",
+                file=sys.stderr,
+            )
+            return 1
+        try:
+            confirm = input("Type YES to continue: ").strip()
+        except EOFError:
+            print(
+                "ERROR: Confirmation input unavailable. Re-run with --yes.",
+                file=sys.stderr,
+            )
+            return 1
         if confirm != "YES":
             print("Archive cancelled.")
             return 1

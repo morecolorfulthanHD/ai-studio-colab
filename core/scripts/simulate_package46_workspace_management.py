@@ -455,6 +455,7 @@ def run_simulations() -> list[tuple[str, str]]:
         _assert_true("menu has deactivate", "Deactivate active project" in text)
         _assert_true("menu has delete", "Delete project" in text)
         _assert_true("menu has search", "Search generations" in text)
+        _assert_true("menu delete passes confirm-slug", "--confirm-slug" in text)
         _pass(results, "Notebook JSON remains valid")
 
     return results

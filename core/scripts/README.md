@@ -31,6 +31,7 @@ Cross-engine utility scripts for bootstrap, validation, and batch processing.
 | `simulate_modern_editing_benchmark.py` | Package 4.4 modern editing benchmark simulations | No |
 | `simulate_package45_provenance_workspace.py` | Package 4.5 provenance, truthfulness, workspace simulations | No |
 | `simulate_package46_workspace_management.py` | Package 4.6 project lifecycle, stats, filters, watcher refresh simulations | No |
+| `simulate_package461_delete_confirmation.py` | Package 4.6.1 notebook-safe delete/archive confirmation simulations | No |
 | `list_generations.py` | Search generation evidence (`--project`, `--capability`, `--prompt-contains`, `--date-from`/`--to`, `--json`) | No |
 | `list_project_assets.py` | List project assets with canonical + mirror paths | No |
 | `show_generation.py` | Show evidence for one prompt ID (`--json`) | No |

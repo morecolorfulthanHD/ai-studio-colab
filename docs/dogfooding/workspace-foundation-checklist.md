@@ -43,6 +43,12 @@ instead.
     `python core/scripts/delete_project.py --project alpine-demo --dry-run`
     `python core/scripts/delete_project.py --project alpine-demo --confirm-slug alpine-demo`
 
+Notebook delete (Package 4.6.1): Workspace menu collects the exact slug in the
+notebook, then launches `delete_project.py --project … --confirm-slug …`.
+Do not rely on interactive stdin inside the subprocess — `run_repo_python`
+does not forward it. Direct shell usage may still omit `--confirm-slug` and
+confirm interactively when stdin is a TTY.
+
 Deleting a project:
 
 - removes the managed project folder and project mirrors

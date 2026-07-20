@@ -41,6 +41,7 @@ def collect_files() -> list[Path]:
         "simulate_modern_editing_benchmark.py",
         "simulate_package45_provenance_workspace.py",
         "simulate_package46_workspace_management.py",
+        "simulate_package461_delete_confirmation.py",
         "list_generations.py",
         "show_generation.py",
         "report_generation_history.py",
