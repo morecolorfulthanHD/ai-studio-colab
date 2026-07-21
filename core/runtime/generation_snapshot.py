@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from .generation_evidence_ledger import EvidenceRecord, file_sha256, utc_now
+from .generation_identity import InvalidGenerationIdError, normalize_generation_id
 from .generation_index import GenerationIndex, GenerationIndexRecord
 from .project_workspace import ProjectManifest
 from .workflow_provenance import (
@@ -380,13 +381,18 @@ def create_generation_snapshot(
 
 
 def load_snapshot_by_id(drive_root: Path, generation_id: str) -> dict[str, Any] | None:
-    """Find snapshot manifest by generation_id under global or project trees."""
-    candidates = [global_generations_root(drive_root) / generation_id]
+    """Find snapshot manifest by generation_id under global or project trees.
+
+    Accepts canonical ``gen_<uuid>`` or bare UUID; normalizes before lookup.
+    Raises InvalidGenerationIdError for malformed IDs.
+    """
+    canonical = normalize_generation_id(generation_id)
+    candidates = [global_generations_root(drive_root) / canonical]
     projects_root = drive_root / "projects"
     if projects_root.is_dir():
         for project_dir in projects_root.iterdir():
             if project_dir.is_dir():
-                candidates.append(project_generations_root(drive_root, project_dir.name) / generation_id)
+                candidates.append(project_generations_root(drive_root, project_dir.name) / canonical)
     for root in candidates:
         manifest = root / MANIFEST_FILENAME
         if manifest.is_file():
@@ -395,6 +401,7 @@ def load_snapshot_by_id(drive_root: Path, generation_id: str) -> dict[str, Any] 
             except (OSError, json.JSONDecodeError):
                 continue
             data["snapshot_root"] = str(root)
+            data["generation_id"] = str(data.get("generation_id") or canonical)
             return data
     return None
 

@@ -16,13 +16,18 @@ assert _spec is not None and _spec.loader is not None
 _spec.loader.exec_module(_activate)
 _activate.activate(__file__)
 
+from core.runtime.generation_identity import InvalidGenerationIdError, normalize_generation_id
 from core.runtime.generation_snapshot import global_generations_root, load_snapshot_by_id, validate_snapshot
 from core.runtime.registry_loader import RegistryLoader, find_repo_root
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate AI Studio generation snapshots.")
-    parser.add_argument("--generation-id", default="")
+    parser.add_argument(
+        "--generation-id",
+        default="",
+        help="Generation ID as gen_<UUID> or bare UUID.",
+    )
     parser.add_argument("--all", action="store_true")
     parser.add_argument("--repo-root", type=Path, default=None)
     parser.add_argument("--json", action="store_true")
@@ -38,9 +43,14 @@ def main() -> int:
 
     roots: list[Path] = []
     if args.generation_id:
-        manifest = load_snapshot_by_id(drive_root, args.generation_id)
+        try:
+            generation_id = normalize_generation_id(args.generation_id)
+            manifest = load_snapshot_by_id(drive_root, generation_id)
+        except InvalidGenerationIdError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
         if manifest is None:
-            print(f"ERROR: Unknown generation ID: {args.generation_id}", file=sys.stderr)
+            print(f"ERROR: Generation not found:\n{generation_id}", file=sys.stderr)
             return 1
         roots.append(Path(str(manifest.get("snapshot_root") or "")))
     else:

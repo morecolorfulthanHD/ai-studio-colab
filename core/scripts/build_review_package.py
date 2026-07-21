@@ -43,6 +43,7 @@ def collect_files() -> list[Path]:
         "simulate_package46_workspace_management.py",
         "simulate_package461_delete_confirmation.py",
         "simulate_package47_generation_snapshots.py",
+        "simulate_package471_generations_ux.py",
         "generation_info.py",
         "export_generation.py",
         "validate_generation_snapshot.py",

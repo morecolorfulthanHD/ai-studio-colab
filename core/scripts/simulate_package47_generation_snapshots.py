@@ -663,7 +663,7 @@ def run_simulations() -> list[tuple[str, str]]:
         _assert_equal("resolved gid", loaded.get("generation_id"), project_gid)
         _pass(results, "generation_info resolves snapshot")
 
-        unknown = load_snapshot_by_id(drive, "gen_does-not-exist")
+        unknown = load_snapshot_by_id(drive, "gen_ed3c6ad8-644c-447e-969d-2ea48aa3e999")
         _assert_equal("unknown generation", unknown, None)
         _pass(results, "unknown generation fails cleanly")
 

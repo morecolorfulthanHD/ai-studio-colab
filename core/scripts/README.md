@@ -33,7 +33,8 @@ Cross-engine utility scripts for bootstrap, validation, and batch processing.
 | `simulate_package46_workspace_management.py` | Package 4.6 project lifecycle, stats, filters, watcher refresh simulations | No |
 | `simulate_package461_delete_confirmation.py` | Package 4.6.1 notebook-safe delete/archive confirmation simulations | No |
 | `simulate_package47_generation_snapshots.py` | Package 4.7 generation snapshot and reproducibility simulations | No |
-| `generation_info.py` | Show generation snapshot details (`--generation-id`, `--json`) | No |
+| `simulate_package471_generations_ux.py` | Package 4.7.1 generations UX cleanup and ID normalization simulations | No |
+| `generation_info.py` | Show generation snapshot details (`--generation-id` as `gen_<uuid>` or bare UUID, `--json`) | No |
 | `export_generation.py` | Export generation snapshot to ZIP (`--generation-id`) | No |
 | `validate_generation_snapshot.py` | Validate snapshot integrity (`--generation-id`, `--all`) | No |
 | `repair_generation_snapshot.py` | Repair missing manifest from metadata/workflow (`--dry-run`) | No |

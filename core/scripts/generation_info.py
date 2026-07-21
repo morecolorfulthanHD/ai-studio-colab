@@ -17,6 +17,7 @@ _spec.loader.exec_module(_activate)
 _activate.activate(__file__)
 
 from core.runtime.generation_history import generation_display_id, provenance_label, snapshot_status_label
+from core.runtime.generation_identity import InvalidGenerationIdError, normalize_generation_id
 from core.runtime.generation_snapshot import MANIFEST_FILENAME, METADATA_FILENAME, WORKFLOW_FILENAME, load_snapshot_by_id
 from core.runtime.registry_loader import RegistryLoader, find_repo_root
 
@@ -39,7 +40,11 @@ def _find_evidence_row(ledger_path: Path, generation_id: str) -> dict | None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Show AI Studio generation snapshot details.")
-    parser.add_argument("--generation-id", required=True)
+    parser.add_argument(
+        "--generation-id",
+        required=True,
+        help="Generation ID as gen_<UUID> or bare UUID.",
+    )
     parser.add_argument("--repo-root", type=Path, default=None)
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--summary", action="store_true")
@@ -47,12 +52,22 @@ def main() -> int:
     parser.add_argument("--show-image-path", action="store_true")
     args = parser.parse_args()
 
+    try:
+        generation_id = normalize_generation_id(args.generation_id)
+    except InvalidGenerationIdError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
     repo_root = args.repo_root.resolve() if args.repo_root else find_repo_root(script_file=Path(__file__))
     bundle = RegistryLoader(repo_root).load_all()
     drive_root = bundle.path("drive_root")
-    manifest = load_snapshot_by_id(drive_root, args.generation_id)
+    try:
+        manifest = load_snapshot_by_id(drive_root, generation_id)
+    except InvalidGenerationIdError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     if manifest is None:
-        print(f"ERROR: Unknown generation ID: {args.generation_id}", file=sys.stderr)
+        print(f"ERROR: Generation not found:\n{generation_id}", file=sys.stderr)
         return 1
 
     snapshot_root = Path(str(manifest.get("snapshot_root") or ""))
@@ -64,10 +79,10 @@ def main() -> int:
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
 
     ledger_path = bundle.path("drive_logs") / "generation_evidence.jsonl"
-    evidence = _find_evidence_row(ledger_path, args.generation_id) or {}
+    evidence = _find_evidence_row(ledger_path, generation_id) or {}
 
     payload = {
-        "generation_id": args.generation_id,
+        "generation_id": generation_id,
         "project_id": metadata.get("project_id") or evidence.get("project_id"),
         "project_slug": metadata.get("project_slug"),
         "capability": metadata.get("capability") or evidence.get("capability"),
@@ -99,7 +114,7 @@ def main() -> int:
         return 0
     if args.summary:
         print(
-            f"{generation_display_id(evidence or {'generation_id': args.generation_id})} | "
+            f"{generation_display_id(evidence or {'generation_id': generation_id})} | "
             f"{payload.get('capability')} | {payload.get('workflow_identifier')} | "
             f"snapshot={payload.get('snapshot_status')}"
         )

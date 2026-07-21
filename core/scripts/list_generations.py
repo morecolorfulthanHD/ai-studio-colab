@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 import importlib.util
 
@@ -22,6 +23,7 @@ from core.runtime.generation_history import (
     provenance_label,
     snapshot_status_label,
 )
+from core.runtime.generation_identity import InvalidGenerationIdError
 from core.runtime.project_workspace import ProjectWorkspace
 from core.runtime.registry_loader import RegistryLoader, find_repo_root
 
@@ -39,7 +41,11 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=20)
     parser.add_argument("--verified-only", action="store_true", default=True)
     parser.add_argument("--raw", action="store_true", help="Return raw ledger rows without collapse.")
-    parser.add_argument("--generation-id", default="")
+    parser.add_argument(
+        "--generation-id",
+        default="",
+        help="Generation ID as gen_<UUID> or bare UUID.",
+    )
     parser.add_argument("--project", default="", help="Project slug or project_id.")
     parser.add_argument("--capability", default="")
     parser.add_argument("--workflow", default="")
@@ -72,28 +78,32 @@ def main() -> int:
         except (FileNotFoundError, ValueError):
             project_slug = args.project
             project_id = args.project
-    rows = collapse_generations(
-        ledger_path,
-        generation_id=args.generation_id,
-        project=project_slug,
-        project_id=project_id,
-        capability=args.capability,
-        workflow=args.workflow,
-        model_family=args.model_family,
-        model_file=args.model_file,
-        seed=args.seed,
-        date_from=args.date_from,
-        date_to=args.date_to,
-        prompt_contains=args.prompt_contains,
-        sync_status="" if args.raw and not args.sync_status else args.sync_status,
-        provenance_status=args.provenance_status,
-        snapshot_status=args.snapshot_status,
-        image_sha256=args.image_sha256,
-        drive_filename=args.drive_filename,
-        verified_only=False if args.raw else bool(args.verified_only or args.sync_status == "verified"),
-        raw=args.raw,
-        limit=args.limit,
-    )
+    try:
+        rows = collapse_generations(
+            ledger_path,
+            generation_id=args.generation_id,
+            project=project_slug,
+            project_id=project_id,
+            capability=args.capability,
+            workflow=args.workflow,
+            model_family=args.model_family,
+            model_file=args.model_file,
+            seed=args.seed,
+            date_from=args.date_from,
+            date_to=args.date_to,
+            prompt_contains=args.prompt_contains,
+            sync_status="" if args.raw and not args.sync_status else args.sync_status,
+            provenance_status=args.provenance_status,
+            snapshot_status=args.snapshot_status,
+            image_sha256=args.image_sha256,
+            drive_filename=args.drive_filename,
+            verified_only=False if args.raw else bool(args.verified_only or args.sync_status == "verified"),
+            raw=args.raw,
+            limit=args.limit,
+        )
+    except InvalidGenerationIdError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
 
     if args.json:
         print(json.dumps(rows, indent=2))
@@ -104,6 +114,7 @@ def main() -> int:
 
     print("AI Studio — Generations")
     print("=" * 40)
+    print("You may enter either the full gen_<uuid> ID or the UUID portion alone.")
     if not rows:
         print("No matching generation records found.")
         return 0
@@ -115,8 +126,8 @@ def main() -> int:
         seed = row.get("seed", "-")
         snapshot = snapshot_status_label(row)
         filename = row.get("drive_filename") or Path(str(row.get("drive_path") or "")).name
+        print(gid)
         print(
-            f"{gid}\n"
             f"{stamp} | {project} | {row.get('capability') or 'unknown'} | "
             f"{row.get('workflow_identifier') or 'unknown'} | {model} | {seed} | {snapshot} | {filename}"
         )

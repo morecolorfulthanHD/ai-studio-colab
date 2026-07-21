@@ -55,7 +55,7 @@ Deleting a project:
 - does **not** erase historical generation evidence or global snapshots under `AI_Studio/generations/`
 - Google Drive's web interface may take a short time to reflect folder deletion
 
-## Generation snapshots (Package 4.7)
+## Generation snapshots (Package 4.7 / 4.7.1)
 
 Verified outputs automatically create immutable snapshots under:
 - Global: `AI_Studio/generations/<generation_id>/`
@@ -64,10 +64,12 @@ Verified outputs automatically create immutable snapshots under:
 Each snapshot contains `metadata.json`, `workflow.json`, and `manifest.json` (written last).
 The canonical image remains under `AI_Studio/outputs/`.
 
-1. `python core/scripts/list_generations.py` — shows generation ID and snapshot status
-2. `python core/scripts/generation_info.py --generation-id gen_<uuid>`
-3. `python core/scripts/export_generation.py --generation-id gen_<uuid>`
-4. `python core/scripts/validate_generation_snapshot.py --generation-id gen_<uuid>`
+Generation ID inputs accept either `gen_<uuid>` or the bare UUID (whitespace trimmed).
+
+1. `python core/scripts/list_generations.py` — shows full canonical generation ID and snapshot status
+2. `python core/scripts/generation_info.py --generation-id gen_<uuid>` (or bare UUID)
+3. `python core/scripts/export_generation.py --generation-id gen_<uuid>` (or bare UUID)
+4. `python core/scripts/validate_generation_snapshot.py --generation-id gen_<uuid>` (or bare UUID)
 5. `python core/scripts/migrate_generation_snapshots.py --dry-run`
 
 Deleting a project:
@@ -116,10 +118,19 @@ not silently overwritten.
 9. Delete project
 10. Project statistics
 11. Workflow catalog
-12. Recent generations
-13. Search generations
+12. Generations
+0. Back
+
+=== Generations ===
+1. Recent generations
+2. Search generations
+3. Show generation
+4. Export generation
+5. Validate generation snapshot
 0. Back
 ```
+
+You may enter either the full `gen_<uuid>` ID or the UUID portion alone.
 
 ## Pass / Fail
 

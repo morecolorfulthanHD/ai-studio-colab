@@ -92,6 +92,17 @@ class GenerationIndex:
             return str(row.get("generation_id") or "")
         return ""
 
+    def lookup_by_generation_id(self, generation_id: str) -> dict[str, Any] | None:
+        """Return the latest index row for a generation ID.
+
+        Accepts canonical ``gen_<uuid>`` or bare UUID; normalizes before lookup.
+        Raises InvalidGenerationIdError for malformed IDs.
+        """
+        from .generation_identity import normalize_generation_id
+
+        canonical = normalize_generation_id(generation_id)
+        return self.latest_by_generation_id().get(canonical)
+
 
 def rebuild_index_from_sources(
     *,

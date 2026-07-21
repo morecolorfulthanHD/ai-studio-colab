@@ -17,6 +17,7 @@ _spec.loader.exec_module(_activate)
 _activate.activate(__file__)
 
 from core.runtime.generation_evidence_ledger import file_sha256, utc_now
+from core.runtime.generation_identity import InvalidGenerationIdError, normalize_generation_id
 from core.runtime.generation_snapshot import (
     MANIFEST_FILENAME,
     METADATA_FILENAME,
@@ -56,26 +57,42 @@ def repair_manifest(snapshot_root: Path, *, dry_run: bool) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Repair AI Studio generation snapshots.")
-    parser.add_argument("--generation-id", required=True)
+    parser.add_argument(
+        "--generation-id",
+        required=True,
+        help="Generation ID as gen_<UUID> or bare UUID.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--repo-root", type=Path, default=None)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
+    try:
+        generation_id = normalize_generation_id(args.generation_id)
+    except InvalidGenerationIdError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
     repo_root = args.repo_root.resolve() if args.repo_root else find_repo_root(script_file=Path(__file__))
     bundle = RegistryLoader(repo_root).load_all()
-    manifest = load_snapshot_by_id(bundle.path("drive_root"), args.generation_id)
+    try:
+        manifest = load_snapshot_by_id(bundle.path("drive_root"), generation_id)
+    except InvalidGenerationIdError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     if manifest is None:
-        print(f"ERROR: Unknown generation ID: {args.generation_id}", file=sys.stderr)
+        print(f"ERROR: Generation not found:\n{generation_id}", file=sys.stderr)
         return 1
 
     snapshot_root = Path(str(manifest.get("snapshot_root") or ""))
     result = repair_manifest(snapshot_root, dry_run=args.dry_run)
+    result["generation_id"] = generation_id
     if args.json:
         print(json.dumps(result, indent=2))
     else:
         if result.get("repaired"):
             print("Manifest repair preview OK." if args.dry_run else "Manifest repaired.")
+            print(f"generation_id: {generation_id}")
         else:
             print(f"Repair skipped: {result.get('reason')}", file=sys.stderr)
             return 1

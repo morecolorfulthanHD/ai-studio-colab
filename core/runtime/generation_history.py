@@ -131,6 +131,8 @@ def collapse_generations(
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     """Return resolved generation views (latest status per execution key by default)."""
+    from .generation_identity import InvalidGenerationIdError, normalize_generation_id
+
     rows = EvidenceLedger(path).read_all()
     if raw:
         selected = list(rows)
@@ -139,6 +141,13 @@ def collapse_generations(
         for row in rows:
             latest[generation_key(row)] = row
         selected = list(latest.values())
+
+    filter_gid = ""
+    if generation_id:
+        try:
+            filter_gid = normalize_generation_id(generation_id)
+        except InvalidGenerationIdError:
+            raise
 
     filtered: list[dict[str, Any]] = []
     needle = prompt_contains.lower().strip()
@@ -149,7 +158,7 @@ def collapse_generations(
             continue
         if sync_status and status != sync_status:
             continue
-        if generation_id and str(row.get("generation_id") or "") != generation_id:
+        if filter_gid and str(row.get("generation_id") or "") != filter_gid:
             continue
         if project or project_id:
             row_project_id = str(row.get("project_id") or "")
