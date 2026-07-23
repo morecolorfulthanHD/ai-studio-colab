@@ -118,6 +118,8 @@ class EvidenceRecord:
     snapshot_metadata_path: str = ""
     snapshot_workflow_path: str = ""
     workflow_snapshot_status: str = ""
+    preparation_id: str = ""
+    prepared_workflow_hash: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)

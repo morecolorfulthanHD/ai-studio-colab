@@ -227,6 +227,12 @@ def _embedded_ai_studio_metadata(data: dict[str, Any] | None) -> dict[str, Any] 
     return None
 
 
+def extract_ai_studio_extra(ui_workflow: dict[str, Any] | None) -> dict[str, Any]:
+    """Return embedded ``extra.ai_studio`` metadata from a UI workflow, or {}."""
+    meta = _embedded_ai_studio_metadata(ui_workflow)
+    return dict(meta) if isinstance(meta, dict) else {}
+
+
 # --------------------------------------------------------------------------------------
 # Registered workflow identification
 # --------------------------------------------------------------------------------------
@@ -554,6 +560,8 @@ class ExecutionProvenance:
     prompt_resolution: str = "none"
     provenance_status: str = "unavailable"
     missing_provenance_fields: list[str] = field(default_factory=list)
+    preparation_id: str = ""
+    prepared_workflow_hash: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -584,6 +592,8 @@ class ExecutionProvenance:
             "prompt_resolution": self.prompt_resolution,
             "provenance_status": self.provenance_status,
             "missing_provenance_fields": list(self.missing_provenance_fields),
+            "preparation_id": self.preparation_id,
+            "prepared_workflow_hash": self.prepared_workflow_hash,
         }
 
 
@@ -645,6 +655,15 @@ def extract_execution_provenance(
         provenance.workflow_source = source
         provenance.workflow_hash = ui_hash
         provenance.workflow_hash_type = HASH_TYPE_UI
+        ai_meta = extract_ai_studio_extra(ui_workflow)
+        if ai_meta.get("preparation_id"):
+            provenance.preparation_id = str(ai_meta.get("preparation_id") or "")
+        if ai_meta.get("prepared_workflow_hash"):
+            provenance.prepared_workflow_hash = str(ai_meta.get("prepared_workflow_hash") or "")
+        elif ai_meta.get("canonical_workflow_hash"):
+            canonical = str(ai_meta.get("canonical_workflow_hash") or "")
+            if canonical and ui_hash != canonical:
+                provenance.prepared_workflow_hash = ui_hash
     elif prompt_nodes:
         provenance.workflow_hash = provenance.api_prompt_hash
         provenance.workflow_hash_type = HASH_TYPE_API

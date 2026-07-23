@@ -1,0 +1,168 @@
+{
+  "schema_version": 1,
+  "workflow_identifier": "base/img2img",
+  "display_name": "Image to Image",
+  "description": "Refine a source image with denoise control using SD1.5.",
+  "category": "editing",
+  "capability": "img2img",
+  "implementation_status": "implemented",
+  "runtime_status": "ready",
+  "quality_status": "untested",
+  "production_status": "partial",
+  "status_reason": "Runtime ready where models/nodes are present; production treated with caution until broader quality acceptance.",
+  "model_family": "sd15",
+  "required_model_files": ["sd15.safetensors"],
+  "optional_model_files": [],
+  "required_nodes": [
+    "LoadImage",
+    "CheckpointLoaderSimple",
+    "CLIPTextEncode",
+    "VAEEncode",
+    "KSampler",
+    "VAEDecode",
+    "SaveImage"
+  ],
+  "optional_nodes": [],
+  "canonical_workflow_path": "workflows/base/img2img/workflow.json",
+  "workflow_hash": "54dfd309806a204311676b481bda7ddcb39e60d42bfa6c448d866d610b7000ee",
+  "workflow_hash_type": "ui_workflow_v1",
+  "parameter_schema": {
+    "input_image": {
+      "display_name": "Input Image",
+      "description": "Source image from allowed inputs roots.",
+      "type": "image",
+      "required": true,
+      "default": null,
+      "target_node_id": "1",
+      "target_field": "widgets_values[0]",
+      "secret": false
+    },
+    "positive_prompt": {
+      "display_name": "Positive Prompt",
+      "type": "string",
+      "required": true,
+      "default": "",
+      "target_node_id": "3",
+      "target_field": "widgets_values[0]",
+      "secret": false
+    },
+    "negative_prompt": {
+      "display_name": "Negative Prompt",
+      "type": "string",
+      "required": false,
+      "default": "",
+      "target_node_id": "4",
+      "target_field": "widgets_values[0]",
+      "secret": false
+    },
+    "seed": {
+      "display_name": "Seed",
+      "type": "integer",
+      "required": true,
+      "default": 123456789,
+      "minimum": 0,
+      "maximum": 18446744073709551615,
+      "target_node_id": "6",
+      "target_field": "widgets_values[0]",
+      "secret": false
+    },
+    "steps": {
+      "display_name": "Steps",
+      "type": "integer",
+      "required": true,
+      "default": 24,
+      "minimum": 1,
+      "maximum": 100,
+      "target_node_id": "6",
+      "target_field": "widgets_values[2]",
+      "secret": false
+    },
+    "cfg": {
+      "display_name": "CFG",
+      "type": "number",
+      "required": true,
+      "default": 7.0,
+      "minimum": 1.0,
+      "maximum": 30.0,
+      "target_node_id": "6",
+      "target_field": "widgets_values[3]",
+      "secret": false
+    },
+    "sampler_name": {
+      "display_name": "Sampler",
+      "type": "enum",
+      "required": true,
+      "default": "euler",
+      "allowed_values": [
+        "euler", "euler_ancestral", "heun", "dpm_2", "dpm_2_ancestral", "lms",
+        "dpm_fast", "dpm_adaptive", "dpmpp_2s_ancestral", "dpmpp_sde", "dpmpp_2m",
+        "ddim", "uni_pc"
+      ],
+      "target_node_id": "6",
+      "target_field": "widgets_values[4]",
+      "secret": false
+    },
+    "scheduler": {
+      "display_name": "Scheduler",
+      "type": "enum",
+      "required": true,
+      "default": "normal",
+      "allowed_values": ["normal", "karras", "exponential", "sgm_uniform", "simple", "ddim_uniform"],
+      "target_node_id": "6",
+      "target_field": "widgets_values[5]",
+      "secret": false
+    },
+    "denoise": {
+      "display_name": "Denoise",
+      "type": "number",
+      "required": true,
+      "default": 0.55,
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "target_node_id": "6",
+      "target_field": "widgets_values[6]",
+      "secret": false
+    },
+    "checkpoint": {
+      "display_name": "Checkpoint",
+      "type": "string",
+      "required": true,
+      "default": "sd15.safetensors",
+      "allowed_values": ["sd15.safetensors"],
+      "target_node_id": "2",
+      "target_field": "widgets_values[0]",
+      "secret": false
+    },
+    "save_prefix": {
+      "display_name": "Save Prefix",
+      "type": "string",
+      "required": true,
+      "default": "ai_studio_base_img2img",
+      "normalization": "safe_filename_prefix",
+      "target_node_id": "8",
+      "target_field": "widgets_values[0]",
+      "secret": false
+    }
+  },
+  "default_parameters": {
+    "input_image": null,
+    "positive_prompt": "",
+    "negative_prompt": "",
+    "seed": 123456789,
+    "steps": 24,
+    "cfg": 7.0,
+    "sampler_name": "euler",
+    "scheduler": "normal",
+    "denoise": 0.55,
+    "checkpoint": "sd15.safetensors",
+    "save_prefix": "ai_studio_base_img2img"
+  },
+  "output_prefix": "ai_studio_base_img2img",
+  "supported_environments": ["colab"],
+  "license_notes": [],
+  "tags": ["sd15", "editing"],
+  "documentation_path": "workflows/base/img2img/README.md",
+  "launchable": true,
+  "requires_experimental": false,
+  "requires_benchmark": false
+}

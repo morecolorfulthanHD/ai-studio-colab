@@ -21,6 +21,7 @@ from .workflow_provenance import (
     ExecutionProvenance,
     HASH_TYPE_API,
     HASH_TYPE_UI,
+    extract_ai_studio_extra,
     hash_api_prompt,
     hash_ui_workflow,
 )
@@ -178,12 +179,22 @@ def build_metadata_snapshot(
     workflow_snapshot_status: str,
     runtime_id: str = "",
     repo_meta: dict[str, Any] | None = None,
+    ui_workflow: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     prov = provenance or ExecutionProvenance()
     repo_meta = repo_meta or {}
     project_slug = active_project.slug if active_project else None
     project_name = active_project.display_name if active_project else None
     project_id = record.project_id or (active_project.project_id if active_project else None)
+
+    preparation_id = record.preparation_id or prov.preparation_id or ""
+    prepared_workflow_hash = record.prepared_workflow_hash or prov.prepared_workflow_hash or ""
+    canonical_workflow_identifier = ""
+    ai_meta = extract_ai_studio_extra(ui_workflow)
+    if ai_meta:
+        preparation_id = preparation_id or str(ai_meta.get("preparation_id") or "")
+        prepared_workflow_hash = prepared_workflow_hash or str(ai_meta.get("prepared_workflow_hash") or "")
+        canonical_workflow_identifier = str(ai_meta.get("workflow_identifier") or "")
 
     def _nullable(value: Any) -> Any:
         if value is None:
@@ -238,6 +249,9 @@ def build_metadata_snapshot(
         "package_version": PACKAGE_VERSION,
         "snapshot_schema_version": SNAPSHOT_SCHEMA_VERSION,
         "workflow_snapshot_status": workflow_snapshot_status,
+        "preparation_id": _nullable(preparation_id),
+        "prepared_workflow_hash": _nullable(prepared_workflow_hash),
+        "canonical_workflow_identifier": _nullable(canonical_workflow_identifier),
     }
 
 
@@ -311,6 +325,7 @@ def create_generation_snapshot(
             workflow_snapshot_status=workflow_status,
             runtime_id=runtime_id,
             repo_meta=repo_meta,
+            ui_workflow=ui_workflow,
         )
 
         snapshot_root.mkdir(parents=True, exist_ok=True)

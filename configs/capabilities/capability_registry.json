@@ -30,7 +30,10 @@
         "all_required_assets_present_or_planned"
       ],
       "notes": "Base workflow implemented and dogfooded. Runtime readiness is computed dynamically from ComfyUI, SD1.5, workflow validation, and generation evidence.",
-      "implementation_status": "implemented"
+      "implementation_status": "implemented",
+      "runtime_status": "ready",
+      "quality_status": "accepted",
+      "production_status": "ready"
     },
     {
       "id": "img2img",
@@ -62,7 +65,9 @@
         "all_required_workflows_registered"
       ],
       "notes": "Base img2img workflow implemented with native ComfyUI nodes. Execution inputs are selected separately.",
-      "implementation_status": "implemented"
+      "implementation_status": "implemented",
+      "production_status": "partial",
+      "quality_status": "untested"
     },
     {
       "id": "inpainting",
@@ -133,7 +138,9 @@
         "all_required_models_registered"
       ],
       "notes": "Base outpainting workflow implemented with ImagePadForOutpaint. SD1.5 quality limits apply.",
-      "implementation_status": "implemented"
+      "implementation_status": "implemented",
+      "production_status": "partial",
+      "quality_status": "untested"
     },
     {
       "id": "openpose_conditioning",

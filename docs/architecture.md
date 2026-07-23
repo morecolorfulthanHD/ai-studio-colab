@@ -100,6 +100,10 @@ Physical storage for model weights. Binary files are gitignored; README files do
 
 ### Workflow Layer (`workflows/`)
 
+Canonical ComfyUI graphs plus Package 4.8 `manifest.json` files describing parameters, readiness, and production status.
+Prepared instances are written outside the repo (runtime/Drive); executed reproducibility remains Package 4.7 generation snapshots.
+See [docs/workflow-library.md](workflow-library.md).
+
 ComfyUI workflow JSON files organized by capability. See [workflow-guide.md](workflow-guide.md) for the full taxonomy and composition rules.
 
 **Production Package 4** adds base image-editing workflows (`img2img`, `inpainting`, `outpainting`) with registry-driven validation, ephemeral preparation via `prepare_workflow.py`, and persistent Drive inputs under `inputs/images/` and `inputs/masks/`. These form the foundation for later identity-lock, reference-lock, and scene-consistency workflows without embedding project-specific logic.

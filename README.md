@@ -2,7 +2,7 @@
 
 A general-purpose, version-controlled AI Studio for high-end image generation, environment generation, character consistency, and video generation.
 
-**Current phase:** Production Package 4 — image editing foundation (img2img, inpainting, outpainting).
+**Current phase:** Production Package 4.8 — Workflow Library & Parameterized Launch (on top of Packages 4.5–4.7.1 snapshots, projects, and autosync).
 
 ## What This Is
 

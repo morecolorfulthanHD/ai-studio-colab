@@ -34,6 +34,7 @@ Cross-engine utility scripts for bootstrap, validation, and batch processing.
 | `simulate_package461_delete_confirmation.py` | Package 4.6.1 notebook-safe delete/archive confirmation simulations | No |
 | `simulate_package47_generation_snapshots.py` | Package 4.7 generation snapshot and reproducibility simulations | No |
 | `simulate_package471_generations_ux.py` | Package 4.7.1 generations UX cleanup and ID normalization simulations | No |
+| `simulate_package48_workflow_library.py` | Package 4.8 workflow library, parameterized launch, readiness, and preparation simulations | No |
 | `generation_info.py` | Show generation snapshot details (`--generation-id` as `gen_<uuid>` or bare UUID, `--json`) | No |
 | `export_generation.py` | Export generation snapshot to ZIP (`--generation-id`) | No |
 | `validate_generation_snapshot.py` | Validate snapshot integrity (`--generation-id`, `--all`) | No |
@@ -55,7 +56,14 @@ Cross-engine utility scripts for bootstrap, validation, and batch processing.
 | `delete_project.py` | Delete managed project folder (`--confirm-slug`, `--dry-run`); preserves global outputs/evidence | No |
 | `project_statistics.py` | Authoritative project statistics from files + evidence | No |
 | `migrate_projects.py` | Preview/apply Package 4.6 metadata migration (`--dry-run`, `--apply`) | No |
-| `workflow_catalog.py` | User-facing workflow catalog with runtime/quality/production status | No |
+| `workflow_catalog.py` | Workflow Library catalog (READY / caution / experimental / benchmark sections; filters) | No |
+| `workflow_info.py` | Show workflow identity, statuses, parameters, and readiness (`--workflow`, `--check-readiness`) | No |
+| `check_workflow_readiness.py` | Read-only readiness evaluation (`--allow-experimental`, `--allow-benchmark`) | No |
+| `prepare_workflow.py` | Prepare workflows: legacy `--input` mode or library `--param` / `--params-json` mode | No |
+| `list_prepared_workflows.py` | List recent prepared workflows from preparation index | No |
+| `prepared_workflow_info.py` | Show one preparation (`--preparation-id` as `prep_<uuid>` or bare UUID) | No |
+| `validate_prepared_workflow.py` | Validate prepared workflow artifacts (`--preparation-id`, `--all`) | No |
+| `open_prepared_workflow.py` | Copy prepared JSON into ComfyUI user workflows for manual load (no auto-queue) | No |
 
 ## Runtime Verification (Phase 1b)
 

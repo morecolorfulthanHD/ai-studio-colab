@@ -17,8 +17,11 @@ _spec.loader.exec_module(_activate)
 _activate.activate(__file__)
 
 from core.runtime.registry_loader import find_repo_root
-
-
+from core.runtime.workflow_manifest import (
+    list_workflow_manifests,
+    validate_manifest_against_canonical,
+    validate_manifest_structure,
+)
 
 MANIFEST_RULES: dict[str, dict] = {
     "paths/colab_paths.json": {
@@ -203,9 +206,44 @@ def main() -> int:
             print(f"  [PASS] {rel}")
             passed += 1
 
-    print(f"\nRESULT: {passed}/{len(json_files)} manifest(s) passed.")
+    print(f"\nRESULT: {passed}/{len(json_files)} config manifest(s) passed.")
     if all_errors:
-        print(f"Failed: {', '.join(all_errors)}", file=sys.stderr)
+        print(f"Failed config manifests: {', '.join(all_errors)}", file=sys.stderr)
+
+    print("\nWorkflow library manifests")
+    print("-" * 40)
+    workflow_passed = 0
+    workflow_failed = 0
+    workflow_errors: list[str] = []
+    try:
+        workflow_manifests = list_workflow_manifests(repo_root)
+    except FileNotFoundError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    for manifest in workflow_manifests:
+        identifier = str(manifest.get("_workflow_identifier") or manifest.get("workflow_identifier") or "")
+        rel = Path(str(manifest.get("_manifest_path") or "")).relative_to(repo_root).as_posix()
+        structure_errors = validate_manifest_structure(manifest)
+        hash_errors = validate_manifest_against_canonical(repo_root, manifest)
+        errors = structure_errors + hash_errors
+        if errors:
+            workflow_failed += 1
+            workflow_errors.append(identifier or rel)
+            print(f"  [FAIL] {rel}")
+            for err in errors:
+                print(f"         {err}")
+        else:
+            workflow_passed += 1
+            print(f"  [PASS] {rel}")
+
+    print(
+        f"\nRESULT: {workflow_passed}/{workflow_passed + workflow_failed} workflow manifest(s) passed."
+    )
+    if workflow_errors:
+        print(f"Failed workflow manifests: {', '.join(workflow_errors)}", file=sys.stderr)
+
+    if all_errors or workflow_errors:
         return 1
 
     return 0

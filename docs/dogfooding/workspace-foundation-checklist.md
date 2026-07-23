@@ -132,6 +132,25 @@ not silently overwritten.
 
 You may enter either the full `gen_<uuid>` ID or the UUID portion alone.
 
+## Control Panel menu (option 10) — Workflow Library
+
+```
+=== Workflow Library ===
+1. Browse workflows
+2. Workflow details
+3. Prepare txt2img
+4. Prepare img2img
+5. Prepare outpainting
+6. Prepare experimental inpainting
+7. Recent prepared workflows
+8. Open prepared workflow
+0. Back
+```
+
+Experimental inpainting requires typing `YES` in the notebook before `--allow-experimental` is passed.
+Prepared workflows are not generations; Package 4.7 snapshots remain the executed truth.
+See [docs/workflow-library.md](../workflow-library.md).
+
 ## Pass / Fail
 
 **PASS:** create/switch/deactivate/rename/archive/restore/delete work safely;

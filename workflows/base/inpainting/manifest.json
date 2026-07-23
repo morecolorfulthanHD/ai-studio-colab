@@ -1,0 +1,190 @@
+{
+  "schema_version": 1,
+  "workflow_identifier": "base/inpainting",
+  "display_name": "SD1.5 Inpainting",
+  "description": "Regenerate masked regions while preserving context. Technically runnable but quality-benchmark failed.",
+  "category": "editing",
+  "capability": "inpainting",
+  "implementation_status": "implemented",
+  "runtime_status": "ready",
+  "quality_status": "benchmark_failed",
+  "production_status": "experimental",
+  "status_reason": "This workflow executes technically but did not pass the real-world inpainting quality benchmark. Use for testing only.",
+  "model_family": "sd15_inpainting",
+  "required_model_files": ["512-inpainting-ema.safetensors"],
+  "optional_model_files": [],
+  "required_nodes": [
+    "LoadImage",
+    "LoadImageMask",
+    "CheckpointLoaderSimple",
+    "CLIPTextEncode",
+    "VAEEncodeForInpaint",
+    "KSampler",
+    "VAEDecode",
+    "SaveImage"
+  ],
+  "optional_nodes": [],
+  "canonical_workflow_path": "workflows/base/inpainting/workflow.json",
+  "workflow_hash": "f36e583feb51cadc09f7647956fe1151d454b28e5253e1e255b4cc633c5e3804",
+  "workflow_hash_type": "ui_workflow_v1",
+  "parameter_schema": {
+    "source_image": {
+      "display_name": "Source Image",
+      "type": "image",
+      "required": true,
+      "default": null,
+      "target_node_id": "1",
+      "target_field": "widgets_values[0]",
+      "secret": false
+    },
+    "mask_image": {
+      "display_name": "Mask Image",
+      "type": "mask",
+      "required": true,
+      "default": null,
+      "target_node_id": "2",
+      "target_field": "widgets_values[0]",
+      "secret": false
+    },
+    "positive_prompt": {
+      "display_name": "Positive Prompt",
+      "type": "string",
+      "required": true,
+      "default": "",
+      "target_node_id": "4",
+      "target_field": "widgets_values[0]",
+      "secret": false
+    },
+    "negative_prompt": {
+      "display_name": "Negative Prompt",
+      "type": "string",
+      "required": false,
+      "default": "",
+      "target_node_id": "5",
+      "target_field": "widgets_values[0]",
+      "secret": false
+    },
+    "seed": {
+      "display_name": "Seed",
+      "type": "integer",
+      "required": true,
+      "default": 123456789,
+      "minimum": 0,
+      "maximum": 18446744073709551615,
+      "target_node_id": "7",
+      "target_field": "widgets_values[0]",
+      "secret": false
+    },
+    "steps": {
+      "display_name": "Steps",
+      "type": "integer",
+      "required": true,
+      "default": 24,
+      "minimum": 1,
+      "maximum": 100,
+      "target_node_id": "7",
+      "target_field": "widgets_values[2]",
+      "secret": false
+    },
+    "cfg": {
+      "display_name": "CFG",
+      "type": "number",
+      "required": true,
+      "default": 7.0,
+      "minimum": 1.0,
+      "maximum": 30.0,
+      "target_node_id": "7",
+      "target_field": "widgets_values[3]",
+      "secret": false
+    },
+    "sampler_name": {
+      "display_name": "Sampler",
+      "type": "enum",
+      "required": true,
+      "default": "euler",
+      "allowed_values": [
+        "euler", "euler_ancestral", "heun", "dpm_2", "dpm_2_ancestral", "lms",
+        "dpm_fast", "dpm_adaptive", "dpmpp_2s_ancestral", "dpmpp_sde", "dpmpp_2m",
+        "ddim", "uni_pc"
+      ],
+      "target_node_id": "7",
+      "target_field": "widgets_values[4]",
+      "secret": false
+    },
+    "scheduler": {
+      "display_name": "Scheduler",
+      "type": "enum",
+      "required": true,
+      "default": "normal",
+      "allowed_values": ["normal", "karras", "exponential", "sgm_uniform", "simple", "ddim_uniform"],
+      "target_node_id": "7",
+      "target_field": "widgets_values[5]",
+      "secret": false
+    },
+    "denoise": {
+      "display_name": "Denoise",
+      "type": "number",
+      "required": true,
+      "default": 1.0,
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "target_node_id": "7",
+      "target_field": "widgets_values[6]",
+      "secret": false
+    },
+    "grow_mask_by": {
+      "display_name": "Grow Mask By",
+      "type": "integer",
+      "required": true,
+      "default": 6,
+      "minimum": 0,
+      "maximum": 64,
+      "target_node_id": "6",
+      "target_field": "widgets_values[0]",
+      "secret": false
+    },
+    "checkpoint": {
+      "display_name": "Checkpoint",
+      "type": "string",
+      "required": true,
+      "default": "512-inpainting-ema.safetensors",
+      "allowed_values": ["512-inpainting-ema.safetensors"],
+      "target_node_id": "3",
+      "target_field": "widgets_values[0]",
+      "secret": false
+    },
+    "save_prefix": {
+      "display_name": "Save Prefix",
+      "type": "string",
+      "required": true,
+      "default": "ai_studio_base_inpainting",
+      "normalization": "safe_filename_prefix",
+      "target_node_id": "9",
+      "target_field": "widgets_values[0]",
+      "secret": false
+    }
+  },
+  "default_parameters": {
+    "source_image": null,
+    "mask_image": null,
+    "positive_prompt": "",
+    "negative_prompt": "",
+    "seed": 123456789,
+    "steps": 24,
+    "cfg": 7.0,
+    "sampler_name": "euler",
+    "scheduler": "normal",
+    "denoise": 1.0,
+    "grow_mask_by": 6,
+    "checkpoint": "512-inpainting-ema.safetensors",
+    "save_prefix": "ai_studio_base_inpainting"
+  },
+  "output_prefix": "ai_studio_base_inpainting",
+  "supported_environments": ["colab"],
+  "license_notes": [],
+  "tags": ["sd15", "editing", "experimental"],
+  "documentation_path": "workflows/base/inpainting/README.md",
+  "launchable": true,
+  "requires_experimental": true,
+  "requires_benchmark": false
+}
