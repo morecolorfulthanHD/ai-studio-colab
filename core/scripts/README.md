@@ -35,6 +35,7 @@ Cross-engine utility scripts for bootstrap, validation, and batch processing.
 | `simulate_package47_generation_snapshots.py` | Package 4.7 generation snapshot and reproducibility simulations | No |
 | `simulate_package471_generations_ux.py` | Package 4.7.1 generations UX cleanup and ID normalization simulations | No |
 | `simulate_package48_workflow_library.py` | Package 4.8 workflow library, parameterized launch, readiness, and preparation simulations | No |
+| `simulate_package481_prepared_workflow_hotfix.py` | Package 4.8.1 userdata loading, project auto-resolve, notebook UX, and regression simulations | No |
 | `generation_info.py` | Show generation snapshot details (`--generation-id` as `gen_<uuid>` or bare UUID, `--json`) | No |
 | `export_generation.py` | Export generation snapshot to ZIP (`--generation-id`) | No |
 | `validate_generation_snapshot.py` | Validate snapshot integrity (`--generation-id`, `--all`) | No |
@@ -63,7 +64,9 @@ Cross-engine utility scripts for bootstrap, validation, and batch processing.
 | `list_prepared_workflows.py` | List recent prepared workflows from preparation index | No |
 | `prepared_workflow_info.py` | Show one preparation (`--preparation-id` as `prep_<uuid>` or bare UUID) | No |
 | `validate_prepared_workflow.py` | Validate prepared workflow artifacts (`--preparation-id`, `--all`) | No |
-| `open_prepared_workflow.py` | Copy prepared JSON into ComfyUI user workflows for manual load (no auto-queue) | No |
+| `open_prepared_workflow.py` | Register prepared JSON with ComfyUI userdata + filesystem loading copy (no auto-queue) | No |
+| `diagnose_prepared_workflow_loading.py` | Read-only diagnostic for prepared workflow loading vs ComfyUI userdata | No |
+| `reprepare_workflow.py` | Allocate a new preparation from an existing archive without mutating it | No |
 
 ## Runtime Verification (Phase 1b)
 

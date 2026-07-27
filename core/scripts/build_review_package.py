@@ -23,6 +23,7 @@ def collect_files() -> list[Path]:
     for script_name in (
         "cli_activate.py",
         "repo_bootstrap.py",
+        "build_review_package.py",
         "simulate_package3_hardening.py",
         "simulate_package4_editing.py",
         "validate_manifests.py",
@@ -72,7 +73,10 @@ def collect_files() -> list[Path]:
         "prepared_workflow_info.py",
         "validate_prepared_workflow.py",
         "open_prepared_workflow.py",
+        "diagnose_prepared_workflow_loading.py",
+        "reprepare_workflow.py",
         "simulate_package48_workflow_library.py",
+        "simulate_package481_prepared_workflow_hotfix.py",
         "runtime_report.py",
         "verify_models.py",
         "verify_generation.py",

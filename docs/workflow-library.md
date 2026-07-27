@@ -28,14 +28,37 @@ python core/scripts/list_prepared_workflows.py
 python core/scripts/prepared_workflow_info.py --preparation-id prep_<uuid>
 python core/scripts/validate_prepared_workflow.py --preparation-id prep_<uuid>
 python core/scripts/open_prepared_workflow.py --preparation-id prep_<uuid>
+python core/scripts/diagnose_prepared_workflow_loading.py --preparation-id prep_<uuid>
+python core/scripts/reprepare_workflow.py --preparation-id prep_<uuid>
 ```
 
-`open_prepared_workflow.py` copies JSON into ComfyUI `user/default/workflows/` for manual load. It does **not** auto-queue prompts or drive the browser.
+### Project resolution (Package 4.8.1)
+
+`prepare_workflow.py` resolves project context automatically:
+
+- `--global` — global archive only (no project mirror)
+- `--project <slug-or-id>` — explicit project (errors if missing or archived)
+- neither — uses the active project when set; otherwise global-only
+
+The notebook Workflow Library menu does not pass `--project`; it relies on the active project pointer from **Workspace / Projects**.
+
+Prepared artifacts land in:
+
+- **Global archive:** `AI_Studio/workflows/prepared/<prep_id>/`
+- **Project mirror** (when a project is active or selected): `AI_Studio/projects/<slug>/workflows/prepared/<prep_id>/`
+
+`open_prepared_workflow.py` writes a ComfyUI loading copy under `user/default/workflows/` **and** registers the same bytes via the ComfyUI `/userdata` API so the Workflows sidebar can open the graph. It does **not** auto-queue prompts or confirm the browser canvas loaded.
+
+**Root cause (Package 4.8 live Colab):** filesystem placement alone could list a workflow in the sidebar without registering it through userdata routes (`GET/POST /userdata`, `GET /v2/userdata`). Appearing in the sidebar was not treated as proof the graph could load. Package 4.8.1 POSTs the loading bytes, GETs them back, and verifies SHA-256 before instructing a manual left-click open.
 
 ## Loading prepared workflows
 
 1. Prepare via notebook **10. Workflow Library** or CLI.
-2. Run `open_prepared_workflow.py` (or notebook option 8).
-3. In ComfyUI, open the Workflows sidebar / Load the `ai_studio_prep_*.json` file.
-4. Inspect or edit, then Run.
-5. Autosync + Package 4.7 snapshots capture the **executed** graph (including manual edits).
+2. Run `open_prepared_workflow.py` (or notebook option 8) while ComfyUI is running when possible.
+3. In ComfyUI, open the **Workflows** sidebar and **left-click** the `ai_studio_prep_*.json` workflow name.
+4. If the sidebar does not list it, use **File → Load** on the filesystem loading copy path printed by the CLI.
+5. Automatic browser graph confirmation is unavailable — verify the canvas manually.
+6. Inspect or edit, then Run.
+7. Autosync + Package 4.7 snapshots capture the **executed** graph (including manual edits).
+
+Use `diagnose_prepared_workflow_loading.py` for read-only server-side checks (source on disk, loading copy, userdata listing/GET). Use `reprepare_workflow.py` to allocate a **new** preparation from an existing archive without mutating the original.

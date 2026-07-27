@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 import shutil
@@ -24,6 +25,7 @@ from .workflow_manifest import (
     workflow_id_for_identifier,
 )
 from .workflow_parameters import IMAGE_PARAM_TYPES, apply_parameter_bindings, coerce_and_validate_parameters
+from .comfyui_workflow_loading import COMFYUI_LOAD_SCHEMA_VERSION, build_comfyui_load_workflow
 from .workflow_provenance import hash_ui_workflow
 from .workflow_readiness import (
     READINESS_BLOCKED,
@@ -32,7 +34,7 @@ from .workflow_readiness import (
     evaluate_workflow_readiness,
 )
 
-PACKAGE_VERSION = "4.8"
+PACKAGE_VERSION = "4.8.1"
 
 
 @dataclass
@@ -192,10 +194,34 @@ def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
     tmp.replace(path)
 
 
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while True:
+            chunk = handle.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _copy_preparation_tree(source_dir: Path, dest_dir: Path) -> None:
+    """Copy preparation artifacts and verify presence, size, and SHA-256."""
     if dest_dir.exists():
         raise FileExistsError(f"Destination already exists: {dest_dir}")
     shutil.copytree(source_dir, dest_dir)
+    source_files = sorted(p for p in source_dir.rglob("*") if p.is_file())
+    if not source_files:
+        raise OSError(f"Source preparation tree is empty: {source_dir}")
+    for src in source_files:
+        rel = src.relative_to(source_dir)
+        dst = dest_dir / rel
+        if not dst.is_file():
+            raise OSError(f"Mirror missing file after copy: {dst}")
+        if src.stat().st_size != dst.stat().st_size:
+            raise OSError(f"Mirror size mismatch for {rel}: {src.stat().st_size} != {dst.stat().st_size}")
+        if _file_sha256(src) != _file_sha256(dst):
+            raise OSError(f"Mirror SHA-256 mismatch for {rel}")
 
 
 def prepare_library_workflow(
@@ -343,6 +369,10 @@ def prepare_library_workflow(
     ):
         prepared_data["extra"]["ai_studio"]["prepared_workflow_hash"] = prepared_hash
 
+    # Deterministic frontend-load representation hash (archival JSON stays unchanged).
+    load_data = build_comfyui_load_workflow(prepared_data)
+    comfyui_load_hash = hash_ui_workflow(load_data)
+
     runtime_dir = runtime_prepared_root / preparation_id
     result.runtime_prepared_dir = str(runtime_dir)
     workflow_filename = f"{preparation_id}.workflow.json"
@@ -369,6 +399,8 @@ def prepare_library_workflow(
         "canonical_workflow_path": canonical_rel or None,
         "canonical_workflow_hash": canonical_hash,
         "prepared_workflow_hash": prepared_hash,
+        "comfyui_load_workflow_hash": comfyui_load_hash,
+        "comfyui_load_schema_version": COMFYUI_LOAD_SCHEMA_VERSION,
         "capability": manifest.get("capability") or None,
         "project_id": (active_project.project_id if active_project is not None else None),
         "project_slug": (active_project.slug if active_project is not None else None),
@@ -429,14 +461,25 @@ def prepare_library_workflow(
         shutil.rmtree(temp_dir, ignore_errors=True)
 
     drive_prepared_root.mkdir(parents=True, exist_ok=True)
-    _copy_preparation_tree(runtime_dir, drive_dir)
-    result.messages.append(f"Drive prepared copy: {drive_dir}")
+    try:
+        _copy_preparation_tree(runtime_dir, drive_dir)
+        result.messages.append(f"Drive prepared copy: {drive_dir}")
+    except FileExistsError as exc:
+        result.errors.append(str(exc))
+        return result
 
     if active_project is not None and project_dir:
         project_path = Path(project_dir)
-        project_path.parent.mkdir(parents=True, exist_ok=True)
-        _copy_preparation_tree(runtime_dir, project_path)
-        result.messages.append(f"Project prepared copy: {project_path}")
+        try:
+            project_path.parent.mkdir(parents=True, exist_ok=True)
+            _copy_preparation_tree(runtime_dir, project_path)
+            result.messages.append(f"Project prepared copy: {project_path}")
+        except (OSError, FileExistsError) as exc:
+            result.project_prepared_dir = ""
+            result.messages.append(
+                f"WARNING: Project preparation mirror failed after global archive was written: {exc}"
+            )
+            result.messages.append("PARTIAL: global archive OK; project mirror missing.")
 
     log_path = preparations_log_path(drive_root)
     append_preparation_record(

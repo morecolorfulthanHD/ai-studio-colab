@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare runtime workflow copies with user-selected inputs."""
+"""Prepare runtime workflow copies with selected inputs / library parameters."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ assert _spec is not None and _spec.loader is not None
 _spec.loader.exec_module(_activate)
 _activate.activate(__file__)
 
+from core.runtime.preparation_project_context import resolve_preparation_project
 from core.runtime.registry_loader import RegistryLoader, find_repo_root
 from core.runtime.workflow_library_preparation import prepare_library_workflow
 from core.runtime.workflow_manifest import resolve_workflow_identifier
@@ -126,12 +127,18 @@ def _run_library(args: argparse.Namespace, repo_root: Path) -> int:
     comfyui_input_dir = args.comfyui_input_dir or (bundle.path("comfyui_runtime") / "input")
     drive_root = bundle.path("drive_root")
     allowed_roots = [bundle.path("drive_inputs"), repo_root / "inputs"]
-    active_project = None
-    if args.project:
-        from core.runtime.project_workspace import ProjectWorkspace
+    try:
+        comfy_input = bundle.path("comfyui_runtime") / "input"
+        allowed_roots.append(comfy_input)
+    except KeyError:
+        pass
 
-        workspace = ProjectWorkspace(drive_root)
-        active_project = workspace.get_active_project()
+    context = resolve_preparation_project(
+        drive_root,
+        use_global=bool(args.use_global),
+        project_ref=args.project,
+    )
+    active_project = context.project
 
     params = _load_params(args)
     result = prepare_library_workflow(
@@ -149,31 +156,79 @@ def _run_library(args: argparse.Namespace, repo_root: Path) -> int:
         allowed_input_roots=allowed_roots,
     )
     payload = result.to_dict()
+    payload["mode"] = (
+        f"Project — {active_project.slug}" if active_project is not None else "Global outputs only"
+    )
+    payload["project_resolution"] = context.source
+
+    expected_project = active_project is not None
+    project_ok = bool(result.project_prepared_dir) if expected_project and result.ok else True
+    if expected_project and result.ok and not result.project_prepared_dir and not args.dry_run:
+        print(
+            "ERROR: Active/selected project mode expected a project preparation mirror, "
+            "but prepared_project_path is missing.",
+            file=sys.stderr,
+        )
+        print("\nRESULT: PARTIAL — global archive may exist without project mirror.", file=sys.stderr)
+        if args.json:
+            payload["ok"] = False
+            payload["partial"] = True
+            print(json.dumps(payload, indent=2))
+        return 2
+
     if args.json:
         print(json.dumps(payload, indent=2))
     elif args.summary:
         print(
             f"{result.preparation_id} {result.workflow_identifier} "
-            f"readiness={result.readiness_status} ok={result.ok}"
+            f"readiness={result.readiness_status} mode={payload['mode']} ok={result.ok}"
         )
     else:
-        print("AI Studio — Workflow Preparation (Library)")
+        print("AI Studio — Workflow Preparation")
         print("=" * 40)
-        print(f"Workflow:       {result.workflow_identifier} ({result.workflow_id})")
-        print(f"Preparation ID: {result.preparation_id}")
-        print(f"Readiness:      {result.readiness_status}")
-        print(f"Prepared hash:  {result.prepared_workflow_hash}")
+        print(f"Workflow:          {result.workflow_identifier}")
+        print(f"Preparation ID:    {result.preparation_id}")
+        print(f"Readiness:         {result.readiness_status}")
+        print(f"Mode:              {payload['mode']}")
         if result.runtime_workflow_path:
-            print(f"Runtime path:   {result.runtime_workflow_path}")
+            print(f"Runtime path:      {result.runtime_workflow_path}")
         if result.drive_prepared_dir:
-            print(f"Drive path:     {result.drive_prepared_dir}")
+            print(f"Global Drive path: {result.drive_prepared_dir}")
+        if result.project_prepared_dir:
+            print(f"Project path:      {result.project_prepared_dir}")
+        elif expected_project and not args.dry_run:
+            print("Project path:      (missing)")
+        print(f"Canonical hash:    {result.canonical_workflow_hash}")
+        print(f"Prepared hash:     {result.prepared_workflow_hash}")
+        effective = result.parameters or {}
+        for key in (
+            "positive_prompt",
+            "negative_prompt",
+            "seed",
+            "steps",
+            "cfg",
+            "width",
+            "height",
+            "batch_size",
+            "sampler_name",
+            "scheduler",
+            "checkpoint",
+            "save_prefix",
+            "denoise",
+        ):
+            if key in effective:
+                label = key.replace("_", " ").title()
+                print(f"{label + ':':18} {effective.get(key)}")
         for message in result.messages:
             print(f"Note: {message}")
         for error in result.errors:
             print(f"Error: {error}", file=sys.stderr)
+
     if not result.ok:
         print("\nRESULT: FAIL — library workflow preparation failed.", file=sys.stderr)
         return 1
+    if not project_ok:
+        return 2
     print("\nRESULT: OK — library workflow preparation complete.")
     return 0
 
@@ -194,8 +249,17 @@ def main() -> int:
     parser.add_argument("--param", action="append", default=[], help="Parameter key=value (repeatable).")
     parser.add_argument("--params-json", default="", help="JSON object of workflow parameters.")
     parser.add_argument("--params-file", type=Path, default=None, help="JSON file of workflow parameters.")
-    parser.add_argument("--project", action="store_true", help="Also copy prepared workflow to active project.")
-    parser.add_argument("--global", dest="use_global", action="store_true", help="Accepted for compatibility.")
+    parser.add_argument(
+        "--project",
+        default=None,
+        help="Explicit project slug or id. If omitted, the active project is used when set.",
+    )
+    parser.add_argument(
+        "--global",
+        dest="use_global",
+        action="store_true",
+        help="Force global-only preparation (ignore active project).",
+    )
     parser.add_argument("--allow-experimental", action="store_true")
     parser.add_argument("--allow-benchmark", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
@@ -206,6 +270,9 @@ def main() -> int:
 
     try:
         repo_root = args.repo_root.resolve() if args.repo_root else find_repo_root(script_file=Path(__file__))
+        if args.use_global and args.project:
+            print("ERROR: Conflicting flags: use either --global or --project, not both.", file=sys.stderr)
+            return 1
         if _use_library_mode(args):
             resolve_workflow_identifier(args.workflow)
             return _run_library(args, repo_root)
