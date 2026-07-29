@@ -34,7 +34,7 @@ from .workflow_readiness import (
     evaluate_workflow_readiness,
 )
 
-PACKAGE_VERSION = "4.8.1"
+PACKAGE_VERSION = "4.8.2"
 
 
 @dataclass

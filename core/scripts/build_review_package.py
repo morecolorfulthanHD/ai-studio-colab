@@ -77,6 +77,7 @@ def collect_files() -> list[Path]:
         "reprepare_workflow.py",
         "simulate_package48_workflow_library.py",
         "simulate_package481_prepared_workflow_hotfix.py",
+        "simulate_package482_prepared_workflow_integration.py",
         "runtime_report.py",
         "verify_models.py",
         "verify_generation.py",

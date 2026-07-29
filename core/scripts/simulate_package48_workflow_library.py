@@ -245,6 +245,12 @@ def run_simulations() -> list[tuple[str, str]]:
     _pass(results, "build_catalog filters and sorts entries")
     _pass(results, "build_catalog excludes benchmark workflows by default")
 
+    full_catalog = build_catalog(repo_root)
+    full_ids = {e["workflow_identifier"] for e in full_catalog}
+    _assert_true("catalog includes qwen by default", "reference/qwen_image_edit" in full_ids)
+    _assert_true("catalog includes flux by default", "reference/flux_fill" in full_ids)
+    _pass(results, "build_catalog includes benchmark workflows by default")
+
     txt2img_manifest = load_workflow_manifest(repo_root, "base/txt2img")
     txt2img_nodes = _comfy_object_info(txt2img_manifest)
     ready = evaluate_workflow_readiness(

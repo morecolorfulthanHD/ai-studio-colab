@@ -1,20 +1,33 @@
 #!/usr/bin/env python3
-"""Prepared workflow → ComfyUI frontend loading (Package 4.8.1).
+"""Prepared workflow → ComfyUI frontend loading (Package 4.8.2).
 
-Root cause (live Colab Package 4.8):
-  open_prepared_workflow.py only copied JSON onto the filesystem under
-  ComfyUI/user/default/workflows/. Modern ComfyUI frontends list and open
-  sidebar workflows through the /userdata API. A raw disk copy can appear in
-  some listings but clicking/Insert/drag fails because the workflow was never
-  registered via userdata POST.
+Root cause (live Colab Package 4.8.1 dogfood):
+  Userdata POST/GET verification succeeded and the workflow appeared in the
+  Workflows sidebar, but left-click/Insert/drag still did not show a graph.
 
-Verified loading method:
-  1. Build a frontend load copy (preserves graph + extra.ai_studio).
-  2. Write a separate filesystem loading copy under user/default/workflows/.
-  3. POST the same bytes to /userdata/workflows%2F<name>.json when ComfyUI is up.
-  4. GET the userdata entry back and verify SHA-256 match.
-  5. Instruct the user to click the workflow name in the Workflows sidebar
-     (or File → Load). Never claim browser graph open completed.
+Reverse-engineered mechanism (Comfy-Org/ComfyUI_frontend + ComfyUI user_manager):
+  1. Sidebar discovery uses listUserDataFullInfo:
+       GET /api/userdata?dir=workflows&recurse=true&split=false&full_info=true
+  2. Left-click leaf calls workflowService.openWorkflow → ComfyWorkflow.load:
+       GET /api/userdata/{encodeURIComponent('workflows/<file>.json')}
+       → JSON.parse → app.loadGraphData(graph)
+  3. If loadGraphData receives a non-object (e.g. parse failure / wrong shape),
+     it silently substitutes the empty defaultGraph — looking like “click did
+     nothing / blank canvas”.
+  4. Collision-safe sibling names (ai_studio_<id>_1.json) can leave an older
+     broken ai_studio_<id>.json visible while registration targets the sibling.
+     The user left-clicks the broken primary name.
+
+Verified loading method (Package 4.8.2):
+  - Build a frontend-compatible UI workflow (version 0.4 schema fields).
+  - Write/overwrite the deterministic loading copy:
+      user/default/workflows/ai_studio_<prep_id>.json
+  - POST the same bytes via /api/userdata/...&full_info=true (frontend Save path).
+  - GET and verify SHA-256 + JSON parse + required schema fields + node/link counts.
+  - Confirm the filename appears in the frontend full_info listing with matching size.
+  - Instruct left-click of that exact filename; warn against sidebar Refresh
+    (known frontend sync bug). Never claim browser canvas confirmation.
+  - Never call /prompt. No browser automation.
 """
 
 from __future__ import annotations
@@ -22,6 +35,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -36,7 +50,7 @@ from .comfyui_userdata import (
 from .workflow_provenance import hash_ui_workflow
 
 COMFYUI_LOAD_SCHEMA_VERSION = "0.4"
-PACKAGE_VERSION = "4.8.1"
+PACKAGE_VERSION = "4.8.2"
 
 
 @dataclass
@@ -55,6 +69,8 @@ class OpenPreparedResult:
     userdata_registered: bool = False
     userdata_verified: bool = False
     userdata_listed: bool = False
+    userdata_list_size_matches: bool = False
+    schema_valid: bool = False
     comfyui_reachable: bool = False
     node_count: int = 0
     link_count: int = 0
@@ -62,6 +78,7 @@ class OpenPreparedResult:
     messages: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     instructions: list[str] = field(default_factory=list)
+    verification_limits: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -86,21 +103,89 @@ def bytes_sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def build_comfyui_load_workflow(archival: dict[str, Any]) -> dict[str, Any]:
-    """Return a frontend-loadable copy without mutating the archival dict.
+def validate_comfyui_ui_workflow_schema(data: dict[str, Any]) -> list[str]:
+    """Validate required fields of ComfyUI UI schema version 0.4.
 
-    Keeps UI graph structure (nodes/links). Ensures version and extra.ai_studio
-    survive. Does not convert to API prompt format.
+    Mirrors the frontend zod schema's required surface for loading
+    (last_node_id, last_link_id, nodes, links, version). Does not claim
+    full zod parity. Rejects non-objects so callers never substitute
+    defaultGraph silently.
     """
+    errors: list[str] = []
+    if not isinstance(data, dict):
+        return ["workflow root must be a JSON object"]
+    if "version" not in data:
+        errors.append("missing version")
+    else:
+        try:
+            float(data["version"])
+        except (TypeError, ValueError):
+            errors.append(f"invalid version: {data.get('version')!r}")
+    if "last_node_id" not in data:
+        errors.append("missing last_node_id")
+    if "last_link_id" not in data:
+        errors.append("missing last_link_id")
+    nodes = data.get("nodes")
+    if not isinstance(nodes, list):
+        errors.append("nodes must be an array")
+    elif not nodes:
+        errors.append("nodes must be a non-empty array")
+    else:
+        for index, node in enumerate(nodes):
+            if not isinstance(node, dict):
+                errors.append(f"nodes[{index}] must be an object")
+                continue
+            if "id" not in node:
+                errors.append(f"nodes[{index}] missing id")
+            if not str(node.get("type") or "").strip():
+                errors.append(f"nodes[{index}] missing type")
+    links = data.get("links")
+    if not isinstance(links, list):
+        errors.append("links must be an array")
+    else:
+        for index, link in enumerate(links):
+            if isinstance(link, list):
+                if len(link) < 5:
+                    errors.append(f"links[{index}] tuple too short")
+            elif isinstance(link, dict):
+                for key in ("id", "origin_id", "target_id"):
+                    if key not in link:
+                        errors.append(f"links[{index}] missing {key}")
+            else:
+                errors.append(f"links[{index}] must be a list or object")
+    extra = data.get("extra")
+    if extra is not None and not isinstance(extra, dict):
+        errors.append("extra must be an object when present")
+    return errors
+
+
+def build_comfyui_load_workflow(archival: dict[str, Any]) -> dict[str, Any]:
+    """Return a frontend-loadable copy without mutating the archival dict."""
     data = copy.deepcopy(archival)
     if "version" not in data or data.get("version") in (None, ""):
         data["version"] = float(COMFYUI_LOAD_SCHEMA_VERSION)
     else:
-        # Preserve numeric 0.4 / 1.0 as JSON number when possible.
         try:
             data["version"] = float(data["version"])
         except (TypeError, ValueError):
             data["version"] = float(COMFYUI_LOAD_SCHEMA_VERSION)
+
+    # Modern Save As often stamps a top-level UUID id; optional but helps tab identity.
+    existing_id = data.get("id")
+    if not isinstance(existing_id, str) or not existing_id.strip():
+        data["id"] = str(uuid.uuid4())
+
+    if "last_node_id" not in data and isinstance(data.get("nodes"), list) and data["nodes"]:
+        try:
+            data["last_node_id"] = max(int(n.get("id")) for n in data["nodes"] if isinstance(n, dict))
+        except (TypeError, ValueError):
+            pass
+    if "last_link_id" not in data and isinstance(data.get("links"), list) and data["links"]:
+        try:
+            data["last_link_id"] = max(int(link[0]) for link in data["links"] if isinstance(link, list) and link)
+        except (TypeError, ValueError, IndexError):
+            pass
+
     extra = data.setdefault("extra", {})
     if isinstance(extra, dict):
         ai = extra.setdefault("ai_studio", {})
@@ -108,20 +193,6 @@ def build_comfyui_load_workflow(archival: dict[str, Any]) -> dict[str, Any]:
             ai["comfyui_load_schema_version"] = COMFYUI_LOAD_SCHEMA_VERSION
             ai["package_version_open"] = PACKAGE_VERSION
     return data
-
-
-def _collision_safe_path(dest_dir: Path, dest_name: str) -> Path:
-    candidate = dest_dir / dest_name
-    if not candidate.exists():
-        return candidate
-    stem = Path(dest_name).stem
-    suffix = Path(dest_name).suffix
-    stamp = 1
-    while True:
-        alt = dest_dir / f"{stem}_{stamp}{suffix}"
-        if not alt.exists():
-            return alt
-        stamp += 1
 
 
 def open_prepared_workflow_for_comfyui(
@@ -133,6 +204,11 @@ def open_prepared_workflow_for_comfyui(
     dry_run: bool = False,
 ) -> OpenPreparedResult:
     result = OpenPreparedResult(preparation_id=preparation_id, dry_run=dry_run)
+    result.verification_limits = [
+        "Browser canvas/graph rendering is not verified programmatically.",
+        "Left-click open is instructed for the user; AI Studio does not automate the browser.",
+        "Server-side checks: filesystem copy, /api/userdata POST+GET, full_info listing, schema, node/link counts.",
+    ]
     source = source_workflow_path
     result.source_path = str(source)
     if not source.is_file():
@@ -151,18 +227,28 @@ def open_prepared_workflow_for_comfyui(
     result.source_sha256 = file_sha256(source)
     result.prepared_workflow_hash = hash_ui_workflow(archival)
     load_data = build_comfyui_load_workflow(archival)
+    schema_errors = validate_comfyui_ui_workflow_schema(load_data)
+    result.schema_valid = not schema_errors
+    if schema_errors:
+        result.errors.append("Frontend load schema invalid: " + "; ".join(schema_errors))
+        return result
+
     result.comfyui_load_workflow_hash = hash_ui_workflow(load_data)
     result.load_schema_version = str(load_data.get("version") or COMFYUI_LOAD_SCHEMA_VERSION)
     result.node_count = len(load_data.get("nodes") or [])
     result.link_count = len(load_data.get("links") or [])
-    load_bytes = (json.dumps(load_data, indent=2) + "\n").encode("utf-8")
+    # Compact JSON matches frontend storeUserData of an already-stringified body.
+    # Pretty-print remains valid; keep stable indent for hash diagnostics.
+    load_text = json.dumps(load_data, indent=2) + "\n"
+    load_bytes = load_text.encode("utf-8")
 
+    # Deterministic AI Studio-owned name — overwrite in place (no _1 siblings).
     load_filename = f"ai_studio_{preparation_id}.json"
     dest_dir = Path(comfyui_runtime) / "user" / "default" / "workflows"
-    dest_path = _collision_safe_path(dest_dir, load_filename)
-    result.load_filename = dest_path.name
+    dest_path = dest_dir / load_filename
+    result.load_filename = load_filename
     result.filesystem_destination = str(dest_path)
-    result.userdata_relative_path = f"workflows/{dest_path.name}"
+    result.userdata_relative_path = f"workflows/{load_filename}"
 
     if dry_run:
         result.messages.append("Dry run — no filesystem write or userdata POST performed.")
@@ -176,9 +262,8 @@ def open_prepared_workflow_for_comfyui(
     if result.destination_sha256 != bytes_sha256(load_bytes):
         result.errors.append("Filesystem loading copy hash mismatch after write.")
         return result
-    result.messages.append(f"Wrote ComfyUI loading copy: {dest_path}")
+    result.messages.append(f"Wrote ComfyUI loading copy (overwrite): {dest_path}")
 
-    # Confirm archival source unchanged.
     if file_sha256(source) != result.source_sha256:
         result.errors.append("Archival prepared workflow changed unexpectedly during open.")
         result.archival_unchanged = False
@@ -188,27 +273,71 @@ def open_prepared_workflow_for_comfyui(
     if result.comfyui_reachable:
         put = userdata_put_workflow(
             base_url=base_url,
-            filename=dest_path.name,
+            filename=load_filename,
             content=load_bytes,
             overwrite=True,
+            full_info=True,
         )
         result.userdata_registered = bool(put.get("ok"))
         if result.userdata_registered:
-            result.messages.append(f"Registered with ComfyUI userdata: {put.get('relative_path')}")
-            got = userdata_get_workflow(base_url=base_url, filename=dest_path.name)
-            if got.get("ok") and bytes_sha256(got.get("body") or b"") == bytes_sha256(load_bytes):
-                result.userdata_verified = True
-                result.messages.append("Verified userdata bytes match loading copy.")
+            result.messages.append(
+                f"Registered with ComfyUI userdata: {put.get('relative_path')} via {put.get('url')}"
+            )
+            got = userdata_get_workflow(base_url=base_url, filename=load_filename)
+            got_body = got.get("body") or b""
+            if got.get("ok") and bytes_sha256(got_body) == bytes_sha256(load_bytes):
+                try:
+                    parsed = json.loads(got_body.decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                    result.messages.append(f"WARNING: userdata GET JSON parse failed: {exc}")
+                else:
+                    parse_errors = validate_comfyui_ui_workflow_schema(parsed if isinstance(parsed, dict) else {})
+                    if parse_errors:
+                        result.messages.append(
+                            "WARNING: userdata GET body failed schema validation: "
+                            + "; ".join(parse_errors)
+                        )
+                    elif len(parsed.get("nodes") or []) != result.node_count:
+                        result.messages.append(
+                            "WARNING: userdata GET node count mismatch "
+                            f"({len(parsed.get('nodes') or [])} != {result.node_count})."
+                        )
+                    else:
+                        result.userdata_verified = True
+                        result.messages.append(
+                            "Verified userdata GET bytes + schema + node count match loading copy."
+                        )
             else:
                 result.messages.append(
                     "WARNING: userdata GET did not verify matching bytes; "
-                    "filesystem copy is present for File → Load."
+                    "filesystem copy is present for File → Load fallback."
                 )
+
             listing = userdata_list_workflows(base_url=base_url)
             names = listing.get("names") or []
-            result.userdata_listed = dest_path.name in names or any(
-                dest_path.name in str(n) for n in names
+            result.userdata_listed = load_filename in names or any(
+                load_filename in str(n) for n in names
             )
+            for entry in listing.get("entries") or []:
+                if str(entry.get("name") or "") == load_filename:
+                    size = entry.get("size")
+                    if size is None or int(size) == len(load_bytes):
+                        result.userdata_list_size_matches = True
+                    else:
+                        result.messages.append(
+                            f"WARNING: listing size {size} != load bytes {len(load_bytes)}"
+                        )
+                    break
+            if result.userdata_listed:
+                result.messages.append(
+                    f"Workflow listed by ComfyUI userdata discovery ({listing.get('url')})."
+                )
+            else:
+                result.messages.append(
+                    "WARNING: workflow not present in userdata full_info listing yet. "
+                    "Hard-reload the ComfyUI browser tab (not the sidebar Refresh icon), "
+                    "then left-click the workflow name."
+                )
         else:
             result.messages.append(
                 "WARNING: ComfyUI userdata registration failed "
@@ -218,7 +347,7 @@ def open_prepared_workflow_for_comfyui(
     else:
         result.messages.append(
             "ComfyUI HTTP API unreachable — wrote filesystem loading copy only. "
-            "Start ComfyUI, then re-run open or use File → Load on the destination file."
+            "Start ComfyUI, hard-reload the browser tab, then re-run open."
         )
 
     result.instructions = _instructions(
@@ -232,23 +361,21 @@ def open_prepared_workflow_for_comfyui(
 def _instructions(result: OpenPreparedResult, *, registered: bool, verified: bool) -> list[str]:
     lines = [
         "Prepared workflow registered with ComfyUI."
-        if registered
-        else "Prepared workflow loading copy is available on disk.",
+        if registered and verified
+        else "Prepared workflow loading copy is available.",
         "Automatic browser graph confirmation is unavailable.",
         "Opening does not queue a prompt and does not call /prompt.",
-        "1. Open the ComfyUI page in your browser (refresh the Workflows list if needed).",
-        "2. Open the Workflows sidebar.",
+        "1. Open the ComfyUI page.",
+        "2. Hard-reload the entire browser tab after external registration.",
+        "3. Do not use the Workflows sidebar Refresh icon for this test",
+        "   (sidebar refresh can leave workflows listed but unable to open until a full page reload).",
+        "4. Open the Workflows sidebar.",
+        f"5. Left-click the exact deterministic workflow filename: {result.load_filename}",
+        "6. Confirm a graph with nodes appears on the canvas.",
+        "7. Review the graph parameters.",
+        "8. Click Run manually when ready.",
     ]
-    if registered or verified:
-        lines.append(f"3. Left-click the workflow name: {result.load_filename}")
-        lines.append("   The workflow should open in a tab for review.")
-    else:
-        lines.append("3. Use File → Load (or Load Workflow) and select:")
+    if not (registered and verified):
+        lines.append("Fallback if left-click fails: File → Load and select:")
         lines.append(f"   {result.filesystem_destination}")
-    lines.extend(
-        [
-            "4. Confirm the graph appears on the canvas with your prepared parameters.",
-            "5. Review or edit, then click Run when ready.",
-        ]
-    )
     return lines

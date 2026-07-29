@@ -54,7 +54,7 @@ def build_catalog(
     capability: str = "",
     status: str = "",
     include_experimental: bool = True,
-    include_benchmark: bool = False,
+    include_benchmark: bool = True,
     ready_only: bool = False,
 ) -> list[dict]:
     bundle = RegistryLoader(repo_root).load_all()
@@ -133,7 +133,18 @@ def main() -> int:
     parser.add_argument("--status", default="")
     parser.add_argument("--include-experimental", action="store_true", default=True)
     parser.add_argument("--no-include-experimental", action="store_false", dest="include_experimental")
-    parser.add_argument("--include-benchmark", action="store_true")
+    parser.add_argument(
+        "--include-benchmark",
+        action="store_true",
+        default=True,
+        help="Include BENCHMARK ONLY workflows (default: on).",
+    )
+    parser.add_argument(
+        "--exclude-benchmark",
+        action="store_false",
+        dest="include_benchmark",
+        help="Hide BENCHMARK ONLY workflows from the catalog.",
+    )
     parser.add_argument("--ready-only", action="store_true")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--summary", action="store_true")

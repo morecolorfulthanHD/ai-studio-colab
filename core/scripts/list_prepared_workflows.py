@@ -20,6 +20,21 @@ from core.runtime.prepared_workflow_index import preparations_log_path, read_pre
 from core.runtime.registry_loader import RegistryLoader, find_repo_root
 
 
+def _project_label(row: dict) -> str:
+    slug = str(row.get("project_slug") or "").strip()
+    if slug:
+        return slug
+    project_dir = str(row.get("project_prepared_dir") or row.get("prepared_project_path") or "").strip()
+    if project_dir:
+        parts = Path(project_dir).parts
+        if "projects" in parts:
+            idx = parts.index("projects")
+            if idx + 1 < len(parts):
+                return parts[idx + 1]
+        return project_dir
+    return "Global"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="List prepared workflow library preparations.")
     parser.add_argument("--repo-root", type=Path, default=None)
@@ -55,15 +70,27 @@ def main() -> int:
         print("No prepared workflows found.")
         return 0
     for row in filtered:
+        prep_id = str(row.get("preparation_id") or "")
+        workflow_id = str(row.get("workflow_identifier") or "")
+        project = _project_label(row)
+        readiness = str(row.get("readiness_status") or "")
+        drive_path = str(row.get("drive_prepared_dir") or row.get("prepared_drive_path") or "")
+        project_path = str(row.get("project_prepared_dir") or row.get("prepared_project_path") or "")
         if args.summary:
-            print(
-                f"{row.get('preparation_id', ''):40} "
-                f"{row.get('workflow_identifier', ''):20} "
-                f"{row.get('readiness_status', '')}"
-            )
+            print(f"{prep_id}  {workflow_id}  project={project}  readiness={readiness}")
         else:
-            print(f"{row.get('preparation_id')} — {row.get('workflow_identifier')}")
-            print(f"  drive: {row.get('drive_prepared_dir', '')}")
+            print(prep_id)
+            print(f"  Workflow:     {workflow_id}")
+            print(f"  Project:      {project}")
+            print(f"  Readiness:    {readiness}")
+            created = str(row.get("created_timestamp") or row.get("created") or "").strip()
+            print(f"  Created:      {created or '(unavailable)'}")
+            print(f"  Global path:  {drive_path or '(none)'}")
+            if project_path:
+                print(f"  Project path: {project_path}")
+            else:
+                print("  Project path: (none)")
+            print()
     return 0
 
 

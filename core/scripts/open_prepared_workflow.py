@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Register a prepared workflow for ComfyUI frontend loading (Package 4.8.1)."""
+"""Register a prepared workflow for ComfyUI frontend loading (Package 4.8.2)."""
 
 from __future__ import annotations
 
@@ -76,6 +76,9 @@ def main() -> int:
         print(f"ComfyUI reachable:  {result.comfyui_reachable}")
         print(f"Userdata registered:{result.userdata_registered}")
         print(f"Userdata verified:  {result.userdata_verified}")
+        print(f"Userdata listed:    {result.userdata_listed}")
+        print(f"List size match:    {result.userdata_list_size_matches}")
+        print(f"Schema valid:       {result.schema_valid}")
         print(f"Nodes/links:        {result.node_count}/{result.link_count}")
         print(f"Archival unchanged: {result.archival_unchanged}")
         for message in result.messages:
@@ -83,25 +86,38 @@ def main() -> int:
         print()
         for line in result.instructions:
             print(line)
+        for limit in result.verification_limits:
+            print(f"Limit: {limit}")
         for error in result.errors:
             print(f"Error: {error}", file=sys.stderr)
 
     if not result.ok:
         return 1
-    # Partial: filesystem copy OK but userdata registration/verification incomplete.
-    if result.comfyui_reachable and not result.userdata_verified and not args.dry_run:
-        print(
-            "\nRESULT: PARTIAL — loading copy written; userdata verification incomplete.",
-            file=sys.stderr,
-        )
-        return 2
-    if not result.comfyui_reachable and not args.dry_run:
+    # Full success requires registration + GET verify + discovery listing when Comfy is up.
+    if args.dry_run:
+        return 0
+    if not result.comfyui_reachable:
         print(
             "\nRESULT: PARTIAL — loading copy written; ComfyUI unreachable for userdata registration.",
             file=sys.stderr,
         )
         return 2
+    full = (
+        result.userdata_registered
+        and result.userdata_verified
+        and result.userdata_listed
+        and result.userdata_list_size_matches
+        and result.schema_valid
+        and result.archival_unchanged
+    )
+    if not full:
+        print(
+            "\nRESULT: PARTIAL — loading copy written; userdata verification or discovery incomplete.",
+            file=sys.stderr,
+        )
+        return 2
     print("\nRESULT: OK — prepared workflow registered with ComfyUI userdata.")
+    print("Limit: browser canvas open was not verified programmatically.")
     return 0
 
 

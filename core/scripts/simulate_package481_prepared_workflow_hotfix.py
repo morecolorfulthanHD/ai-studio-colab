@@ -425,7 +425,7 @@ def run_simulations() -> list[tuple[str, str]]:
         def _mock_reachable(_url=None, **_kw):
             return True
 
-        def _mock_put(*, base_url=None, filename, content, overwrite=True, timeout=15.0):
+        def _mock_put(*, base_url=None, filename, content, overwrite=True, full_info=True, timeout=15.0):
             load_bytes_holder[filename] = content
             return {"ok": True, "status_code": 200, "relative_path": f"workflows/{filename}", "error": ""}
 
@@ -474,6 +474,10 @@ def run_simulations() -> list[tuple[str, str]]:
         _assert_true(
             "instructions no auto-queue",
             "does not queue a prompt" in instruction_text and "/prompt" in instruction_text,
+        )
+        _assert_true(
+            "instructions hard-reload guidance",
+            "hard-reload" in instruction_text.lower() or "Hard-reload" in instruction_text,
         )
         _pass(results, "open instructions mention left-click sidebar workflow name")
         _pass(results, "open instructions omit right-click Insert guidance")
@@ -559,8 +563,10 @@ def run_simulations() -> list[tuple[str, str]]:
         "checkpoint={checkpoint}",
         "save_prefix={save_prefix}",
         "Automatic browser graph confirmation is unavailable.",
-        "left-click the workflow name",
+        "Left-click the exact ai_studio_prep_<uuid>.json filename",
         "File → Load as fallback",
+        "Hard-reload the entire browser tab",
+        "Do not use the Workflows sidebar Refresh icon",
         "Type YES to acknowledge experimental",
     ):
         _assert_true(f"notebook contains {needle!r}", needle in nb_text)
@@ -637,7 +643,7 @@ def run_simulations() -> list[tuple[str, str]]:
         def _mock_reachable2(_url=None, **_kw):
             return True
 
-        def _mock_put2(*, base_url=None, filename, content, overwrite=True, timeout=15.0):
+        def _mock_put2(*, base_url=None, filename, content, overwrite=True, full_info=True, timeout=15.0):
             load_bytes_holder[filename] = content
             return {"ok": True, "status_code": 200, "relative_path": f"workflows/{filename}", "error": ""}
 
