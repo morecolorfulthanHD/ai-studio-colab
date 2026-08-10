@@ -25,6 +25,11 @@ from .comfyui_userdata import (
     userdata_get_workflow,
     userdata_list_workflows,
 )
+from .comfyui_userdata_route_compat import (
+    explain_colab_proxy_failure,
+    inspect_userdata_route_patterns,
+    simulate_proxy_decoded_userdata_paths,
+)
 from .comfyui_workflow_integrity import (
     check_nodes_against_object_info,
     compare_workflow_structures,
@@ -210,7 +215,14 @@ def capture_live_environment(
             "prefer system_stats + web package.json + browser DevTools Network for the live build.",
             "Custom-node isolation uses ComfyUI --disable-all-custom-nodes temporarily; "
             "do not uninstall or delete packages for this investigation.",
+            "Package 4.8.3 live finding: localhost userdata registration/GET can PASS while "
+            "browser requests through Colab prod.colab.dev fail (Save As POST 405, prepared GET 404) "
+            "because the proxy decodes workflows%2F to workflows/ and stock aiohttp {file} is "
+            "single-segment. Package 4.8.4 applies reversible {file:.*} route compat.",
         ],
+        "colab_proxy_userdata_finding": explain_colab_proxy_failure(),
+        "userdata_route_compat": inspect_userdata_route_patterns(runtime),
+        "userdata_path_forms": simulate_proxy_decoded_userdata_paths(),
     }
 
 
@@ -269,6 +281,54 @@ def round_trip_test_instructions() -> list[str]:
         "5. If round-trip succeeds → failure is likely in AI Studio prepared/canonical structure.",
         "6. If round-trip fails → failure is likely registration/runtime/frontend behavior.",
     ]
+
+
+def _probe_userdata_path_forms(
+    *,
+    base_url: str | None,
+    filename: str,
+    timeout: float = 8.0,
+) -> dict[str, Any]:
+    """Probe encoded vs proxy-decoded nested userdata GET forms (read-only)."""
+    import urllib.parse
+
+    from .comfyui_userdata import _api_and_bare, _request, userdata_workflows_relpath
+
+    rel = userdata_workflows_relpath(filename)
+    encoded = urllib.parse.quote(rel, safe="")
+    decoded = rel  # literal slash form after Colab proxy decode
+    base = normalize_comfy_base_url(base_url)
+    results: dict[str, Any] = {
+        "relative_path": rel,
+        "encoded_form": f"/api/userdata/{encoded}",
+        "decoded_form": f"/api/userdata/{decoded}",
+        "encoded_get": None,
+        "decoded_get": None,
+    }
+    for label, path_tail in (
+        ("encoded_get", f"/userdata/{encoded}"),
+        ("decoded_get", f"/userdata/{decoded}"),
+    ):
+        last = {"ok": False, "status_code": 0, "url": "", "error": "unreachable"}
+        for url in _api_and_bare(base, path_tail):
+            status, body, err = _request("GET", url, timeout=timeout)
+            last = {
+                "ok": status == 200,
+                "status_code": status,
+                "url": url,
+                "bytes": len(body) if status == 200 else 0,
+                "error": err or ("" if status == 200 else f"status {status}"),
+            }
+            if status in {200, 404, 405}:
+                # Capture first conclusive response on preferred /api URL.
+                break
+        results[label] = last
+    results["browser_compatible_get_strategy"] = (
+        "multi_segment_route_or_decoded_path"
+        if (results["decoded_get"] or {}).get("ok")
+        else "encoded_only_or_unavailable"
+    )
+    return results
 
 
 def analyze_preparation_open(
@@ -385,21 +445,27 @@ def analyze_preparation_open(
             }
 
     root_cause_status = {
-        "status": "unproven",
+        "status": "proven_colab_proxy_userdata_routing",
         "statement": (
-            "Package 4.8.2 live failure is confirmed (sidebar visible, left-click blank canvas) "
-            "but the exact browser-side refusal reason is NOT yet proven without console/network "
-            "evidence and the known-good control result."
+            "Package 4.8.3 live evidence: AI Studio localhost userdata registration/GET PASS, "
+            "but browser through Colab prod.colab.dev FAILS — native Save As POST 405 and "
+            "prepared workflow GET 404 — because the proxy decodes workflows%2F to workflows/ "
+            "and stock aiohttp `/userdata/{file}` matches only one path segment. "
+            "This supersedes the serialization hypothesis. Package 4.8.4 applies reversible "
+            "`{file:.*}` route compatibility (upstream Comfy-Org/ComfyUI#12468)."
         ),
-        "do_not_speculate": True,
+        "do_not_speculate_serialization": True,
         "next_required_evidence": [
-            "known_good_saved_by_comfyui left-click result after hard-reload",
-            "browser console stack on AI Studio left-click",
-            "userdata GET response preview (object vs string)",
-            "structured diff vs known-good when available",
-            "custom-node isolation matrix if known-good also fails",
+            "After applying compat and restarting ComfyUI: browser GET decoded/encoded form returns 200",
+            "Hard-reload + left-click opens seven-node graph (BROWSER GRAPH OPEN still UNVERIFIED until confirmed)",
+            "Native Save As through Colab proxy succeeds (POST not 405)",
         ],
     }
+
+    route_compat = inspect_userdata_route_patterns(Path(comfyui_runtime))
+    path_probes = None
+    if env["comfyui_reachable"]:
+        path_probes = _probe_userdata_path_forms(base_url=base_url, filename=load_filename)
 
     return {
         **env,
@@ -428,6 +494,26 @@ def analyze_preparation_open(
         "userdata_get_sha256": userdata_get_sha or None,
         "userdata_get_starts_with_object": userdata_starts_with_object,
         "userdata_get_preview": userdata_body_preview or None,
+        "localhost_userdata_route_health": {
+            "reachable": env["comfyui_reachable"],
+            "listing_ok": bool(listing and listing.get("ok")),
+            "get_ok": bool(userdata_get and userdata_get.get("ok")),
+        },
+        "browser_compatible_proxy_route_strategy": (
+            "stock_encoded_percent_2f_breaks_under_colab_proxy;"
+            "compat_uses_aiohttp_{file:.*}_so_decoded_slash_paths_work"
+        ),
+        "userdata_path_form_probes": path_probes,
+        "userdata_route_compat": route_compat,
+        "compatibility_layer_installed_or_active": bool(route_compat.get("compatible")),
+        "prepared_workflow_retrievable_browser_compatible_route": bool(
+            (path_probes or {}).get("decoded_get", {}).get("ok")
+            or (
+                route_compat.get("compatible")
+                and userdata_get
+                and userdata_get.get("ok")
+            )
+        ),
         "known_good_control": known_good_analysis,
         "browser_graph_open": "UNVERIFIED",
         "server_registration": (
@@ -447,6 +533,7 @@ def analyze_preparation_open(
             else "INCOMPLETE_OR_UNVERIFIED"
         ),
         "root_cause": root_cause_status,
+        "colab_proxy_userdata_finding": explain_colab_proxy_failure(),
         "browser_evidence_instructions": browser_evidence_instructions(load_filename),
         "control_test_instructions": control_test_instructions(),
         "round_trip_test_instructions": round_trip_test_instructions(),
@@ -455,5 +542,7 @@ def analyze_preparation_open(
             "Do not uninstall or delete custom node packages for this test.",
             "Retest both known-good and AI Studio workflows in each state.",
             "Only pin/disable a specific extension after it is isolated.",
+            "Package 4.8.3 evidence showed custom nodes are NOT the primary failure boundary "
+            "once HTTP 404/405 on proxied userdata routes is confirmed.",
         ],
     }

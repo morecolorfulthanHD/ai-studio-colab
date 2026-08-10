@@ -53,25 +53,38 @@ Prepared artifacts land in:
 
 **Live Package 4.8.2 failure (operational acceptance NOT met):** Preparation `prep_870c685b-751a-4ed8-ac2c-ad12c4bae42b` had deterministic filename in the sidebar, ComfyUI reachable, userdata registered/verified/listed, list size match, schema valid, 7 nodes / 9 links, archival unchanged — yet after a full hard reload, left-clicking the exact workflow name did nothing and the canvas stayed blank. Server-side success alone is **not** browser graph loading.
 
-**Package 4.8.3 investigation posture:** Do not invent another speculative registration/serialization fix. Capture live environment + browser console/network evidence with `diagnose_live_comfyui_workflow_open.py`, compare against a known-good workflow saved by the *same* frontend (`ai_studio_known_good_control.json`), run integrity validation, and only then apply a narrow fix justified by that evidence. `open_prepared_workflow.py` now reports dual status:
+**Package 4.8.3 live investigation finding (supersedes serialization hypothesis):**
+
+| Path | Result |
+|------|--------|
+| SERVER/LOCALHOST registration + GET | PASS |
+| Browser through Colab `prod.colab.dev` — native Save As POST `/api/userdata/workflows%2F…` | FAIL **405** Allow: GET,HEAD |
+| Browser through Colab proxy — prepared workflow GET | FAIL **404** |
+
+Root cause: frontend builds `encodeURIComponent('workflows/<file>.json')` → `workflows%2F…`. The Colab Google reverse proxy decodes `%2F` to `/` before aiohttp. Stock ComfyUI registers `/userdata/{file}` where `{file}` matches **one** path segment, so `/api/userdata/workflows/<file>.json` misses the userdata handler and falls through to `web.static('/', web_root)` (GET/HEAD only).
+
+**Package 4.8.4 compatibility:** Reversible rewrite of installed `app/user_manager.py` routes to `{file:.*}` / `{dest:.*}` (same approach as upstream Comfy-Org/ComfyUI#12468), applied at install (`install.sh --execute`) and before notebook `launch_comfyui`. No workflow serialization change. No ComfyUI version pin. Restart ComfyUI after apply. `BROWSER GRAPH OPEN` remains UNVERIFIED until the user confirms left-click opens the graph.
+
+**Package 4.8.3 investigation posture:** Capture live environment + browser console/network evidence with `diagnose_live_comfyui_workflow_open.py`. `open_prepared_workflow.py` reports dual status:
 
 - `SERVER REGISTRATION: VERIFIED|PARTIAL|FAILED|UNVERIFIED`
 - `BROWSER GRAPH OPEN: UNVERIFIED` (never auto-claimed)
 
 **Live Package 4.8.1 failure (documented accurately):** The prepared workflow appeared in the Workflows sidebar, but left-click did not load the graph, right-click Insert did not work, dragging did not work, and the canvas remained blank. Successful filesystem placement or userdata byte retrieval alone was **not** treated as proof of browser graph loading.
 
-**Root cause tracing (frontend/user_manager, not guessed):** Discovery uses `GET /api/userdata?dir=workflows&recurse=true&split=false&full_info=true`. Open uses `GET /api/userdata/{encodeURIComponent('workflows/<file>.json')}` → parse JSON → validate as a workflow object → frontend graph-loading path. Save/register uses `POST /api/userdata/{encodeURIComponent(...)}?overwrite=true&full_info=true` with the raw workflow JSON body. `/api` routes are preferred to match frontend behavior; bare `/userdata` remains a compatibility fallback. Contributing Package 4.8.1 issues included collision sibling names (`_1`) leaving a stale sidebar entry, and sidebar Refresh after external registration (known frontend sync bug). Package 4.8.2 overwrites the deterministic `ai_studio_<prep_id>.json` name and verifies listing/schema/counts, but live left-click still failed — hence 4.8.3 diagnostics before any further load-path change.
+**Root cause tracing (frontend/user_manager):** Discovery uses `GET /api/userdata?dir=workflows&recurse=true&split=false&full_info=true`. Open uses `GET /api/userdata/{encodeURIComponent('workflows/<file>.json')}` → parse JSON → frontend graph-loading path. Save/register uses `POST …?overwrite=true&full_info=true` with raw JSON. `/api` preferred; bare `/userdata` fallback. Package 4.8.2 deterministic overwrite + listing checks remain; Package 4.8.4 makes those browser requests reachable through the Colab proxy.
 
 ## Loading prepared workflows
 
 1. Prepare via notebook **10. Workflow Library** or CLI.
-2. Run `open_prepared_workflow.py` (or notebook option 8) while ComfyUI is running when possible.
-3. Treat `SERVER REGISTRATION: VERIFIED` as server-side only; `BROWSER GRAPH OPEN` remains unverified until you confirm the canvas.
-4. Open the ComfyUI page and **hard-reload the entire browser tab** after external registration (do **not** use the Workflows sidebar Refresh icon for this test).
-5. Open the **Workflows** sidebar and **left-click** the exact deterministic `ai_studio_prep_*.json` filename.
-6. Confirm a graph with nodes appears; review parameters; click **Run** manually when ready.
-7. If left-click still fails, capture evidence with `diagnose_live_comfyui_workflow_open.py --preparation-id <prep_id> --json`, then run the known-good control Save As test. File → Load remains a truthful fallback.
-8. Automatic browser graph confirmation is unavailable — verify the canvas manually. Do not use right-click Insert, dragging, or expect automatic queueing.
-9. Autosync + Package 4.7 snapshots capture the **executed** graph (including manual edits).
+2. Ensure Package 4.8.4 userdata route compat is applied (automatic on Launch / `install.sh --execute`, or run `apply_comfyui_userdata_route_compat.py --apply`) and **restart ComfyUI**.
+3. Run `open_prepared_workflow.py` (or notebook option 8) while ComfyUI is running when possible.
+4. Treat `SERVER REGISTRATION: VERIFIED` as server-side only; `BROWSER GRAPH OPEN` remains unverified until you confirm the canvas.
+5. Open the ComfyUI page (Colab proxy URL) and **hard-reload the entire browser tab** after external registration (do **not** use the Workflows sidebar Refresh icon for this test).
+6. Open the **Workflows** sidebar and **left-click** the exact deterministic `ai_studio_prep_*.json` filename.
+7. Confirm a graph with nodes appears; review parameters; click **Run** manually when ready.
+8. If left-click still fails, re-run `diagnose_live_comfyui_workflow_open.py --preparation-id <prep_id> --json` and check `userdata_route_compat.compatible` plus encoded/decoded path probes. File → Load remains a truthful fallback.
+9. Automatic browser graph confirmation is unavailable — verify the canvas manually. Do not use right-click Insert, dragging, or expect automatic queueing.
+10. Autosync + Package 4.7 snapshots capture the **executed** graph (including manual edits).
 
-Use `diagnose_prepared_workflow_loading.py` for read-only server-side checks. Use `diagnose_live_comfyui_workflow_open.py` for environment/version capture, integrity, known-good comparison, and exact DevTools collection steps. Use `reprepare_workflow.py` to allocate a **new** preparation from an existing archive without mutating the original.
+Use `diagnose_prepared_workflow_loading.py` for read-only server-side checks. Use `diagnose_live_comfyui_workflow_open.py` for environment/version capture, integrity, proxy-route probes, and DevTools collection steps. Use `reprepare_workflow.py` to allocate a **new** preparation from an existing archive without mutating the original.

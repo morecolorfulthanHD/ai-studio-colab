@@ -811,6 +811,18 @@ main() {
   install_python_requirements
   manage_extra_model_paths
 
+  # Package 4.8.4: multi-segment userdata routes for Colab proxy (%2F decoded to /).
+  if [[ "${EXECUTE}" -eq 1 ]]; then
+    _script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    _repo_root="$(cd "${_script_dir}/../.." && pwd)"
+    if [[ -f "${_repo_root}/core/scripts/apply_comfyui_userdata_route_compat.py" ]]; then
+      log "Applying ComfyUI userdata route compatibility (Colab proxy)"
+      "${PYTHON}" "${_repo_root}/core/scripts/apply_comfyui_userdata_route_compat.py" \
+        --comfyui-runtime "${COMFYUI_DIR}" \
+        --apply || log "WARN: userdata route compat apply returned non-zero"
+    fi
+  fi
+
   phase "Complete"
   log "ComfyUI install/validation complete"
   log "Runtime: ${COMFYUI_DIR}"

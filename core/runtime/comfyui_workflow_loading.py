@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""Prepared workflow → ComfyUI frontend loading (Package 4.8.3).
+"""Prepared workflow → ComfyUI frontend loading (Package 4.8.4).
+
+Package 4.8.3 live evidence established the failure boundary:
+  Localhost userdata registration/GET PASS; browser through Colab prod.colab.dev
+  FAILS (native Save As POST 405, prepared GET 404) because the proxy decodes
+  workflows%2F to workflows/ and stock aiohttp `/userdata/{file}` is single-segment.
+  Serialization is NOT the primary cause. Package 4.8.4 applies reversible
+  `{file:.*}` userdata route compatibility at install/launch.
 
 Package 4.8.2 live operational acceptance FAILED:
   prep_870c685b-751a-4ed8-ac2c-ad12c4bae42b — userdata registered/verified/listed,
   schema 7/9, archival unchanged, but after hard-reload left-click left the canvas blank.
   Server registration alone is never treated as browser graph open.
-
-Package 4.8.1 dogfood notes (still relevant):
-  Userdata POST/GET verification succeeded and the workflow appeared in the
-  Workflows sidebar, but left-click/Insert/drag still did not show a graph.
-  If loadGraphData receives a non-object, it silently substitutes defaultGraph.
 
 Reverse-engineered mechanism (Comfy-Org/ComfyUI_frontend + ComfyUI user_manager):
   1. Sidebar discovery uses listUserDataFullInfo:
@@ -20,14 +22,13 @@ Reverse-engineered mechanism (Comfy-Org/ComfyUI_frontend + ComfyUI user_manager)
   3. Collision-safe sibling names (ai_studio_<id>_1.json) can leave an older
      broken ai_studio_<id>.json visible while registration targets the sibling.
 
-Loading method (still used; browser open remains unverified):
+Loading method (still used; browser open remains unverified until user confirms):
   - Build a frontend-compatible UI workflow load copy (do not mutate archival).
   - Write/overwrite deterministic: user/default/workflows/ai_studio_<prep_id>.json
   - POST the same bytes via /api/userdata/...&full_info=true
   - GET + SHA-256 + schema + graph integrity + listing size
   - Instruct hard-reload + left-click; never claim browser canvas confirmation.
   - Never call /prompt. No browser automation.
-  - Do not invent another speculative serialization fix without live evidence.
 """
 
 from __future__ import annotations
@@ -51,7 +52,7 @@ from .comfyui_workflow_integrity import validate_graph_integrity
 from .workflow_provenance import hash_ui_workflow
 
 COMFYUI_LOAD_SCHEMA_VERSION = "0.4"
-PACKAGE_VERSION = "4.8.3"
+PACKAGE_VERSION = "4.8.4"
 
 
 @dataclass

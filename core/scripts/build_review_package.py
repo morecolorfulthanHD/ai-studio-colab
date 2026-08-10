@@ -20,6 +20,9 @@ def collect_files() -> list[Path]:
     for runtime_file in sorted((REPO_ROOT / "core/runtime").glob("*.py")):
         paths.append(runtime_file)
 
+    add("core/comfyui/install.sh")
+    add("core/comfyui/README.md")
+
     for script_name in (
         "cli_activate.py",
         "repo_bootstrap.py",
@@ -75,11 +78,13 @@ def collect_files() -> list[Path]:
         "open_prepared_workflow.py",
         "diagnose_prepared_workflow_loading.py",
         "diagnose_live_comfyui_workflow_open.py",
+        "apply_comfyui_userdata_route_compat.py",
         "reprepare_workflow.py",
         "simulate_package48_workflow_library.py",
         "simulate_package481_prepared_workflow_hotfix.py",
         "simulate_package482_prepared_workflow_integration.py",
         "simulate_package483_live_workflow_open_diagnostics.py",
+        "simulate_package484_colab_userdata_route_compat.py",
         "runtime_report.py",
         "verify_models.py",
         "verify_generation.py",
