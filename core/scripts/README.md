@@ -37,6 +37,8 @@ Cross-engine utility scripts for bootstrap, validation, and batch processing.
 | `simulate_package48_workflow_library.py` | Package 4.8 workflow library, parameterized launch, readiness, and preparation simulations | No |
 | `simulate_package481_prepared_workflow_hotfix.py` | Package 4.8.1 userdata loading, project auto-resolve, notebook UX, and regression simulations | No |
 | `simulate_package482_prepared_workflow_integration.py` | Package 4.8.2 frontend-aligned loading, catalog completeness, expanded info/list simulations | No |
+| `simulate_package483_live_workflow_open_diagnostics.py` | Package 4.8.3 live open diagnostics, integrity, dual status, known-good compare | No |
+| `diagnose_live_comfyui_workflow_open.py` | Read-only live ComfyUI/frontend evidence capture for blank-canvas open failures | No |
 | `generation_info.py` | Show generation snapshot details (`--generation-id` as `gen_<uuid>` or bare UUID, `--json`) | No |
 | `export_generation.py` | Export generation snapshot to ZIP (`--generation-id`) | No |
 | `validate_generation_snapshot.py` | Validate snapshot integrity (`--generation-id`, `--all`) | No |

@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
-"""Prepared workflow → ComfyUI frontend loading (Package 4.8.2).
+"""Prepared workflow → ComfyUI frontend loading (Package 4.8.3).
 
-Root cause (live Colab Package 4.8.1 dogfood):
+Package 4.8.2 live operational acceptance FAILED:
+  prep_870c685b-751a-4ed8-ac2c-ad12c4bae42b — userdata registered/verified/listed,
+  schema 7/9, archival unchanged, but after hard-reload left-click left the canvas blank.
+  Server registration alone is never treated as browser graph open.
+
+Package 4.8.1 dogfood notes (still relevant):
   Userdata POST/GET verification succeeded and the workflow appeared in the
   Workflows sidebar, but left-click/Insert/drag still did not show a graph.
+  If loadGraphData receives a non-object, it silently substitutes defaultGraph.
 
 Reverse-engineered mechanism (Comfy-Org/ComfyUI_frontend + ComfyUI user_manager):
   1. Sidebar discovery uses listUserDataFullInfo:
@@ -11,23 +17,17 @@ Reverse-engineered mechanism (Comfy-Org/ComfyUI_frontend + ComfyUI user_manager)
   2. Left-click leaf calls workflowService.openWorkflow → ComfyWorkflow.load:
        GET /api/userdata/{encodeURIComponent('workflows/<file>.json')}
        → JSON.parse → app.loadGraphData(graph)
-  3. If loadGraphData receives a non-object (e.g. parse failure / wrong shape),
-     it silently substitutes the empty defaultGraph — looking like “click did
-     nothing / blank canvas”.
-  4. Collision-safe sibling names (ai_studio_<id>_1.json) can leave an older
+  3. Collision-safe sibling names (ai_studio_<id>_1.json) can leave an older
      broken ai_studio_<id>.json visible while registration targets the sibling.
-     The user left-clicks the broken primary name.
 
-Verified loading method (Package 4.8.2):
-  - Build a frontend-compatible UI workflow (version 0.4 schema fields).
-  - Write/overwrite the deterministic loading copy:
-      user/default/workflows/ai_studio_<prep_id>.json
-  - POST the same bytes via /api/userdata/...&full_info=true (frontend Save path).
-  - GET and verify SHA-256 + JSON parse + required schema fields + node/link counts.
-  - Confirm the filename appears in the frontend full_info listing with matching size.
-  - Instruct left-click of that exact filename; warn against sidebar Refresh
-    (known frontend sync bug). Never claim browser canvas confirmation.
+Loading method (still used; browser open remains unverified):
+  - Build a frontend-compatible UI workflow load copy (do not mutate archival).
+  - Write/overwrite deterministic: user/default/workflows/ai_studio_<prep_id>.json
+  - POST the same bytes via /api/userdata/...&full_info=true
+  - GET + SHA-256 + schema + graph integrity + listing size
+  - Instruct hard-reload + left-click; never claim browser canvas confirmation.
   - Never call /prompt. No browser automation.
+  - Do not invent another speculative serialization fix without live evidence.
 """
 
 from __future__ import annotations
@@ -47,10 +47,11 @@ from .comfyui_userdata import (
     userdata_list_workflows,
     userdata_put_workflow,
 )
+from .comfyui_workflow_integrity import validate_graph_integrity
 from .workflow_provenance import hash_ui_workflow
 
 COMFYUI_LOAD_SCHEMA_VERSION = "0.4"
-PACKAGE_VERSION = "4.8.2"
+PACKAGE_VERSION = "4.8.3"
 
 
 @dataclass
@@ -71,10 +72,14 @@ class OpenPreparedResult:
     userdata_listed: bool = False
     userdata_list_size_matches: bool = False
     schema_valid: bool = False
+    integrity_valid: bool = False
+    integrity_errors: list[str] = field(default_factory=list)
     comfyui_reachable: bool = False
     node_count: int = 0
     link_count: int = 0
     dry_run: bool = False
+    server_registration: str = "UNVERIFIED"
+    browser_graph_open: str = "UNVERIFIED"
     messages: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     instructions: list[str] = field(default_factory=list)
@@ -84,8 +89,15 @@ class OpenPreparedResult:
     def ok(self) -> bool:
         return not self.errors
 
+    @property
+    def server_registration_verified(self) -> bool:
+        return self.server_registration == "VERIFIED"
+
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        payload = asdict(self)
+        payload["server_registration_verified"] = self.server_registration_verified
+        payload["operational_browser_open_accepted"] = False
+        return payload
 
 
 def file_sha256(path: Path) -> str:
@@ -207,8 +219,11 @@ def open_prepared_workflow_for_comfyui(
     result.verification_limits = [
         "Browser canvas/graph rendering is not verified programmatically.",
         "Left-click open is instructed for the user; AI Studio does not automate the browser.",
-        "Server-side checks: filesystem copy, /api/userdata POST+GET, full_info listing, schema, node/link counts.",
+        "Server-side checks: filesystem copy, /api/userdata POST+GET, full_info listing, schema, integrity, node/link counts.",
+        "SERVER REGISTRATION VERIFIED is not operational acceptance of browser graph open.",
     ]
+    result.browser_graph_open = "UNVERIFIED"
+    result.server_registration = "UNVERIFIED"
     source = source_workflow_path
     result.source_path = str(source)
     if not source.is_file():
@@ -232,6 +247,12 @@ def open_prepared_workflow_for_comfyui(
     if schema_errors:
         result.errors.append("Frontend load schema invalid: " + "; ".join(schema_errors))
         return result
+    integrity_errors = validate_graph_integrity(load_data)
+    result.integrity_errors = integrity_errors
+    result.integrity_valid = not integrity_errors
+    if integrity_errors:
+        result.errors.append("Graph integrity invalid: " + "; ".join(integrity_errors))
+        return result
 
     result.comfyui_load_workflow_hash = hash_ui_workflow(load_data)
     result.load_schema_version = str(load_data.get("version") or COMFYUI_LOAD_SCHEMA_VERSION)
@@ -254,6 +275,8 @@ def open_prepared_workflow_for_comfyui(
         result.messages.append("Dry run — no filesystem write or userdata POST performed.")
         result.comfyui_reachable = comfyui_reachable(base_url)
         result.instructions = _instructions(result, registered=False, verified=False)
+        result.server_registration = "UNVERIFIED"
+        result.browser_graph_open = "UNVERIFIED"
         return result
 
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -355,6 +378,21 @@ def open_prepared_workflow_for_comfyui(
         registered=result.userdata_registered and result.userdata_verified,
         verified=result.userdata_verified,
     )
+    if (
+        result.userdata_registered
+        and result.userdata_verified
+        and result.userdata_listed
+        and result.userdata_list_size_matches
+        and result.schema_valid
+        and result.integrity_valid
+        and result.archival_unchanged
+    ):
+        result.server_registration = "VERIFIED"
+    elif result.filesystem_destination and Path(result.filesystem_destination).is_file():
+        result.server_registration = "PARTIAL"
+    else:
+        result.server_registration = "FAILED"
+    result.browser_graph_open = "UNVERIFIED"
     return result
 
 

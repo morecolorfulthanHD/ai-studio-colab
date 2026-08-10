@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Register a prepared workflow for ComfyUI frontend loading (Package 4.8.2)."""
+"""Register a prepared workflow for ComfyUI frontend loading (Package 4.8.3).
+
+Server registration success is NOT operational browser-open acceptance.
+"""
 
 from __future__ import annotations
 
@@ -27,7 +30,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
             "Register a prepared workflow with ComfyUI (userdata + loading copy). "
-            "Does not auto-queue or open the browser graph."
+            "Does not auto-queue or open the browser graph. "
+            "Server registration VERIFIED != browser graph open."
         )
     )
     parser.add_argument("--preparation-id", required=True)
@@ -79,8 +83,11 @@ def main() -> int:
         print(f"Userdata listed:    {result.userdata_listed}")
         print(f"List size match:    {result.userdata_list_size_matches}")
         print(f"Schema valid:       {result.schema_valid}")
+        print(f"Integrity valid:    {result.integrity_valid}")
         print(f"Nodes/links:        {result.node_count}/{result.link_count}")
         print(f"Archival unchanged: {result.archival_unchanged}")
+        print(f"SERVER REGISTRATION:{result.server_registration}")
+        print(f"BROWSER GRAPH OPEN: {result.browser_graph_open}")
         for message in result.messages:
             print(f"Note: {message}")
         print()
@@ -93,12 +100,15 @@ def main() -> int:
 
     if not result.ok:
         return 1
-    # Full success requires registration + GET verify + discovery listing when Comfy is up.
     if args.dry_run:
+        print("\nSERVER REGISTRATION: UNVERIFIED (dry-run)")
+        print("BROWSER GRAPH OPEN: UNVERIFIED")
         return 0
     if not result.comfyui_reachable:
+        print("\nSERVER REGISTRATION: PARTIAL", file=sys.stderr)
+        print("BROWSER GRAPH OPEN: UNVERIFIED", file=sys.stderr)
         print(
-            "\nRESULT: PARTIAL — loading copy written; ComfyUI unreachable for userdata registration.",
+            "Loading copy written; ComfyUI unreachable for userdata registration.",
             file=sys.stderr,
         )
         return 2
@@ -108,16 +118,23 @@ def main() -> int:
         and result.userdata_listed
         and result.userdata_list_size_matches
         and result.schema_valid
+        and result.integrity_valid
         and result.archival_unchanged
     )
     if not full:
+        print("\nSERVER REGISTRATION: PARTIAL", file=sys.stderr)
+        print("BROWSER GRAPH OPEN: UNVERIFIED", file=sys.stderr)
         print(
-            "\nRESULT: PARTIAL — loading copy written; userdata verification or discovery incomplete.",
+            "Loading copy written; userdata verification or discovery incomplete.",
             file=sys.stderr,
         )
         return 2
-    print("\nRESULT: OK — prepared workflow registered with ComfyUI userdata.")
-    print("Limit: browser canvas open was not verified programmatically.")
+    print("\nSERVER REGISTRATION: VERIFIED")
+    print("BROWSER GRAPH OPEN: UNVERIFIED")
+    print(
+        "Operational acceptance requires a live hard-reload + left-click that "
+        "opens the graph on the ComfyUI canvas."
+    )
     return 0
 
 
