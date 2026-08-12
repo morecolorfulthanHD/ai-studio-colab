@@ -39,6 +39,8 @@ Cross-engine utility scripts for bootstrap, validation, and batch processing.
 | `simulate_package482_prepared_workflow_integration.py` | Package 4.8.2 frontend-aligned loading, catalog completeness, expanded info/list simulations | No |
 | `simulate_package483_live_workflow_open_diagnostics.py` | Package 4.8.3 live open diagnostics, integrity, dual status, known-good compare | No |
 | `simulate_package484_colab_userdata_route_compat.py` | Package 4.8.4 Colab proxy userdata `%2F` route compatibility | No |
+| `simulate_package485_prepared_execution_autosync.py` | Package 4.8.5 prepared-workflow execution → Drive autosync | No |
+| `diagnose_prepared_execution_autosync.py` | Read-only prepared execution / watcher / history / evidence diagnostic | No |
 | `diagnose_live_comfyui_workflow_open.py` | Read-only live ComfyUI/frontend evidence capture for blank-canvas open failures | No |
 | `apply_comfyui_userdata_route_compat.py` | Apply/inspect reversible `{file:.*}` userdata route compat for Colab proxy | Yes (patches installed ComfyUI routes only) |
 | `generation_info.py` | Show generation snapshot details (`--generation-id` as `gen_<uuid>` or bare UUID, `--json`) | No |

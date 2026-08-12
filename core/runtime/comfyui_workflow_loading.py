@@ -205,6 +205,8 @@ def build_comfyui_load_workflow(archival: dict[str, Any]) -> dict[str, Any]:
         if isinstance(ai, dict):
             ai["comfyui_load_schema_version"] = COMFYUI_LOAD_SCHEMA_VERSION
             ai["package_version_open"] = PACKAGE_VERSION
+            # extra is ignored by hash_ui_workflow; stamp after other extra fields.
+            ai["comfyui_load_workflow_hash"] = hash_ui_workflow(data)
     return data
 
 

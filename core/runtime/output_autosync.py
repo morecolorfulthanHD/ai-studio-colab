@@ -27,10 +27,20 @@ from typing import Any, Callable
 
 from .comfyui_events import (
     DEFAULT_COMFY_BASE,
+    collect_named_file_mentions,
     extract_output_files,
     fetch_history,
+    history_prompt_has_save_image,
     parse_ws_message,
+    prompt_execution_epoch,
+    save_image_prefixes,
 )
+
+AMBIGUOUS_PREFIX_RECOVERY = "ambiguous_saveimage_prefix_recovery"
+INSUFFICIENT_ATTRIBUTION_EVIDENCE = "insufficient_attribution_evidence"
+COMPETITOR_CHECK_UNAVAILABLE = "competitor_check_unavailable"
+PREFIX_MTIME_WINDOW_SECONDS = 180.0
+PREFIX_MTIME_LOOKBACK_SECONDS = 5.0
 from .generation_evidence_ledger import (
     EvidenceLedger,
     EvidenceRecord,
@@ -345,6 +355,17 @@ def copy_with_verification(
     return None, "failed", retries, last_error
 
 
+def _meta_from_local_path(comfy_output_dir: Path, path: Path, node_id: str) -> dict[str, Any]:
+    rel = path.relative_to(comfy_output_dir)
+    return {
+        "node_id": str(node_id),
+        "filename": path.name,
+        "subfolder": "" if rel.parent == Path(".") else str(rel.parent).replace("\\", "/"),
+        "type": "output",
+        "kind": "images",
+    }
+
+
 class OutputAutoSyncService:
     def __init__(
         self,
@@ -426,6 +447,13 @@ class OutputAutoSyncService:
         record.mask_filenames = list(payload.get("mask_filenames") or [])
         record.provenance_status = str(payload.get("provenance_status") or "")
         record.missing_provenance_fields = list(payload.get("missing_provenance_fields") or [])
+        record.preparation_id = str(payload.get("preparation_id") or record.preparation_id)
+        record.prepared_workflow_hash = str(
+            payload.get("prepared_workflow_hash") or record.prepared_workflow_hash
+        )
+        record.comfyui_load_workflow_hash = str(
+            payload.get("comfyui_load_workflow_hash") or record.comfyui_load_workflow_hash
+        )
 
     def _mirror_verified_to_project(self, source: Path, capability: str) -> str:
         if self.active_project is None:
@@ -788,9 +816,41 @@ class OutputAutoSyncService:
         output_metas = extract_output_files(entry)
         records: list[EvidenceRecord] = []
         if not output_metas:
+            analysis = self.analyze_saveimage_prefix_recovery(entry, prompt_id=prompt_id)
+            reason = str(
+                analysis.get("attribution_reason") or analysis.get("reason") or ""
+            )
+            recovered = list(analysis.get("recoverable_files") or [])
+            if recovered:
+                output_metas = recovered
+                self.status.messages.append(
+                    f"Prompt {prompt_id}: recovered Save Image output via {reason}."
+                )
+            elif reason:
+                self.status.messages.append(f"Prompt {prompt_id}: {reason}")
+                if reason in {
+                    AMBIGUOUS_PREFIX_RECOVERY,
+                    INSUFFICIENT_ATTRIBUTION_EVIDENCE,
+                    COMPETITOR_CHECK_UNAVAILABLE,
+                } or analysis.get("prefix_recovery_ambiguous"):
+                    self.status.last_completed_prompt = prompt_id
+                    self.recompute_counters()
+                    self.write_status()
+                    return records, False
+        if not output_metas:
             if history_entry_completed(entry):
-                self.status.messages.append(f"Prompt {prompt_id} produced no eligible outputs.")
                 self.status.last_completed_prompt = prompt_id
+                if history_prompt_has_save_image(entry):
+                    # SaveImage ran or is expected; do not mark seen — history/local
+                    # may become extractable on the next poll/reconcile.
+                    self.status.messages.append(
+                        f"Prompt {prompt_id} completed with SaveImage but no extractable "
+                        "history outputs yet; leaving retryable."
+                    )
+                    self.recompute_counters()
+                    self.write_status()
+                    return records, False
+                self.status.messages.append(f"Prompt {prompt_id} produced no eligible outputs.")
                 self.recompute_counters()
                 self.write_status()
                 return records, True
@@ -832,6 +892,138 @@ class OutputAutoSyncService:
                 if record.sync_status == "pending" and "awaiting_stable_file" in (record.messages or []):
                     needs_retry = True
         return records, not needs_retry
+
+    def _verified_local_paths(self) -> set[str]:
+        return {
+            str(row.get("local_path") or "")
+            for row in self.ledger.read_all()
+            if str(row.get("sync_status") or "") == "verified"
+        }
+
+    def _competing_unresolved_prompt_ids(
+        self, *, prefix: str, exclude_prompt_id: str
+    ) -> tuple[list[str], bool]:
+        """Other unverified history prompts that share the same SaveImage prefix.
+
+        Returns (competitors, check_available). A failed history lookup is
+        unavailable — never treated as proof that there are no competitors.
+        """
+        try:
+            history = fetch_history(base_url=self.base_url)
+        except RuntimeError:
+            return [], False
+        verified_prompt_ids = {
+            str(row.get("prompt_id") or "")
+            for row in self.ledger.read_all()
+            if str(row.get("sync_status") or "") == "verified"
+        }
+        competitors: list[str] = []
+        for other_id, other_entry in history.items():
+            if not isinstance(other_entry, dict):
+                continue
+            other_id_s = str(other_id)
+            if other_id_s == exclude_prompt_id or other_id_s in verified_prompt_ids:
+                continue
+            other_prefixes = {item[1] for item in save_image_prefixes(other_entry)}
+            if prefix in other_prefixes:
+                competitors.append(other_id_s)
+        return competitors, True
+
+    def analyze_saveimage_prefix_recovery(
+        self,
+        entry: dict[str, Any],
+        *,
+        prompt_id: str,
+    ) -> dict[str, Any]:
+        """Fail-closed attribution. Never newest-alone or unique-prefix-alone."""
+        prefixes = save_image_prefixes(entry)
+        prefix = prefixes[0][1] if prefixes else ""
+        node_id = prefixes[0][0] if prefixes else ""
+        named = collect_named_file_mentions(entry)
+        verified_paths = self._verified_local_paths()
+        local_candidates: list[Path] = []
+        if prefix and self.comfy_output_dir.is_dir():
+            local_candidates = [
+                path
+                for path in self.comfy_output_dir.rglob("*")
+                if path.is_file()
+                and path.name.startswith(prefix)
+                and is_eligible_output(path)
+                and str(path) not in verified_paths
+            ]
+        execution_ts = prompt_execution_epoch(entry)
+        window_candidates: list[Path] = []
+        if execution_ts is not None:
+            lo = execution_ts - PREFIX_MTIME_LOOKBACK_SECONDS
+            hi = execution_ts + PREFIX_MTIME_WINDOW_SECONDS
+            window_candidates = [
+                path
+                for path in local_candidates
+                if lo <= path.stat().st_mtime <= hi
+            ]
+
+        if prefix:
+            competitors, competitor_check_available = self._competing_unresolved_prompt_ids(
+                prefix=prefix,
+                exclude_prompt_id=prompt_id,
+            )
+        else:
+            competitors, competitor_check_available = [], True
+
+        recoverable: list[dict[str, Any]] = []
+        reason = "no_candidate"
+        ambiguous = False
+
+        # 1. Exact filename/subfolder in this history entry — does not need prefix attribution.
+        for mention in named:
+            local_path = resolve_comfy_output_path(
+                self.comfy_output_dir,
+                filename=mention["filename"],
+                subfolder=mention.get("subfolder") or "",
+            )
+            if local_path.is_file() and is_eligible_output(local_path) and str(local_path) not in verified_paths:
+                item = dict(mention)
+                if not item.get("node_id"):
+                    item["node_id"] = node_id
+                recoverable.append(item)
+        if recoverable:
+            reason = "exact_history_filename"
+        elif execution_ts is None:
+            # 2. No timestamp → unique leftover files are not attributable.
+            reason = INSUFFICIENT_ATTRIBUTION_EVIDENCE
+        elif not competitor_check_available:
+            # 3. Cannot prove the candidate is uncontested.
+            reason = COMPETITOR_CHECK_UNAVAILABLE
+        elif len(window_candidates) == 1 and not competitors:
+            # 4–5. Exactly one in-window unverified prefix candidate, competition known empty.
+            reason = "unique_prefix_and_execution_timestamp"
+            recoverable = [
+                _meta_from_local_path(self.comfy_output_dir, window_candidates[0], node_id)
+            ]
+        elif len(window_candidates) > 1 or (window_candidates and competitors):
+            # 6. More than one in-window file, or another unresolved same-prefix prompt.
+            ambiguous = True
+            reason = AMBIGUOUS_PREFIX_RECOVERY
+        elif local_candidates and not window_candidates:
+            reason = "mtime_inconsistent_with_prompt"
+
+        return {
+            "saveimage_prefix": prefix,
+            "named_files_in_history": named,
+            "exact_history_file_count": len(named),
+            "local_candidates": [str(path) for path in local_candidates],
+            "prefix_candidate_count": len(local_candidates),
+            "prefix_recovery_candidate_count": len(local_candidates),
+            "execution_timestamp_available": execution_ts is not None,
+            "timestamp_window_candidate_count": len(window_candidates),
+            "competitor_check_available": competitor_check_available,
+            "competitor_check_status": "known" if competitor_check_available else "unavailable",
+            "prefix_recovery_ambiguous": ambiguous,
+            "competing_unresolved_prompt_ids": competitors,
+            "recoverable_files": recoverable,
+            "attribution_reason": reason,
+            "reason": reason,
+        }
 
     def handle_ws_payload(self, payload: dict[str, Any]) -> tuple[list[EvidenceRecord], bool]:
         """Handle a websocket payload. Returns (records, fully_resolved)."""
@@ -907,11 +1099,14 @@ class OutputAutoSyncService:
         self.write_status()
         return records
 
-    def reconcile_pending(self) -> list[EvidenceRecord]:
+    def reconcile_pending(self, *, history_timeout: float | None = None) -> list[EvidenceRecord]:
         """Retry unverified ledger rows, then discover unrecorded history (safety net)."""
         records = self.retry_unverified_from_ledger()
         try:
-            history = fetch_history(base_url=self.base_url)
+            kwargs: dict[str, Any] = {"base_url": self.base_url}
+            if history_timeout is not None:
+                kwargs["timeout"] = history_timeout
+            history = fetch_history(**kwargs)
         except RuntimeError as exc:
             self.status.watcher = "WARN"
             self.status.messages.append(str(exc))

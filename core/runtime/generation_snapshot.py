@@ -189,11 +189,17 @@ def build_metadata_snapshot(
 
     preparation_id = record.preparation_id or prov.preparation_id or ""
     prepared_workflow_hash = record.prepared_workflow_hash or prov.prepared_workflow_hash or ""
+    comfyui_load_workflow_hash = (
+        record.comfyui_load_workflow_hash or prov.comfyui_load_workflow_hash or ""
+    )
     canonical_workflow_identifier = ""
     ai_meta = extract_ai_studio_extra(ui_workflow)
     if ai_meta:
         preparation_id = preparation_id or str(ai_meta.get("preparation_id") or "")
         prepared_workflow_hash = prepared_workflow_hash or str(ai_meta.get("prepared_workflow_hash") or "")
+        comfyui_load_workflow_hash = comfyui_load_workflow_hash or str(
+            ai_meta.get("comfyui_load_workflow_hash") or ""
+        )
         canonical_workflow_identifier = str(ai_meta.get("workflow_identifier") or "")
 
     def _nullable(value: Any) -> Any:
@@ -252,6 +258,7 @@ def build_metadata_snapshot(
         "preparation_id": _nullable(preparation_id),
         "prepared_workflow_hash": _nullable(prepared_workflow_hash),
         "canonical_workflow_identifier": _nullable(canonical_workflow_identifier),
+        "comfyui_load_workflow_hash": _nullable(comfyui_load_workflow_hash),
     }
 
 

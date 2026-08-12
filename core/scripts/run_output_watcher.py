@@ -77,6 +77,41 @@ INDEX_NAME = "output_watcher_processed.json"
 LOG_NAME = "output_watcher.log"
 DEFAULT_RECONCILE_SECONDS = 15.0
 STALE_VALIDATION_GRACE_SECONDS = 2.0
+INITIAL_HISTORY_ATTEMPTS = 5
+INITIAL_HISTORY_RETRY_SECONDS = 2.0
+INITIAL_HISTORY_TIMEOUT_SECONDS = 3.0
+
+
+def initial_history_reconcile(
+    service: OutputAutoSyncService,
+    *,
+    attempts: int = INITIAL_HISTORY_ATTEMPTS,
+    retry_seconds: float = INITIAL_HISTORY_RETRY_SECONDS,
+    history_timeout: float = INITIAL_HISTORY_TIMEOUT_SECONDS,
+    sleep_fn: Callable[[float], None] = time.sleep,
+) -> tuple[list[Any], bool, int]:
+    """Bounded startup reconcile. Does not report OK until /history succeeds.
+
+    A single transient /history failure must not kill the watcher. After the
+    last failed attempt the caller should mark FAIL and exit.
+    """
+    recovered: list[Any] = []
+    for attempt in range(1, max(1, attempts) + 1):
+        recovered = service.reconcile_pending(history_timeout=history_timeout)
+        if service.status.last_history_poll:
+            return recovered, True, attempt
+        service.status.watcher = "WARN"
+        service.status.ownership_state = "current_runtime"
+        service.status.process_alive = True
+        service.status.heartbeat = service.status.heartbeat or ""
+        service.status.last_error = (
+            f"Initial ComfyUI history reconciliation did not succeed "
+            f"(attempt {attempt}/{attempts})."
+        )
+        service.write_status()
+        if attempt < attempts:
+            sleep_fn(retry_seconds)
+    return recovered, False, max(1, attempts)
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
@@ -565,16 +600,20 @@ def main() -> int:
 
         # Reconcile before claiming healthy. This recovers prompts completed while
         # the previous/absent watcher was not running, without a manual --once.
+        # Bounded retries: one transient /history miss must not kill the watcher.
         service.active_project = ProjectWorkspace(bundle.path("drive_root")).get_active_project()
-        recovered = service.reconcile_pending()
-        service.touch_heartbeat(source="poll")
-        if not service.status.last_history_poll:
+        recovered, history_ok, attempts_used = initial_history_reconcile(service)
+        if not history_ok:
             service.status.watcher = "FAIL"
             service.status.ownership_state = "stale_heartbeat"
-            service.status.last_error = "Initial ComfyUI history reconciliation did not succeed."
+            service.status.last_error = (
+                "Initial ComfyUI history reconciliation did not succeed "
+                f"after {attempts_used} attempt(s)."
+            )
             service.write_status()
             _append_log(log_path, service.status.last_error)
             return 1
+        service.touch_heartbeat(source="poll")
         service.status.watcher = "OK"
         service.write_status()
         _append_log(

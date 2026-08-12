@@ -120,6 +120,7 @@ class EvidenceRecord:
     workflow_snapshot_status: str = ""
     preparation_id: str = ""
     prepared_workflow_hash: str = ""
+    comfyui_load_workflow_hash: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)

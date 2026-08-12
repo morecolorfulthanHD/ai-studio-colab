@@ -562,6 +562,7 @@ class ExecutionProvenance:
     missing_provenance_fields: list[str] = field(default_factory=list)
     preparation_id: str = ""
     prepared_workflow_hash: str = ""
+    comfyui_load_workflow_hash: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -594,6 +595,7 @@ class ExecutionProvenance:
             "missing_provenance_fields": list(self.missing_provenance_fields),
             "preparation_id": self.preparation_id,
             "prepared_workflow_hash": self.prepared_workflow_hash,
+            "comfyui_load_workflow_hash": self.comfyui_load_workflow_hash,
         }
 
 
@@ -664,6 +666,10 @@ def extract_execution_provenance(
             canonical = str(ai_meta.get("canonical_workflow_hash") or "")
             if canonical and ui_hash != canonical:
                 provenance.prepared_workflow_hash = ui_hash
+        if ai_meta.get("comfyui_load_workflow_hash"):
+            provenance.comfyui_load_workflow_hash = str(
+                ai_meta.get("comfyui_load_workflow_hash") or ""
+            )
     elif prompt_nodes:
         provenance.workflow_hash = provenance.api_prompt_hash
         provenance.workflow_hash_type = HASH_TYPE_API

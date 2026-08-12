@@ -63,7 +63,13 @@ Prepared artifacts land in:
 
 Root cause: frontend builds `encodeURIComponent('workflows/<file>.json')` → `workflows%2F…`. The Colab Google reverse proxy decodes `%2F` to `/` before aiohttp. Stock ComfyUI registers `/userdata/{file}` where `{file}` matches **one** path segment, so `/api/userdata/workflows/<file>.json` misses the userdata handler and falls through to `web.static('/', web_root)` (GET/HEAD only).
 
-**Package 4.8.4 compatibility:** Reversible rewrite of installed `app/user_manager.py` routes to `{file:.*}` / `{dest:.*}` (same approach as upstream Comfy-Org/ComfyUI#12468), applied at install (`install.sh --execute`) and before notebook `launch_comfyui`. No workflow serialization change. No ComfyUI version pin. Restart ComfyUI after apply. `BROWSER GRAPH OPEN` remains UNVERIFIED until the user confirms left-click opens the graph.
+**Package 4.8.4 compatibility:** Reversible rewrite of installed `app/user_manager.py` routes to `{file:.*}` / `{dest:.*}` (same approach as upstream Comfy-Org/ComfyUI#12468), applied at install (`install.sh --execute`) and before notebook `launch_comfyui`. No workflow serialization change. No ComfyUI version pin. Restart ComfyUI after apply.
+
+**Live Package 4.8.4 browser acceptance (partial):** Native ComfyUI persistence/open worked. Prepared workflow `prep_870c685b-751a-4ed8-ac2c-ad12c4bae42b` (`base/txt2img`, project `mountain-demo`) appeared in the sidebar, left-click opened the seven-node graph, and Run generated a local image. That live image did **not** appear in `AI_Studio/outputs/` or `AI_Studio/projects/mountain-demo/outputs/`.
+
+**Package 4.8.5:** The live symptom (ComfyUI Save Image preview present; both Drive trees empty) is consistent with a dead watcher **or** an unresolved completed-history output. Live Colab was not available during implementation, so neither the exact history shape of `prep_870c685b-751a-4ed8-ac2c-ad12c4bae42b` nor watcher liveness during that run is proven.
+
+Proven from code: flattened-only extraction could miss nested history shapes; a completed SaveImage prompt could become permanently resolved without a usable file; a single failed initial `/history` poll could exit the watcher and leave Full mode running. Package 4.8.5 keeps SaveImage prompts retryable, accepts nested `ui`/`output` images, uses **fail-closed** prefix recovery (never newest-alone, never unique-prefix-alone, never when competitor history lookup is unavailable), retries initial history access for a bounded window, and copies preparation linkage onto evidence + snapshots. No userdata-route change. No `/prompt`. Live Colab acceptance is required to identify which path caused the observed run.
 
 **Package 4.8.3 investigation posture:** Capture live environment + browser console/network evidence with `diagnose_live_comfyui_workflow_open.py`. `open_prepared_workflow.py` reports dual status:
 
