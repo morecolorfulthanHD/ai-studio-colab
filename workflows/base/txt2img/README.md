@@ -9,7 +9,9 @@ Generate an image from a text prompt using an SD 1.5 checkpoint.
 ## Library
 
 - Manifest: `manifest.json` (parameter schema, statuses, workflow hash)
-- Prepare: `python core/scripts/prepare_workflow.py --workflow base/txt2img --param positive_prompt="..."`
+- Prepare: `python core/scripts/prepare_workflow.py --workflow base/txt2img --param positive_prompt="..." --param seed_mode=fixed`
+- `seed_mode=fixed` (default) keeps KSampler `control_after_generate=fixed` for reproducible repeats
+- `seed_mode=randomize` uses ComfyUI's native `control_after_generate=randomize`
 - Production status: **ready** / quality **accepted**
 
 See [docs/workflow-library.md](../../../docs/workflow-library.md).

@@ -60,6 +60,10 @@ def _coerce_value(param_name: str, spec: dict[str, Any], raw: Any) -> tuple[Any,
             text = text.strip() if isinstance(raw, str) else str(raw)
         if required and not text:
             errors.append(f"{param_name}: required string parameter is empty")
+        allowed = spec.get("allowed_values") or []
+        if allowed and text and text not in allowed:
+            expected = ", ".join(str(v) for v in allowed)
+            errors.append(f"Invalid value for {param_name}. Expected one of: {expected}.")
         return text, errors
 
     if param_type == "boolean":
@@ -112,7 +116,8 @@ def _coerce_value(param_name: str, spec: dict[str, Any], raw: Any) -> tuple[Any,
         text = str(raw).strip()
         allowed = spec.get("allowed_values") or []
         if allowed and text not in allowed:
-            errors.append(f"{param_name}: value {text!r} not in allowed_values")
+            expected = ", ".join(str(v) for v in allowed)
+            errors.append(f"Invalid value for {param_name}. Expected one of: {expected}.")
         return text, errors
 
     errors.append(f"{param_name}: unsupported parameter type {param_type!r}")

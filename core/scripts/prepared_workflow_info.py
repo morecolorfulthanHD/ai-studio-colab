@@ -19,13 +19,33 @@ _activate.activate(__file__)
 from core.runtime.preparation_identity import InvalidPreparationIdError, normalize_preparation_id
 from core.runtime.prepared_workflow_index import find_by_preparation_id, preparations_log_path
 from core.runtime.registry_loader import RegistryLoader, find_repo_root
+from core.runtime.seed_mode import (
+    extract_ksampler_seed,
+    resolve_control_after_generate,
+    resolve_seed_mode,
+)
 
 
-def _load_metadata(prepared_dir: Path, preparation_id: str) -> dict:
-    metadata_path = prepared_dir / f"{preparation_id}.metadata.json"
-    if not metadata_path.is_file():
+def _load_json(path: Path) -> dict:
+    if not path.is_file():
         return {}
-    return json.loads(metadata_path.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _param(metadata: dict, record: dict, key: str, default: str = ""):
+    parameters = metadata.get("parameters") if isinstance(metadata.get("parameters"), dict) else {}
+    summary = record.get("parameter_summary") if isinstance(record.get("parameter_summary"), dict) else {}
+    if key in metadata and metadata.get(key) not in (None, ""):
+        return metadata.get(key)
+    if key in parameters and parameters.get(key) not in (None, ""):
+        return parameters.get(key)
+    if key in summary and summary.get(key) not in (None, ""):
+        return summary.get(key)
+    return default
 
 
 def main() -> int:
@@ -51,8 +71,35 @@ def main() -> int:
         return 1
 
     prepared_dir = Path(str(record.get("drive_prepared_dir") or record.get("runtime_prepared_dir") or ""))
-    metadata = _load_metadata(prepared_dir, preparation_id) if prepared_dir.is_dir() else {}
-    payload = {"index_record": record, "metadata": metadata}
+    metadata = _load_json(prepared_dir / f"{preparation_id}.metadata.json") if prepared_dir.is_dir() else {}
+    workflow_data = (
+        _load_json(prepared_dir / f"{preparation_id}.workflow.json") if prepared_dir.is_dir() else {}
+    )
+    parameters = metadata.get("parameters") if isinstance(metadata.get("parameters"), dict) else {}
+    seed_mode = resolve_seed_mode(
+        parameters=parameters,
+        metadata=metadata,
+        index_record=record,
+        workflow_data=workflow_data,
+    )
+    control = resolve_control_after_generate(
+        parameters=parameters,
+        metadata=metadata,
+        index_record=record,
+        workflow_data=workflow_data,
+        seed_mode=seed_mode,
+    )
+    seed = _param(metadata, record, "seed")
+    if seed in ("", None) and workflow_data:
+        seed = extract_ksampler_seed(workflow_data)
+
+    payload = {
+        "index_record": record,
+        "metadata": metadata,
+        "seed": seed,
+        "seed_mode": seed_mode,
+        "control_after_generate": control,
+    }
 
     if args.json:
         print(json.dumps(payload, indent=2))
@@ -60,16 +107,34 @@ def main() -> int:
 
     print("AI Studio — Prepared Workflow Info")
     print("=" * 40)
-    print(f"Preparation ID: {preparation_id}")
-    print(f"Workflow:       {record.get('workflow_identifier')}")
-    print(f"Readiness:      {record.get('readiness_status')}")
+    print(f"Preparation ID:         {preparation_id}")
+    print(f"Workflow:               {record.get('workflow_identifier')}")
+    print(f"Project:                {record.get('project_slug') or '(global)'}")
+    print(f"Readiness:              {record.get('readiness_status')}")
+    print(f"Seed:                   {seed if seed not in (None, '') else '(unavailable)'}")
+    print(f"Seed mode:              {seed_mode}")
+    print(f"Control after generate: {control}")
     if args.summary:
-        print(f"Prepared hash:  {record.get('prepared_workflow_hash')}")
+        print(f"Prepared hash:          {record.get('prepared_workflow_hash')}")
+        return 0
+
+    print(f"Sampler:                {_param(metadata, record, 'sampler_name') or '(unavailable)'}")
+    print(f"Scheduler:              {_param(metadata, record, 'scheduler') or '(unavailable)'}")
+    print(f"Checkpoint:             {_param(metadata, record, 'checkpoint') or '(unavailable)'}")
+    print(f"Steps:                  {_param(metadata, record, 'steps') or '(unavailable)'}")
+    print(f"CFG:                    {_param(metadata, record, 'cfg') or '(unavailable)'}")
+    width = _param(metadata, record, "width")
+    height = _param(metadata, record, "height")
+    if width not in (None, "") or height not in (None, ""):
+        print(f"Dimensions:             {width or '?'} x {height or '?'}")
     else:
-        print(f"Drive dir:      {record.get('drive_prepared_dir')}")
-        print(f"Runtime dir:    {record.get('runtime_prepared_dir')}")
-        if metadata:
-            print(f"Parameters:     {json.dumps(metadata.get('parameters', {}), sort_keys=True)}")
+        print("Dimensions:             (unavailable)")
+    print(f"Batch size:             {_param(metadata, record, 'batch_size') or '(unavailable)'}")
+    print(f"Save prefix:            {_param(metadata, record, 'save_prefix') or '(unavailable)'}")
+    print(f"Drive/global path:      {record.get('drive_prepared_dir') or record.get('prepared_drive_path') or '(none)'}")
+    project_path = record.get("project_prepared_dir") or record.get("prepared_project_path") or ""
+    print(f"Project mirror path:    {project_path or '(none)'}")
+    print(f"Runtime dir:            {record.get('runtime_prepared_dir') or '(none)'}")
     return 0
 
 

@@ -1,4 +1,4 @@
-# Workflow Library (Package 4.8)
+# Workflow Library (Package 4.8 / 4.9)
 
 Three workflow layers:
 
@@ -25,7 +25,7 @@ Catalog discovery shows **BENCHMARK ONLY** by default (use `--exclude-benchmark`
 python core/scripts/workflow_catalog.py --summary
 python core/scripts/workflow_info.py --workflow base/txt2img --show-parameters --check-readiness
 python core/scripts/check_workflow_readiness.py --workflow base/txt2img
-python core/scripts/prepare_workflow.py --workflow base/txt2img --param positive_prompt="..." --param seed=123
+python core/scripts/prepare_workflow.py --workflow base/txt2img --param positive_prompt="..." --param seed=123 --param seed_mode=fixed
 python core/scripts/list_prepared_workflows.py
 python core/scripts/prepared_workflow_info.py --preparation-id prep_<uuid>
 python core/scripts/validate_prepared_workflow.py --preparation-id prep_<uuid>
@@ -94,3 +94,26 @@ Proven from code: flattened-only extraction could miss nested history shapes; a 
 10. Autosync + Package 4.7 snapshots capture the **executed** graph (including manual edits).
 
 Use `diagnose_prepared_workflow_loading.py` for read-only server-side checks. Use `diagnose_live_comfyui_workflow_open.py` for environment/version capture, integrity, proxy-route probes, and DevTools collection steps. Use `reprepare_workflow.py` to allocate a **new** preparation from an existing archive without mutating the original.
+
+## Package 4.9 — prepared execution controls
+
+`base/txt2img` preparations expose an explicit **seed_mode**:
+
+| seed_mode | KSampler `control_after_generate` | Repeated Run behavior |
+|-----------|-----------------------------------|------------------------|
+| `fixed` (default) | `fixed` | Same initial seed; identical image when other params are unchanged |
+| `randomize` | `randomize` | ComfyUI advances the seed after each completed generation |
+
+Existing callers that pass only `seed=<number>` keep the accepted 4.8.5 fixed/reproducible behavior. Invalid values such as `seed_mode=foo` fail with a clear error (no traceback).
+
+**Three layers stay distinct:**
+
+1. **Preparation archive** (`AI_Studio/workflows/prepared/<prep_id>/` and the project mirror) — original prepared intent, including the original seed and `seed_mode`. Immutable. Opening/running must not rewrite it.
+2. **ComfyUI user copy** (`user/default/workflows/ai_studio_prep_<uuid>.json` / userdata) — runtime-editable working copy. After a randomized Run, ComfyUI may change the seed in this copy only.
+3. **Generation snapshot** — actual execution. Records the seed ComfyUI used for that prompt, which may differ from the archived preparation seed when `seed_mode=randomize`.
+
+Reopening a prepared workflow from AI Studio always reloads the archival preparation (original seed + original `seed_mode`). It does not persist the last randomized runtime seed back into the archive.
+
+Legacy 4.8.x preparations that omit `seed_mode` inspect/open as `fixed` when `control_after_generate` is fixed or missing. No migration is required.
+
+`save_prefix` remains the ComfyUI local Save Image prefix. Permanent Drive names stay `txt2img_<YYYYMMDD>_<six-digit-sequence>.png`.

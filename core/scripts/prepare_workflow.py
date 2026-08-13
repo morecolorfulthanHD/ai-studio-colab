@@ -205,6 +205,8 @@ def _run_library(args: argparse.Namespace, repo_root: Path) -> int:
             "positive_prompt",
             "negative_prompt",
             "seed",
+            "seed_mode",
+            "control_after_generate",
             "steps",
             "cfg",
             "width",

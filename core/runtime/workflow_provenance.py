@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .seed_mode import coerce_execution_seed, extract_ksampler_seed
+
 SCHEMA_VERSION = 2
 PROVENANCE_VERSION = 2
 
@@ -685,7 +687,9 @@ def extract_execution_provenance(
         provenance.prompt_resolution = "wiring" if wiring_ok else "ordering"
 
         fields = _sampler_fields(sampler)
-        provenance.seed = fields.get("seed") if isinstance(fields.get("seed"), int) else None
+        provenance.seed = coerce_execution_seed(fields.get("seed"))
+        if provenance.seed is None and ui_workflow is not None:
+            provenance.seed = extract_ksampler_seed(ui_workflow)
         provenance.steps = fields.get("steps") if isinstance(fields.get("steps"), int) else None
         cfg_val = fields.get("cfg")
         provenance.cfg = float(cfg_val) if isinstance(cfg_val, (int, float)) else None

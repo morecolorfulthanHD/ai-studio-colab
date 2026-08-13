@@ -18,6 +18,7 @@ _activate.activate(__file__)
 
 from core.runtime.prepared_workflow_index import preparations_log_path, read_preparation_records
 from core.runtime.registry_loader import RegistryLoader, find_repo_root
+from core.runtime.seed_mode import resolve_seed_mode
 
 
 def _project_label(row: dict) -> str:
@@ -33,6 +34,11 @@ def _project_label(row: dict) -> str:
                 return parts[idx + 1]
         return project_dir
     return "Global"
+
+
+def _summary_value(row: dict, key: str):
+    summary = row.get("parameter_summary") if isinstance(row.get("parameter_summary"), dict) else {}
+    return summary.get(key)
 
 
 def main() -> int:
@@ -76,15 +82,22 @@ def main() -> int:
         readiness = str(row.get("readiness_status") or "")
         drive_path = str(row.get("drive_prepared_dir") or row.get("prepared_drive_path") or "")
         project_path = str(row.get("project_prepared_dir") or row.get("prepared_project_path") or "")
+        seed = _summary_value(row, "seed")
+        seed_mode = resolve_seed_mode(index_record=row)
+        created = str(row.get("created_timestamp") or row.get("created") or "").strip()
         if args.summary:
-            print(f"{prep_id}  {workflow_id}  project={project}  readiness={readiness}")
+            print(
+                f"{prep_id}  {workflow_id}  project={project}  "
+                f"readiness={readiness}  seed_mode={seed_mode}"
+            )
         else:
-            print(prep_id)
-            print(f"  Workflow:     {workflow_id}")
+            print(f"{prep_id} — {workflow_id}")
             print(f"  Project:      {project}")
             print(f"  Readiness:    {readiness}")
-            created = str(row.get("created_timestamp") or row.get("created") or "").strip()
             print(f"  Created:      {created or '(unavailable)'}")
+            if seed not in (None, ""):
+                print(f"  seed: {seed}")
+            print(f"  seed_mode: {seed_mode}")
             print(f"  Global path:  {drive_path or '(none)'}")
             if project_path:
                 print(f"  Project path: {project_path}")

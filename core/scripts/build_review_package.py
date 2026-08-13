@@ -87,6 +87,7 @@ def collect_files() -> list[Path]:
         "simulate_package483_live_workflow_open_diagnostics.py",
         "simulate_package484_colab_userdata_route_compat.py",
         "simulate_package485_prepared_execution_autosync.py",
+        "simulate_package49_prepared_execution_controls.py",
         "runtime_report.py",
         "verify_models.py",
         "verify_generation.py",

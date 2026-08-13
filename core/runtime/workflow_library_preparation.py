@@ -24,6 +24,7 @@ from .workflow_manifest import (
     validate_manifest_structure,
     workflow_id_for_identifier,
 )
+from .seed_mode import annotate_seed_controls
 from .workflow_parameters import IMAGE_PARAM_TYPES, apply_parameter_bindings, coerce_and_validate_parameters
 from .comfyui_workflow_loading import COMFYUI_LOAD_SCHEMA_VERSION, build_comfyui_load_workflow
 from .workflow_provenance import hash_ui_workflow
@@ -271,6 +272,7 @@ def prepare_library_workflow(
     if param_errors:
         result.errors.extend(param_errors)
         return result
+    annotate_seed_controls(params, schema)
     result.parameters = params
 
     cross_errors = _cross_parameter_rules(identifier, params)
@@ -361,6 +363,12 @@ def prepare_library_workflow(
             "canonical_workflow_hash": canonical_hash,
             "package_version": PACKAGE_VERSION,
         }
+        if "seed_mode" in params:
+            prepared_data["extra"]["ai_studio"]["seed"] = params.get("seed")
+            prepared_data["extra"]["ai_studio"]["seed_mode"] = params.get("seed_mode")
+            prepared_data["extra"]["ai_studio"]["control_after_generate"] = params.get(
+                "control_after_generate"
+            )
 
     prepared_hash = hash_ui_workflow(prepared_data)
     result.prepared_workflow_hash = prepared_hash
@@ -405,6 +413,9 @@ def prepare_library_workflow(
         "project_id": (active_project.project_id if active_project is not None else None),
         "project_slug": (active_project.slug if active_project is not None else None),
         "parameters": params,
+        "seed": params.get("seed"),
+        "seed_mode": params.get("seed_mode"),
+        "control_after_generate": params.get("control_after_generate"),
         "staged_inputs": {
             name: {
                 "source_path": str(params.get(name) or "") or None,
@@ -502,12 +513,18 @@ def prepare_library_workflow(
                 for key in (
                     "positive_prompt",
                     "seed",
+                    "seed_mode",
+                    "control_after_generate",
                     "steps",
                     "cfg",
                     "width",
                     "height",
                     "denoise",
                     "checkpoint",
+                    "sampler_name",
+                    "scheduler",
+                    "batch_size",
+                    "save_prefix",
                 )
                 if key in params
             },

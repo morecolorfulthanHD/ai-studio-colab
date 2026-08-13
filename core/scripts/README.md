@@ -67,7 +67,7 @@ Cross-engine utility scripts for bootstrap, validation, and batch processing.
 | `workflow_catalog.py` | Workflow Library catalog (READY / caution / experimental / benchmark sections; filters) | No |
 | `workflow_info.py` | Show workflow identity, statuses, parameters, and readiness (`--workflow`, `--check-readiness`) | No |
 | `check_workflow_readiness.py` | Read-only readiness evaluation (`--allow-experimental`, `--allow-benchmark`) | No |
-| `prepare_workflow.py` | Prepare workflows: legacy `--input` mode or library `--param` / `--params-json` mode | No |
+| `prepare_workflow.py` | Prepare workflows: legacy `--input` mode or library `--param` / `--params-json` mode (`seed_mode=fixed\|randomize` for txt2img) | No |
 | `list_prepared_workflows.py` | List recent prepared workflows from preparation index | No |
 | `prepared_workflow_info.py` | Show one preparation (`--preparation-id` as `prep_<uuid>` or bare UUID) | No |
 | `validate_prepared_workflow.py` | Validate prepared workflow artifacts (`--preparation-id`, `--all`) | No |
