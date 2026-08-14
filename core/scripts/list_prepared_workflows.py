@@ -92,6 +92,12 @@ def main() -> int:
             )
         else:
             print(f"{prep_id} — {workflow_id}")
+            kind = str(row.get("preparation_kind") or row.get("kind") or "ordinary")
+            if kind == "generation_reproduction":
+                print("  kind: reproduction")
+                source = str(row.get("source_generation_id") or "").strip()
+                if source:
+                    print(f"  source: {source}")
             print(f"  Project:      {project}")
             print(f"  Readiness:    {readiness}")
             print(f"  Created:      {created or '(unavailable)'}")

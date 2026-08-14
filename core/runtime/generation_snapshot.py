@@ -192,6 +192,12 @@ def build_metadata_snapshot(
     comfyui_load_workflow_hash = (
         record.comfyui_load_workflow_hash or prov.comfyui_load_workflow_hash or ""
     )
+    preparation_kind = getattr(record, "preparation_kind", "") or getattr(
+        prov, "preparation_kind", ""
+    ) or ""
+    reproduced_from_generation_id = getattr(
+        record, "reproduced_from_generation_id", ""
+    ) or getattr(prov, "reproduced_from_generation_id", "") or ""
     canonical_workflow_identifier = ""
     ai_meta = extract_ai_studio_extra(ui_workflow)
     if ai_meta:
@@ -201,6 +207,12 @@ def build_metadata_snapshot(
             ai_meta.get("comfyui_load_workflow_hash") or ""
         )
         canonical_workflow_identifier = str(ai_meta.get("workflow_identifier") or "")
+        preparation_kind = preparation_kind or str(ai_meta.get("preparation_kind") or "")
+        reproduced_from_generation_id = reproduced_from_generation_id or str(
+            ai_meta.get("reproduced_from_generation_id")
+            or ai_meta.get("reproduction_source_generation_id")
+            or ""
+        )
 
     def _nullable(value: Any) -> Any:
         if value is None:
@@ -259,6 +271,8 @@ def build_metadata_snapshot(
         "prepared_workflow_hash": _nullable(prepared_workflow_hash),
         "canonical_workflow_identifier": _nullable(canonical_workflow_identifier),
         "comfyui_load_workflow_hash": _nullable(comfyui_load_workflow_hash),
+        "preparation_kind": _nullable(preparation_kind),
+        "reproduced_from_generation_id": _nullable(reproduced_from_generation_id),
     }
 
 

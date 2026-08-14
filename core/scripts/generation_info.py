@@ -18,8 +18,19 @@ _activate.activate(__file__)
 
 from core.runtime.generation_history import generation_display_id, provenance_label, snapshot_status_label
 from core.runtime.generation_identity import InvalidGenerationIdError, normalize_generation_id
+from core.runtime.generation_reproduction import assess_reproduction_eligibility
 from core.runtime.generation_snapshot import MANIFEST_FILENAME, METADATA_FILENAME, WORKFLOW_FILENAME, load_snapshot_by_id
 from core.runtime.registry_loader import RegistryLoader, find_repo_root
+
+
+def _load_json(path: Path) -> dict:
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def _find_evidence_row(ledger_path: Path, generation_id: str) -> dict | None:
@@ -74,12 +85,17 @@ def main() -> int:
     metadata_path = snapshot_root / METADATA_FILENAME
     workflow_path = snapshot_root / WORKFLOW_FILENAME
     manifest_path = snapshot_root / MANIFEST_FILENAME
-    metadata = {}
-    if metadata_path.is_file():
-        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata = _load_json(metadata_path)
+    workflow_payload = _load_json(workflow_path)
 
     ledger_path = bundle.path("drive_logs") / "generation_evidence.jsonl"
     evidence = _find_evidence_row(ledger_path, generation_id) or {}
+
+    eligibility = assess_reproduction_eligibility(
+        metadata=metadata,
+        workflow_payload=workflow_payload,
+        manifest=manifest,
+    )
 
     payload = {
         "generation_id": generation_id,
@@ -97,7 +113,13 @@ def main() -> int:
         "image_sha256": metadata.get("image_sha256") or manifest.get("image_sha256"),
         "snapshot_status": snapshot_status_label(evidence) if evidence else "complete",
         "provenance_status": provenance_label(evidence) if evidence else metadata.get("provenance_status"),
-        "workflow_snapshot_status": metadata.get("workflow_snapshot_status"),
+        "workflow_snapshot_status": metadata.get("workflow_snapshot_status")
+        or workflow_payload.get("workflow_snapshot_status"),
+        "reproduction_eligible": eligibility.eligible,
+        "reproduction_eligibility_reason": eligibility.reason if not eligibility.eligible else "eligible",
+        "preparation_id": metadata.get("preparation_id"),
+        "preparation_kind": metadata.get("preparation_kind"),
+        "reproduced_from_generation_id": metadata.get("reproduced_from_generation_id"),
         "metadata_path": str(metadata_path),
         "workflow_path": str(workflow_path),
         "manifest_path": str(manifest_path),
@@ -116,13 +138,27 @@ def main() -> int:
         print(
             f"{generation_display_id(evidence or {'generation_id': generation_id})} | "
             f"{payload.get('capability')} | {payload.get('workflow_identifier')} | "
-            f"snapshot={payload.get('snapshot_status')}"
+            f"snapshot={payload.get('snapshot_status')} | "
+            f"repro={'yes' if payload.get('reproduction_eligible') else 'no'}"
         )
         return 0
 
     print("AI Studio — Generation Info")
     print("=" * 40)
-    print(json.dumps(payload, indent=2))
+    print(f"Generation ID:              {payload.get('generation_id')}")
+    print(f"Workflow:                   {payload.get('workflow_identifier') or '(unavailable)'}")
+    print(f"Project:                    {payload.get('project_slug') or '(global)'}")
+    print(f"Seed:                       {payload.get('seed') if payload.get('seed') is not None else '(unavailable)'}")
+    print(f"Workflow snapshot status:   {payload.get('workflow_snapshot_status') or '(unavailable)'}")
+    print(f"Reproduction eligible:      {'yes' if payload.get('reproduction_eligible') else 'no'}")
+    if not payload.get("reproduction_eligible"):
+        print(f"Reproduction note:          {payload.get('reproduction_eligibility_reason')}")
+    if payload.get("reproduced_from_generation_id"):
+        print(f"Reproduced from:            {payload.get('reproduced_from_generation_id')}")
+    if payload.get("preparation_kind"):
+        print(f"Preparation kind:           {payload.get('preparation_kind')}")
+    print(f"Image SHA256:               {payload.get('image_sha256') or '(unavailable)'}")
+    print(f"Canonical output:           {payload.get('canonical_output_path') or '(unavailable)'}")
     return 0
 
 

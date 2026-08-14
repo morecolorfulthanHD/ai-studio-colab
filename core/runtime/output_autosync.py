@@ -454,6 +454,12 @@ class OutputAutoSyncService:
         record.comfyui_load_workflow_hash = str(
             payload.get("comfyui_load_workflow_hash") or record.comfyui_load_workflow_hash
         )
+        record.preparation_kind = str(
+            payload.get("preparation_kind") or record.preparation_kind
+        )
+        record.reproduced_from_generation_id = str(
+            payload.get("reproduced_from_generation_id") or record.reproduced_from_generation_id
+        )
 
     def _mirror_verified_to_project(
         self,

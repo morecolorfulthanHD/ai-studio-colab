@@ -35,7 +35,9 @@ from .workflow_readiness import (
     evaluate_workflow_readiness,
 )
 
-PACKAGE_VERSION = "4.8.2"
+PACKAGE_VERSION = "4.10"
+PREPARATION_KIND_ORDINARY = "ordinary"
+PREPARATION_KIND_GENERATION_REPRODUCTION = "generation_reproduction"
 
 
 @dataclass
@@ -241,10 +243,16 @@ def prepare_library_workflow(
     allowed_input_roots: list[Path] | None = None,
     comfy_object_info: dict[str, Any] | None = None,
     model_files_present: dict[str, bool] | None = None,
+    preparation_kind: str = PREPARATION_KIND_ORDINARY,
+    lineage_metadata: dict[str, Any] | None = None,
+    package_version: str | None = None,
 ) -> LibraryPreparationResult:
     """Prepare a library workflow with parameter bindings and staged inputs."""
     repo_root = repo_root.resolve()
     result = LibraryPreparationResult(dry_run=dry_run)
+    effective_package_version = str(package_version or PACKAGE_VERSION)
+    kind = str(preparation_kind or PREPARATION_KIND_ORDINARY).strip() or PREPARATION_KIND_ORDINARY
+    lineage = dict(lineage_metadata or {})
 
     try:
         manifest = load_workflow_manifest(repo_root, workflow_identifier)
@@ -359,9 +367,10 @@ def prepare_library_workflow(
             "workflow_id": result.workflow_id,
             "workflow_source": "registered_canonical",
             "preparation_id": preparation_id,
+            "preparation_kind": kind,
             "prepared_workflow_hash": "",
             "canonical_workflow_hash": canonical_hash,
-            "package_version": PACKAGE_VERSION,
+            "package_version": effective_package_version,
         }
         if "seed_mode" in params:
             prepared_data["extra"]["ai_studio"]["seed"] = params.get("seed")
@@ -369,6 +378,18 @@ def prepare_library_workflow(
             prepared_data["extra"]["ai_studio"]["control_after_generate"] = params.get(
                 "control_after_generate"
             )
+        if kind == PREPARATION_KIND_GENERATION_REPRODUCTION:
+            source_gid = lineage.get("reproduction_source_generation_id")
+            if source_gid:
+                prepared_data["extra"]["ai_studio"]["reproduced_from_generation_id"] = source_gid
+            for key in (
+                "reproduction_source_generation_id",
+                "reproduction_source_preparation_id",
+                "reproduction_source_prompt_id",
+                "reproduction_source_image_sha256",
+            ):
+                if key in lineage:
+                    prepared_data["extra"]["ai_studio"][key] = lineage.get(key)
 
     prepared_hash = hash_ui_workflow(prepared_data)
     result.prepared_workflow_hash = prepared_hash
@@ -402,7 +423,9 @@ def prepare_library_workflow(
     metadata_payload = {
         "schema_version": 1,
         "preparation_id": preparation_id,
+        "preparation_kind": kind,
         "created_timestamp": operation_ts,
+        "created_at": operation_ts,
         "workflow_identifier": identifier,
         "canonical_workflow_path": canonical_rel or None,
         "canonical_workflow_hash": canonical_hash,
@@ -430,7 +453,7 @@ def prepare_library_workflow(
         "benchmark_acknowledged": bool(allow_benchmark),
         "runtime_id": None,
         "repository_commit": None,
-        "package_version": PACKAGE_VERSION,
+        "package_version": effective_package_version,
         "prepared_runtime_path": str(runtime_dir),
         "prepared_drive_path": str(drive_dir),
         "prepared_project_path": project_dir or None,
@@ -439,11 +462,27 @@ def prepare_library_workflow(
         "staged_filenames": staged_filenames,
         "dry_run": dry_run,
     }
+    if kind == PREPARATION_KIND_GENERATION_REPRODUCTION or lineage:
+        for key in (
+            "reproduction_source_generation_id",
+            "reproduction_source_snapshot_path",
+            "reproduction_source_image_sha256",
+            "reproduction_source_prompt_id",
+            "reproduction_source_preparation_id",
+            "reproduction_source_workflow_identifier",
+            "reproduction_source_snapshot_status",
+            "reproduction_source_workflow_snapshot_status",
+            "source_batch_size",
+            "source_output_index",
+            "reproduction_scope",
+        ):
+            metadata_payload[key] = lineage.get(key, None)
 
     manifest_payload = {
         "schema_version": 1,
-        "package_version": PACKAGE_VERSION,
+        "package_version": effective_package_version,
         "preparation_id": preparation_id,
+        "preparation_kind": kind,
         "workflow_identifier": identifier,
         "workflow_file": workflow_filename,
         "metadata_file": metadata_filename,
@@ -493,46 +532,52 @@ def prepare_library_workflow(
             result.messages.append("PARTIAL: global archive OK; project mirror missing.")
 
     log_path = preparations_log_path(drive_root)
-    append_preparation_record(
-        log_path,
-        {
-            "preparation_id": preparation_id,
-            "workflow_identifier": identifier,
-            "created_timestamp": operation_ts,
-            "project_id": (active_project.project_id if active_project is not None else None),
-            "project_slug": (active_project.slug if active_project is not None else None),
-            "prepared_workflow_path": result.runtime_workflow_path,
-            "prepared_drive_path": result.drive_prepared_dir,
-            "prepared_project_path": result.project_prepared_dir or None,
-            "runtime_prepared_dir": result.runtime_prepared_dir,
-            "drive_prepared_dir": result.drive_prepared_dir,
-            "project_prepared_dir": result.project_prepared_dir or None,
-            "readiness_status": readiness.status,
-            "parameter_summary": {
-                key: params.get(key)
-                for key in (
-                    "positive_prompt",
-                    "seed",
-                    "seed_mode",
-                    "control_after_generate",
-                    "steps",
-                    "cfg",
-                    "width",
-                    "height",
-                    "denoise",
-                    "checkpoint",
-                    "sampler_name",
-                    "scheduler",
-                    "batch_size",
-                    "save_prefix",
-                )
-                if key in params
-            },
-            "prepared_workflow_hash": prepared_hash,
-            "canonical_workflow_hash": canonical_hash,
-            "workflow_id": result.workflow_id,
-            "package_version": PACKAGE_VERSION,
+    index_record = {
+        "preparation_id": preparation_id,
+        "preparation_kind": kind,
+        "workflow_identifier": identifier,
+        "created_timestamp": operation_ts,
+        "project_id": (active_project.project_id if active_project is not None else None),
+        "project_slug": (active_project.slug if active_project is not None else None),
+        "prepared_workflow_path": result.runtime_workflow_path,
+        "prepared_drive_path": result.drive_prepared_dir,
+        "prepared_project_path": result.project_prepared_dir or None,
+        "runtime_prepared_dir": result.runtime_prepared_dir,
+        "drive_prepared_dir": result.drive_prepared_dir,
+        "project_prepared_dir": result.project_prepared_dir or None,
+        "readiness_status": readiness.status,
+        "parameter_summary": {
+            key: params.get(key)
+            for key in (
+                "positive_prompt",
+                "seed",
+                "seed_mode",
+                "control_after_generate",
+                "steps",
+                "cfg",
+                "width",
+                "height",
+                "denoise",
+                "checkpoint",
+                "sampler_name",
+                "scheduler",
+                "batch_size",
+                "save_prefix",
+            )
+            if key in params
         },
-    )
+        "prepared_workflow_hash": prepared_hash,
+        "canonical_workflow_hash": canonical_hash,
+        "workflow_id": result.workflow_id,
+        "package_version": effective_package_version,
+    }
+    if kind == PREPARATION_KIND_GENERATION_REPRODUCTION:
+        index_record["kind"] = "generation_reproduction"
+        index_record["source_generation_id"] = lineage.get("reproduction_source_generation_id")
+        if lineage.get("reproduction_scope"):
+            index_record["reproduction_scope"] = lineage.get("reproduction_scope")
+        if lineage.get("source_batch_size") is not None:
+            index_record["source_batch_size"] = lineage.get("source_batch_size")
+    append_preparation_record(log_path, index_record)
     result.messages.append(f"Appended preparation record to {log_path}")
     return result

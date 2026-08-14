@@ -1,10 +1,13 @@
-# Workflow Library (Package 4.8 / 4.9)
+# Workflow Library (Package 4.8 / 4.9 / 4.10)
 
-Three workflow layers:
+Four workflow layers:
 
-1. **Canonical** — Git-managed source of truth under `workflows/**/workflow.json` with sibling `manifest.json`. Never mutated by preparation.
-2. **Prepared** — Parameterized instance with `prep_<uuid>` under runtime `/content/ai-studio-runtime/workflows/prepared/`, Drive `AI_Studio/workflows/prepared/`, and optional project mirror. Not a generation.
-3. **Executed snapshot** — Package 4.7 exact UI/API capture after ComfyUI runs. Remains authoritative for reproducibility.
+1. **Canonical workflow** — Git-managed source of truth under `workflows/**/workflow.json` with sibling `manifest.json`. Never mutated by preparation.
+2. **Preparation** — Parameterized intent with `prep_<uuid>` under runtime `/content/ai-studio-runtime/workflows/prepared/`, Drive `AI_Studio/workflows/prepared/`, and optional project mirror. Records what the user intended before Run.
+3. **Executed generation** — Package 4.7 `gen_<uuid>` snapshot after ComfyUI runs. Authoritative record of what actually executed (including the actual seed when `seed_mode=randomize`).
+4. **Reproduction preparation** — Package 4.10: a **new** `prep_<uuid>` derived from a completed `gen_<uuid>`. Uses the executed generation state (not the original preparation intent) and defaults to `seed_mode=fixed`.
+
+Never mutate a source generation snapshot or the original preparation when reproducing.
 
 ## Statuses
 
@@ -32,6 +35,8 @@ python core/scripts/validate_prepared_workflow.py --preparation-id prep_<uuid>
 python core/scripts/open_prepared_workflow.py --preparation-id prep_<uuid>
 python core/scripts/diagnose_prepared_workflow_loading.py --preparation-id prep_<uuid>
 python core/scripts/reprepare_workflow.py --preparation-id prep_<uuid>
+python core/scripts/prepare_from_generation.py --generation-id gen_<uuid>
+python core/scripts/compare_generation_reproduction.py --source-generation gen_<uuid> --reproduction-preparation prep_<uuid>
 ```
 
 ### Project resolution (Package 4.8.1)
@@ -117,3 +122,37 @@ Reopening a prepared workflow from AI Studio always reloads the archival prepara
 Legacy 4.8.x preparations that omit `seed_mode` inspect/open as `fixed` when `control_after_generate` is fixed or missing. No migration is required.
 
 `save_prefix` remains the ComfyUI local Save Image prefix. Permanent Drive names stay `txt2img_<YYYYMMDD>_<six-digit-sequence>.png`.
+
+## Package 4.10 — generation reproduction preparation
+
+**Reproduce generation** means: create a **new fixed preparation** from the **executed generation snapshot**. It does **not** queue `/prompt`, auto-run, or browser-automate ComfyUI.
+
+Critical seed distinction:
+
+| Layer | Seed meaning |
+|-------|----------------|
+| Randomized preparation archive | Initial / intent seed (e.g. `246802468`) with `seed_mode=randomize` |
+| Executed generation snapshot | Actual seed ComfyUI used (e.g. `603180018352167`) |
+| Reproduction preparation | Uses the **execution** seed with `seed_mode=fixed` |
+
+CLI:
+
+```bash
+python core/scripts/prepare_from_generation.py --generation-id gen_<uuid>
+python core/scripts/prepare_from_generation.py --generation-id <bare-uuid> --project mountain-demo
+python core/scripts/compare_generation_reproduction.py \
+  --source-generation gen_<uuid> \
+  --reproduction-preparation prep_<uuid>
+```
+
+Eligibility:
+
+- `workflow_snapshot_status=complete` → allowed when required executed params recover
+- `partial` → allowed only if all required execution parameters are recoverable without guessing
+- `unavailable` / legacy missing snapshot → refuse with a clear error
+
+Batch policy: selecting one `generation_id` from a multi-image batch prepares the **original batch execution** (`reproduction_scope=source_batch_execution`, original `batch_size`) because per-image latent identity is not preserved in generation snapshots. Isolated `batch_size=1` reduction is not claimed. When `batch_size` itself cannot be recovered, reproduction fails closed.
+
+Save-prefix policy: reproduction preps use `ai_studio_repro_<short-gen-id>`. Permanent Drive naming is unchanged.
+
+Open the resulting prep through the existing **Open prepared workflow** path (Package 4.8.4 userdata compatibility unchanged).

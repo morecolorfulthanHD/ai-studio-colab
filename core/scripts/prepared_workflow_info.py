@@ -108,9 +108,33 @@ def main() -> int:
     print("AI Studio — Prepared Workflow Info")
     print("=" * 40)
     print(f"Preparation ID:         {preparation_id}")
+    kind = str(metadata.get("preparation_kind") or record.get("preparation_kind") or "ordinary")
+    if kind == "generation_reproduction":
+        print("Kind:                   generation reproduction")
+    else:
+        print(f"Kind:                   {kind}")
     print(f"Workflow:               {record.get('workflow_identifier')}")
     print(f"Project:                {record.get('project_slug') or '(global)'}")
     print(f"Readiness:              {record.get('readiness_status')}")
+    if kind == "generation_reproduction":
+        print(
+            f"Source generation:      "
+            f"{metadata.get('reproduction_source_generation_id') or record.get('source_generation_id') or '-'}"
+        )
+        print(f"Source prompt:          {metadata.get('reproduction_source_prompt_id') or '-'}")
+        print(f"Source preparation:     {metadata.get('reproduction_source_preparation_id') or '-'}")
+        print(f"Source image SHA:       {metadata.get('reproduction_source_image_sha256') or '-'}")
+        scope = str(metadata.get("reproduction_scope") or record.get("reproduction_scope") or "")
+        if scope == "source_batch_execution":
+            print("Reproduction scope:     original batch execution")
+        elif scope == "single_generation":
+            print("Reproduction scope:     single generation")
+        elif scope:
+            print(f"Reproduction scope:     {scope}")
+        if metadata.get("source_batch_size") is not None:
+            print(f"Source batch size:      {metadata.get('source_batch_size')}")
+        if metadata.get("source_output_index") is not None:
+            print(f"Source output index:    {metadata.get('source_output_index')}")
     print(f"Seed:                   {seed if seed not in (None, '') else '(unavailable)'}")
     print(f"Seed mode:              {seed_mode}")
     print(f"Control after generate: {control}")
