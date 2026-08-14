@@ -143,6 +143,13 @@ def diagnose(
             continue
         shape = describe_history_output_shape(entry)
         analysis = analyzer.analyze_saveimage_prefix_recovery(entry, prompt_id=str(prompt_id))
+        extractable = extract_output_files(entry)
+        # Primary sync uses extract_output_files. Prefix-recovery attribution is only
+        # meaningful when exact history outputs are absent. Do not report a recovery
+        # insufficiency reason for already exact-filename-resolved prompts.
+        attribution_reason = str(analysis.get("attribution_reason") or "")
+        if extractable:
+            attribution_reason = "exact_history_outputs"
         ui = extract_ui_workflow_from_history(entry)
         meta = extract_ai_studio_extra(ui)
         related.append(
@@ -159,15 +166,17 @@ def diagnose(
                 "prefix_recovery_candidate_count": analysis.get("prefix_candidate_count") or 0,
                 "prefix_candidate_count": analysis.get("prefix_candidate_count") or 0,
                 "exact_history_file_count": analysis.get("exact_history_file_count") or 0,
+                "extractable_output_count": len(extractable),
                 "execution_timestamp_available": bool(analysis.get("execution_timestamp_available")),
                 "timestamp_window_candidate_count": analysis.get("timestamp_window_candidate_count") or 0,
                 "competitor_check_available": bool(analysis.get("competitor_check_available")),
                 "competitor_check_status": analysis.get("competitor_check_status") or "unavailable",
                 "prefix_recovery_ambiguous": bool(analysis.get("prefix_recovery_ambiguous")),
                 "competing_unresolved_prompt_ids": analysis.get("competing_unresolved_prompt_ids") or [],
-                "attribution_reason": analysis.get("attribution_reason") or "",
+                "attribution_reason": attribution_reason,
+                "prefix_recovery_attribution_reason": analysis.get("attribution_reason") or "",
                 "named_file_mentions": collect_named_file_mentions(entry),
-                "extractable_outputs": extract_output_files(entry),
+                "extractable_outputs": extractable,
                 "status": entry.get("status"),
                 "preparation_id": meta.get("preparation_id"),
                 "workflow_identifier": meta.get("workflow_identifier"),
@@ -240,7 +249,11 @@ def diagnose(
         if item.get("extractable_outputs"):
             recoverable.append(pid)
             continue
-        if item.get("attribution_reason") == "exact_history_filename":
+        if item.get("attribution_reason") in {
+            "exact_history_filename",
+            "exact_history_outputs",
+            "exact_history_filename_already_verified",
+        }:
             recoverable.append(pid)
             continue
         if (
@@ -258,7 +271,7 @@ def diagnose(
 
     return {
         "diagnostic_mode": "read_only",
-        "package_version": "4.8.5",
+        "package_version": "4.9.1",
         "preparation_id": preparation_id,
         "preparation_record_found": prep_record is not None,
         "preparation_record": {

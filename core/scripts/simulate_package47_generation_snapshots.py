@@ -826,7 +826,11 @@ def run_simulations() -> list[tuple[str, str]]:
             active_project=None,
             generation_index_path=gen_index,
         )
-        mirrored = svc_after_delete._mirror_verified_to_project(project_src, "txt2img")
+        mirrored = svc_after_delete._mirror_verified_to_project(
+            project_src,
+            "txt2img",
+            canonical_destination=Path("txt2img_20260814_000099.png"),
+        )
         _assert_equal("no recreate after delete", mirrored, "")
         _assert_true("deleted folder stays gone", not (drive / "projects" / "alpine-demo").exists())
         _pass(results, "no deleted project folder recreation")

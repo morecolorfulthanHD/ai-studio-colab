@@ -355,7 +355,11 @@ def run_simulations() -> list[tuple[str, str]]:
         local = comfy / "ai_studio_base_txt2img_00010_.png"
         _write_png(local, fill=(3, 4, 5))
         service.active_project = refresh()
-        mirrored = service._mirror_verified_to_project(local, "txt2img")
+        mirrored = service._mirror_verified_to_project(
+            local,
+            "txt2img",
+            canonical_destination=Path("txt2img_20260814_000010.png"),
+        )
         _assert_equal("no archive recreate", mirrored, "")
         _assert_true(
             "archived folder not recreated as active outputs via mirror",
@@ -366,7 +370,11 @@ def run_simulations() -> list[tuple[str, str]]:
         # Ensure mirror did not create new outputs under archived project after clear.
         before_names = {p.name for p in (drive / "projects" / "alpine-demo" / "outputs").iterdir()} if (drive / "projects" / "alpine-demo" / "outputs").exists() else set()
         service.active_project = refresh()
-        service._mirror_verified_to_project(local, "txt2img")
+        service._mirror_verified_to_project(
+            local,
+            "txt2img",
+            canonical_destination=Path("txt2img_20260814_000010.png"),
+        )
         after_names = {p.name for p in (drive / "projects" / "alpine-demo" / "outputs").iterdir()} if (drive / "projects" / "alpine-demo" / "outputs").exists() else set()
         _assert_equal("archived not recreated", after_names, before_names)
         _pass(results, "Watcher does not recreate archived project")
@@ -380,14 +388,22 @@ def run_simulations() -> list[tuple[str, str]]:
         )
         local2 = comfy / "ai_studio_base_txt2img_00011_.png"
         _write_png(local2, fill=(6, 7, 8))
-        mirrored2 = service._mirror_verified_to_project(local2, "txt2img")
+        mirrored2 = service._mirror_verified_to_project(
+            local2,
+            "txt2img",
+            canonical_destination=Path("txt2img_20260814_000011.png"),
+        )
         _assert_true("future mirror uses new path", "alpine-landscapes" in mirrored2.replace("\\", "/"))
         _pass(results, "Renamed active project receives future mirrors")
 
         workspace.delete_project("alpine-landscapes", confirm_slug="alpine-landscapes")
         service.active_project = refresh()
         _assert_true("deleted clears watcher active", service.active_project is None)
-        mirrored3 = service._mirror_verified_to_project(local2, "txt2img")
+        mirrored3 = service._mirror_verified_to_project(
+            local2,
+            "txt2img",
+            canonical_destination=Path("txt2img_20260814_000011.png"),
+        )
         _assert_equal("deleted not recreated", mirrored3, "")
         _assert_true("deleted folder absent", not (drive / "projects" / "alpine-landscapes").exists())
         _pass(results, "Watcher does not recreate deleted project")
@@ -437,7 +453,15 @@ def run_simulations() -> list[tuple[str, str]]:
         _assert_equal("e2e globals survive", globals_after, globals_before)
         _assert_equal("e2e evidence survives", evidence.read_text(encoding="utf-8"), evidence_before)
         svc.active_project = workspace.get_active_project()
-        _assert_equal("e2e no recreate", svc._mirror_verified_to_project(src4, "txt2img"), "")
+        _assert_equal(
+            "e2e no recreate",
+            svc._mirror_verified_to_project(
+                src4,
+                "txt2img",
+                canonical_destination=Path("txt2img_20260814_000023.png"),
+            ),
+            "",
+        )
         _pass(results, "Critical end-to-end project lifecycle simulation")
 
         # 43-45 regression presence / notebook validity

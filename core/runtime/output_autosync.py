@@ -455,7 +455,21 @@ class OutputAutoSyncService:
             payload.get("comfyui_load_workflow_hash") or record.comfyui_load_workflow_hash
         )
 
-    def _mirror_verified_to_project(self, source: Path, capability: str) -> str:
+    def _mirror_verified_to_project(
+        self,
+        source: Path,
+        capability: str,
+        *,
+        canonical_destination: Path,
+    ) -> str:
+        """Mirror a verified global Drive asset into the active project outputs.
+
+        Package 4.9.1: project mirrors MUST reuse the exact basename of the already
+        assigned canonical global file. They must not allocate an independent
+        project-local sequence, and must not content-collapse distinct executions
+        that share identical bytes (fixed-seed / cached repeats).
+        """
+        del capability  # retained for call-site compatibility; naming comes from canonical.
         if self.active_project is None:
             return ""
         # Archived/deleted projects must never receive new mirrors.
@@ -467,18 +481,26 @@ class OutputAutoSyncService:
         if not project_outputs.parent.is_dir():
             # Do not recreate a deleted project folder from stale watcher state.
             return ""
+        basename = str(canonical_destination.name or "").strip()
+        if not basename or basename in {".", ".."}:
+            self.log("Project mirror refused: canonical destination basename missing.")
+            return ""
         project_outputs.mkdir(parents=True, exist_ok=True)
+        destination = project_outputs / basename
         source_hash = file_sha256(source)
-        for existing in project_outputs.iterdir():
-            if existing.is_file() and file_sha256(existing) == source_hash:
-                return str(existing)
-        try:
-            destination = resolve_permanent_destination(
-                project_outputs,
-                capability=capability or "unknown",
-                source_path=source,
+        if destination.exists():
+            try:
+                existing_hash = file_sha256(destination)
+            except OSError as exc:
+                self.log(f"Project mirror collision (unreadable existing file): {destination} ({exc})")
+                return ""
+            if existing_hash == source_hash:
+                # Idempotent re-mirror of the same execution asset.
+                return str(destination)
+            # Occupied by unrelated bytes — fail closed, never overwrite.
+            self.log(
+                f"Project mirror collision refused (existing unrelated bytes): {destination}"
             )
-        except RuntimeError:
             return ""
         dest, status, _retries, _error = copy_with_verification(
             source,
@@ -722,9 +744,15 @@ class OutputAutoSyncService:
             self._apply_provenance(record, provenance)
             if self.active_project is not None:
                 record.project_id = self.active_project.project_id
-                project_path = self._mirror_verified_to_project(local_path, effective_capability)
+                project_path = self._mirror_verified_to_project(
+                    destination_result,
+                    effective_capability,
+                    canonical_destination=destination_result,
+                )
                 if project_path:
                     record.project_output_path = project_path
+                else:
+                    record.messages.append("project_mirror_unavailable_or_collision")
             snapshot = create_generation_snapshot(
                 drive_root=self.drive_root,
                 record=record,
@@ -988,6 +1016,41 @@ class OutputAutoSyncService:
                 recoverable.append(item)
         if recoverable:
             reason = "exact_history_filename"
+        elif named:
+            # History already named exact files. If they are already verified, do not
+            # fall through to prefix-recovery insufficiency wording — recovery is N/A.
+            verified_named = 0
+            missing_named = 0
+            for mention in named:
+                local_path = resolve_comfy_output_path(
+                    self.comfy_output_dir,
+                    filename=mention["filename"],
+                    subfolder=mention.get("subfolder") or "",
+                )
+                if str(local_path) in verified_paths:
+                    verified_named += 1
+                elif not local_path.is_file():
+                    missing_named += 1
+            if verified_named:
+                reason = "exact_history_filename_already_verified"
+            elif missing_named and not local_candidates:
+                reason = "exact_history_filename_local_missing"
+            elif execution_ts is None:
+                reason = INSUFFICIENT_ATTRIBUTION_EVIDENCE
+            elif not competitor_check_available:
+                reason = COMPETITOR_CHECK_UNAVAILABLE
+            elif len(window_candidates) == 1 and not competitors:
+                reason = "unique_prefix_and_execution_timestamp"
+                recoverable = [
+                    _meta_from_local_path(self.comfy_output_dir, window_candidates[0], node_id)
+                ]
+            elif len(window_candidates) > 1 or (window_candidates and competitors):
+                ambiguous = True
+                reason = AMBIGUOUS_PREFIX_RECOVERY
+            elif local_candidates and not window_candidates:
+                reason = "mtime_inconsistent_with_prompt"
+            else:
+                reason = INSUFFICIENT_ATTRIBUTION_EVIDENCE
         elif execution_ts is None:
             # 2. No timestamp → unique leftover files are not attributable.
             reason = INSUFFICIENT_ATTRIBUTION_EVIDENCE
