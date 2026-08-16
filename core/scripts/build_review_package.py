@@ -21,6 +21,7 @@ def collect_files() -> list[Path]:
         paths.append(runtime_file)
 
     add("core/comfyui/install.sh")
+    add("core/comfyui/install_nodes.py")
     add("core/comfyui/README.md")
 
     for script_name in (
@@ -92,6 +93,7 @@ def collect_files() -> list[Path]:
         "simulate_package49_prepared_execution_controls.py",
         "simulate_package491_project_mirror_canonical_naming.py",
         "simulate_package410_generation_reproduction.py",
+        "simulate_package4101_custom_node_clone_resilience.py",
         "runtime_report.py",
         "verify_models.py",
         "verify_generation.py",

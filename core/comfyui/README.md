@@ -81,16 +81,18 @@ ls -ld /content/ComfyUI.broken.* /content/ComfyUI.archived.*
 
 | Script | Default behavior | Execute mode |
 |--------|-------------------|--------------|
-| `install_nodes.py` | Dry-run plan and status output | `--execute` clones missing nodes and installs per-node requirements when present |
+| `install_nodes.py` | Dry-run plan and status output | `--execute` clones missing nodes (bounded retries for transient git transport failures; recovers incomplete clones; never deletes valid checkouts) and installs per-node requirements when present |
 | `install_models.py` | Dry-run model validation summary | `--execute` validates model readiness only (no downloads) |
 
 ```bash
 python core/comfyui/install_nodes.py --dry-run
 python core/comfyui/install_nodes.py --execute
+python core/comfyui/install_nodes.py --execute --clone-attempts 3
 python core/comfyui/install_models.py --dry-run
 python core/comfyui/install_models.py --execute
 ```
 
+**Package 4.10.1 clone resilience:** Transient failures such as `curl 92` / HTTP/2 early EOF are retried with backoff. After the first transient failure, retries use scoped `git -c http.version=HTTP/1.1 clone ...` (no global git config mutation). Incomplete `custom_nodes/<name>` leftovers are removed before retry. Valid git checkouts are preserved. Required nodes (including ComfyUI-Manager) still fail closed after retries. Archived `ComfyUI.broken.*/custom_nodes` are never restored wholesale into a fresh runtime.
 ## Control Panel Integration
 
 The notebook's Cell 9 (`install_comfyui`) provides an in-notebook installer with additional node support. `install.sh` is the repo-managed, scriptable equivalent for:

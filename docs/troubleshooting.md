@@ -50,7 +50,8 @@ python core/comfyui/install_models.py --dry-run
 | Out of disk space | Large model downloads | Use Drive mount; prune runtime cache |
 | `bootstrap_repo.py` fails | Repo not cloned fully | Re-clone; ensure all top-level dirs present |
 | `validate_paths.py` warns on Colab paths | First run before install | Normal — install ComfyUI via notebook first |
-| `install_nodes.py` reports clone failure | Repo unavailable or network issue | Re-run with `--execute`; optional node failures are reported |
+| `install_nodes.py` reports clone failure | Repo unavailable or transient git transport error (e.g. curl 92 / HTTP/2 early EOF) | Re-run Full launch or `install_nodes.py --execute`. Package 4.10.1 retries transient clone failures with incomplete-clone recovery; required nodes still fail closed after retries. |
+| Full mode node install fails on ComfyUI-Manager | Required Manager clone failed (network) | Re-run Full. Incomplete `custom_nodes/ComfyUI-Manager` leftovers are recovered automatically before retry. Do not restore archived `ComfyUI.broken.*/custom_nodes` wholesale. |
 | `verify_models.py` reports required missing model | SD 1.5 or inpainting checkpoint not found at expected path | Place required checkpoint in Drive shared checkpoint path |
 
 ## Launch Flow Issues
@@ -66,7 +67,7 @@ python core/comfyui/install_models.py --dry-run
 | SD1.5 missing after launch | Checkpoint not on Drive | Place `sd15.safetensors` at expected path (no auto-download) |
 | Inpainting blocked in Image Editing menu | Dedicated inpainting checkpoint missing | Place `512-inpainting-ema.safetensors` at `/content/drive/MyDrive/AI_Studio/models/shared/checkpoints/` |
 | txt2img capability `partial` | SD1.5 or runtime prerequisite missing | Expected until SD1.5 present and generation succeeds |
-| Full mode node install fails | Required node clone error | Check network; re-run `install_nodes.py --execute` |
+| Full mode node install fails | Required node clone error after retries | Check network; re-run `install_nodes.py --execute` or Full launch. Transient HTTP/2 failures are retried; persistent failures remain fail-closed for required nodes. |
 | ComfyUI URL not shown | Port timeout | Check `/content/drive/MyDrive/AI_Studio/logs/comfyui.log` |
 
 ## ComfyUI Model Paths
