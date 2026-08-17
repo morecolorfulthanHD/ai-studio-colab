@@ -28,7 +28,11 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .generation_identity import InvalidGenerationIdError, normalize_generation_id
+from .generation_identity import (
+    InvalidGenerationIdError,
+    format_generation_not_found,
+    normalize_generation_id,
+)
 from .generation_snapshot import (
     MANIFEST_FILENAME,
     METADATA_FILENAME,
@@ -73,6 +77,21 @@ INSUFFICIENT_STATE_ERROR = (
     "ERROR: Generation does not contain sufficient executed workflow state "
     "for deterministic reproduction."
 )
+
+
+def should_prompt_open_reproduction_preparation(
+    *,
+    lookup_ok: bool,
+    prepare_ok: bool,
+    preparation_id: str = "",
+) -> bool:
+    """Prompt to open a reproduction prep only after one was actually created."""
+    if not lookup_ok or not prepare_ok:
+        return False
+    text = str(preparation_id or "").strip()
+    if text:
+        return text.lower().startswith("prep_")
+    return True
 
 BATCH_STATE_UNRECOVERABLE_ERROR = (
     "ERROR: Source generation came from a multi-image execution whose batch "
@@ -594,7 +613,7 @@ def prepare_from_generation(
         result.errors.append(str(exc))
         return result
     if manifest is None:
-        result.errors.append(f"ERROR: Generation not found:\n{canonical_gid}")
+        result.errors.append(format_generation_not_found(canonical_gid))
         return result
 
     snapshot_root = Path(str(manifest.get("snapshot_root") or ""))

@@ -94,6 +94,7 @@ def collect_files() -> list[Path]:
         "simulate_package491_project_mirror_canonical_naming.py",
         "simulate_package410_generation_reproduction.py",
         "simulate_package4101_custom_node_clone_resilience.py",
+        "simulate_package4102_generation_reproduction_lookup.py",
         "runtime_report.py",
         "verify_models.py",
         "verify_generation.py",

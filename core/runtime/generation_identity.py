@@ -30,6 +30,9 @@ class InvalidGenerationIdError(ValueError):
     """Raised when a generation ID cannot be normalized."""
 
 
+GENERATION_NOT_FOUND_HINT = "Use Recent generations to copy an exact ID."
+
+
 def format_generation_id_help() -> str:
     return (
         "ERROR: Invalid generation ID.\n"
@@ -37,6 +40,14 @@ def format_generation_id_help() -> str:
         "  gen_<UUID>\n"
         "or:\n"
         "  <UUID>"
+    )
+
+
+def format_generation_not_found(generation_id: str) -> str:
+    """Fail-closed not-found message. Does not suggest a substitute ID."""
+    return (
+        f"ERROR: Generation not found: {generation_id}\n"
+        f"{GENERATION_NOT_FOUND_HINT}"
     )
 
 

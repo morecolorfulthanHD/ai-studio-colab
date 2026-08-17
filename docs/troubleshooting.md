@@ -261,6 +261,7 @@ Base inpainting uses `VAEEncodeForInpaint` with KSampler denoise **1.0** and req
 |---------|--------------|------------|
 | Different output same seed | Node or model version drift | Pin versions in node/model registries |
 | Workflow JSON won't load | ComfyUI version mismatch | Update ComfyUI or use compatible export |
+| `ERROR: Generation not found` during Reproduce | Typed ID does not exactly match a stored `gen_<uuid>` | Copy the exact ID from Recent generations. UUID-shaped typos are not autocorrected. |
 
 ## Reporting Issues
 

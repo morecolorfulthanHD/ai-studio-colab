@@ -17,7 +17,11 @@ _spec.loader.exec_module(_activate)
 _activate.activate(__file__)
 
 from core.runtime.generation_history import generation_display_id, provenance_label, snapshot_status_label
-from core.runtime.generation_identity import InvalidGenerationIdError, normalize_generation_id
+from core.runtime.generation_identity import (
+    InvalidGenerationIdError,
+    format_generation_not_found,
+    normalize_generation_id,
+)
 from core.runtime.generation_reproduction import assess_reproduction_eligibility
 from core.runtime.generation_snapshot import MANIFEST_FILENAME, METADATA_FILENAME, WORKFLOW_FILENAME, load_snapshot_by_id
 from core.runtime.registry_loader import RegistryLoader, find_repo_root
@@ -78,7 +82,7 @@ def main() -> int:
         print(str(exc), file=sys.stderr)
         return 1
     if manifest is None:
-        print(f"ERROR: Generation not found:\n{generation_id}", file=sys.stderr)
+        print(format_generation_not_found(generation_id), file=sys.stderr)
         return 1
 
     snapshot_root = Path(str(manifest.get("snapshot_root") or ""))

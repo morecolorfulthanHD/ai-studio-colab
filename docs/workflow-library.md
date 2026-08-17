@@ -145,6 +145,8 @@ python core/scripts/compare_generation_reproduction.py \
   --reproduction-preparation prep_<uuid>
 ```
 
+Copy the exact `gen_<uuid>` from **Recent generations**. Valid UUID-shaped IDs that are not stored fail closed (`ERROR: Generation not found`). There is no fuzzy match or silent autocorrect. The notebook prompts **Open the new preparation in ComfyUI now?** only after a `prep_<uuid>` is actually created.
+
 Eligibility:
 
 - `workflow_snapshot_status=complete` → allowed when required executed params recover
