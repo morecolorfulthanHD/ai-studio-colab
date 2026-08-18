@@ -98,6 +98,11 @@ def main() -> int:
                 source = str(row.get("source_generation_id") or "").strip()
                 if source:
                     print(f"  source: {source}")
+            elif kind == "generation_derivation":
+                print("  kind: variation")
+                source = str(row.get("derived_from_generation_id") or row.get("source_generation_id") or "").strip()
+                if source:
+                    print(f"  derived from: {source}")
             print(f"  Project:      {project}")
             print(f"  Readiness:    {readiness}")
             print(f"  Created:      {created or '(unavailable)'}")

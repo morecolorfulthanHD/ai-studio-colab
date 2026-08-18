@@ -567,6 +567,7 @@ class ExecutionProvenance:
     comfyui_load_workflow_hash: str = ""
     preparation_kind: str = ""
     reproduced_from_generation_id: str = ""
+    derived_from_generation_id: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -602,6 +603,7 @@ class ExecutionProvenance:
             "comfyui_load_workflow_hash": self.comfyui_load_workflow_hash,
             "preparation_kind": self.preparation_kind,
             "reproduced_from_generation_id": self.reproduced_from_generation_id,
+            "derived_from_generation_id": self.derived_from_generation_id,
         }
 
 
@@ -685,6 +687,10 @@ def extract_execution_provenance(
         elif ai_meta.get("reproduction_source_generation_id"):
             provenance.reproduced_from_generation_id = str(
                 ai_meta.get("reproduction_source_generation_id") or ""
+            )
+        if ai_meta.get("derived_from_generation_id"):
+            provenance.derived_from_generation_id = str(
+                ai_meta.get("derived_from_generation_id") or ""
             )
     elif prompt_nodes:
         provenance.workflow_hash = provenance.api_prompt_hash

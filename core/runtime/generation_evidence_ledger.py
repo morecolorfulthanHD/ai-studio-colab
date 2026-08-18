@@ -123,6 +123,7 @@ class EvidenceRecord:
     comfyui_load_workflow_hash: str = ""
     preparation_kind: str = ""
     reproduced_from_generation_id: str = ""
+    derived_from_generation_id: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)

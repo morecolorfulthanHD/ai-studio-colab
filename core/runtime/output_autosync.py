@@ -460,6 +460,9 @@ class OutputAutoSyncService:
         record.reproduced_from_generation_id = str(
             payload.get("reproduced_from_generation_id") or record.reproduced_from_generation_id
         )
+        record.derived_from_generation_id = str(
+            payload.get("derived_from_generation_id") or record.derived_from_generation_id
+        )
 
     def _mirror_verified_to_project(
         self,

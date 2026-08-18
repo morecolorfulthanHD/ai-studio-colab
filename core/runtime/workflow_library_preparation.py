@@ -38,6 +38,7 @@ from .workflow_readiness import (
 PACKAGE_VERSION = "4.10"
 PREPARATION_KIND_ORDINARY = "ordinary"
 PREPARATION_KIND_GENERATION_REPRODUCTION = "generation_reproduction"
+PREPARATION_KIND_GENERATION_DERIVATION = "generation_derivation"
 
 
 @dataclass
@@ -74,6 +75,11 @@ def _allocate_preparation_id(runtime_prepared_root: Path) -> str:
         if not (runtime_prepared_root / preparation_id).exists():
             return preparation_id
     raise RuntimeError("Unable to allocate unique preparation_id")
+
+
+def allocate_preparation_id(runtime_prepared_root: Path) -> str:
+    """Public wrapper for deterministic prep id allocation (Package 4.11)."""
+    return _allocate_preparation_id(runtime_prepared_root)
 
 
 def _validate_allowed_path(path: Path, allowed_roots: list[Path]) -> str | None:
@@ -246,6 +252,7 @@ def prepare_library_workflow(
     preparation_kind: str = PREPARATION_KIND_ORDINARY,
     lineage_metadata: dict[str, Any] | None = None,
     package_version: str | None = None,
+    preparation_id: str | None = None,
 ) -> LibraryPreparationResult:
     """Prepare a library workflow with parameter bindings and staged inputs."""
     repo_root = repo_root.resolve()
@@ -338,7 +345,24 @@ def prepare_library_workflow(
     canonical_hash = hash_ui_workflow(canonical_data)
     result.canonical_workflow_hash = canonical_hash
 
-    preparation_id = _allocate_preparation_id(runtime_prepared_root)
+    if preparation_id:
+        prep_id_text = str(preparation_id).strip()
+        if not prep_id_text.startswith("prep_"):
+            result.errors.append(f"Invalid preparation_id: {preparation_id}")
+            return result
+        if (runtime_prepared_root / prep_id_text).exists() and not dry_run:
+            existing = runtime_prepared_root / prep_id_text
+            if existing.is_dir():
+                entries = {p.name for p in existing.iterdir()}
+                if entries - {"derivation_source"}:
+                    result.errors.append(f"Preparation directory already exists: {prep_id_text}")
+                    return result
+            else:
+                result.errors.append(f"Preparation path already exists: {prep_id_text}")
+                return result
+        preparation_id = prep_id_text
+    else:
+        preparation_id = _allocate_preparation_id(runtime_prepared_root)
     result.preparation_id = preparation_id
     operation_ts = utc_collision_timestamp()
 
@@ -387,6 +411,24 @@ def prepare_library_workflow(
                 "reproduction_source_preparation_id",
                 "reproduction_source_prompt_id",
                 "reproduction_source_image_sha256",
+            ):
+                if key in lineage:
+                    prepared_data["extra"]["ai_studio"][key] = lineage.get(key)
+        if kind == PREPARATION_KIND_GENERATION_DERIVATION:
+            parent_gid = lineage.get("derived_from_generation_id")
+            if parent_gid:
+                prepared_data["extra"]["ai_studio"]["derived_from_generation_id"] = parent_gid
+            for key in (
+                "derivation_type",
+                "derived_from_generation_id",
+                "derivation_source_image_sha256",
+                "derivation_source_canonical_path",
+                "derivation_source_project_output_path",
+                "derivation_source_archived_path",
+                "derivation_source_prompt_id",
+                "derivation_source_preparation_id",
+                "derivation_source_workflow_identifier",
+                "derivation_source_snapshot_path",
             ):
                 if key in lineage:
                     prepared_data["extra"]["ai_studio"][key] = lineage.get(key)
@@ -475,6 +517,20 @@ def prepare_library_workflow(
             "source_batch_size",
             "source_output_index",
             "reproduction_scope",
+        ):
+            metadata_payload[key] = lineage.get(key, None)
+    if kind == PREPARATION_KIND_GENERATION_DERIVATION:
+        metadata_payload["derivation_type"] = lineage.get("derivation_type", "image_variation")
+        for key in (
+            "derived_from_generation_id",
+            "derivation_source_image_sha256",
+            "derivation_source_canonical_path",
+            "derivation_source_project_output_path",
+            "derivation_source_archived_path",
+            "derivation_source_prompt_id",
+            "derivation_source_preparation_id",
+            "derivation_source_workflow_identifier",
+            "derivation_source_snapshot_path",
         ):
             metadata_payload[key] = lineage.get(key, None)
 
@@ -578,6 +634,11 @@ def prepare_library_workflow(
             index_record["reproduction_scope"] = lineage.get("reproduction_scope")
         if lineage.get("source_batch_size") is not None:
             index_record["source_batch_size"] = lineage.get("source_batch_size")
+    if kind == PREPARATION_KIND_GENERATION_DERIVATION:
+        index_record["kind"] = "generation_derivation"
+        index_record["derivation_type"] = lineage.get("derivation_type", "image_variation")
+        index_record["source_generation_id"] = lineage.get("derived_from_generation_id")
+        index_record["derived_from_generation_id"] = lineage.get("derived_from_generation_id")
     append_preparation_record(log_path, index_record)
     result.messages.append(f"Appended preparation record to {log_path}")
     return result

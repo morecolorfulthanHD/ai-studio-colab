@@ -1,4 +1,4 @@
-# Workflow Library (Package 4.8 / 4.9 / 4.10)
+# Workflow Library (Package 4.8 / 4.9 / 4.10 / 4.11)
 
 Four workflow layers:
 
@@ -158,3 +158,51 @@ Batch policy: selecting one `generation_id` from a multi-image batch prepares th
 Save-prefix policy: reproduction preps use `ai_studio_repro_<short-gen-id>`. Permanent Drive naming is unchanged.
 
 Open the resulting prep through the existing **Open prepared workflow** path (Package 4.8.4 userdata compatibility unchanged).
+
+## Package 4.11 — generation derivation / image variation
+
+**Create variation from generation** means: create a **new img2img preparation** from a **verified permanent generation PNG**. The source generation, snapshot, and original preparation remain immutable. Variation preps default to `seed_mode=randomize` with a concrete starting seed (not reproduction of the parent's executed seed).
+
+```bash
+python core/scripts/prepare_variation_from_generation.py --generation-id gen_<uuid>
+python core/scripts/compare_generation_derivation.py \
+  --source-generation gen_<uuid> \
+  --derivation-preparation prep_<uuid>
+```
+
+Lineage fields (primary parent-generation source only):
+
+- `preparation_kind=generation_derivation`
+- `derivation_type=image_variation`
+- `derived_from_generation_id` — creative parentage only (not character identity)
+- `derivation_source_*` — primary img2img input asset metadata
+- `derivation_source_archived_path` — preparation-relative `derivation_source/derivation_source.png` (not a runtime absolute path)
+
+Source asset flow: verified canonical PNG → SHA verify → prep-scoped `derivation_source/` archive → ComfyUI input staging. Opening a variation prep restages from the **preparation-relative** archive in the Drive/runtime/project copy being opened.
+
+**Eligibility (fail closed):** any verified image-producing generation may be a source (not limited to `base/txt2img`). Required inherited creative state must be recoverable from the source snapshot/metadata (or workflow payload). A PNG alone is not enough.
+
+Inherited from source (never silently defaulted):
+
+- positive prompt
+- negative prompt (empty is valid; missing treated as empty inheritance)
+- steps, CFG, sampler, scheduler
+- checkpoint / model identity
+
+New derivation defaults (not inherited):
+
+- seed: new concrete preparation seed
+- seed_mode: `randomize` (user may select `fixed`)
+- denoise / variation strength: `0.55`
+- save_prefix: `ai_studio_var_<short-gen-id>` (locked)
+- input_image: archived source PNG (locked)
+
+Complete snapshots with all inherited fields: eligible. Partial snapshots: eligible only when every inherited field is still recoverable. Legacy/PNG-only or missing creative state: refuse. Missing image, missing SHA, or SHA mismatch: refuse.
+
+Missing inherited checkpoint or required img2img node: no usable prep (no substitution, no auto-download).
+
+Project scope defaults to the source generation's project. A global source creates a global derivative. An archived source project fails closed.
+
+Batch policy (contrast with reproduction): one selected batch sibling may be varied independently because autosync materializes each as its own verified artifact. Variation does **not** propagate source `batch_size`.
+
+Does **not** queue `/prompt`, auto-run, or implement img2img exact reproduction (Package 4.10 reproduction semantics unchanged).

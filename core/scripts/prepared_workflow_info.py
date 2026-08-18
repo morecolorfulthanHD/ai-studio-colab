@@ -111,6 +111,9 @@ def main() -> int:
     kind = str(metadata.get("preparation_kind") or record.get("preparation_kind") or "ordinary")
     if kind == "generation_reproduction":
         print("Kind:                   generation reproduction")
+    elif kind == "generation_derivation":
+        print("Kind:                   generation derivation")
+        print(f"Derivation type:        {metadata.get('derivation_type') or record.get('derivation_type') or '-'}")
     else:
         print(f"Kind:                   {kind}")
     print(f"Workflow:               {record.get('workflow_identifier')}")
@@ -135,6 +138,15 @@ def main() -> int:
             print(f"Source batch size:      {metadata.get('source_batch_size')}")
         if metadata.get("source_output_index") is not None:
             print(f"Source output index:    {metadata.get('source_output_index')}")
+    elif kind == "generation_derivation":
+        print(
+            f"Source generation:      "
+            f"{metadata.get('derived_from_generation_id') or record.get('source_generation_id') or '-'}"
+        )
+        print(f"Source prompt:          {metadata.get('derivation_source_prompt_id') or '-'}")
+        print(f"Source preparation:     {metadata.get('derivation_source_preparation_id') or '-'}")
+        print(f"Source image SHA:       {metadata.get('derivation_source_image_sha256') or '-'}")
+        print(f"Archived source:        {metadata.get('derivation_source_archived_path') or '-'}")
     print(f"Seed:                   {seed if seed not in (None, '') else '(unavailable)'}")
     print(f"Seed mode:              {seed_mode}")
     print(f"Control after generate: {control}")
@@ -147,6 +159,9 @@ def main() -> int:
     print(f"Checkpoint:             {_param(metadata, record, 'checkpoint') or '(unavailable)'}")
     print(f"Steps:                  {_param(metadata, record, 'steps') or '(unavailable)'}")
     print(f"CFG:                    {_param(metadata, record, 'cfg') or '(unavailable)'}")
+    denoise = _param(metadata, record, "denoise")
+    if denoise not in (None, ""):
+        print(f"Variation strength:     {denoise}")
     width = _param(metadata, record, "width")
     height = _param(metadata, record, "height")
     if width not in (None, "") or height not in (None, ""):

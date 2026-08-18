@@ -66,6 +66,17 @@
       "target_field": "widgets_values[0]",
       "secret": false
     },
+    "seed_mode": {
+      "display_name": "Seed Mode",
+      "description": "fixed keeps KSampler control_after_generate=fixed for reproducible repeats. randomize uses ComfyUI's native control_after_generate=randomize so each completed Run advances the seed.",
+      "type": "enum",
+      "required": true,
+      "default": "fixed",
+      "allowed_values": ["fixed", "randomize"],
+      "target_node_id": "6",
+      "target_field": "widgets_values[1]",
+      "secret": false
+    },
     "steps": {
       "display_name": "Steps",
       "type": "integer",
@@ -149,6 +160,7 @@
     "positive_prompt": "",
     "negative_prompt": "",
     "seed": 123456789,
+    "seed_mode": "fixed",
     "steps": 24,
     "cfg": 7.0,
     "sampler_name": "euler",

@@ -56,8 +56,24 @@ def main() -> int:
         return 1
 
     prepared_dir = Path(str(record.get("drive_prepared_dir") or record.get("runtime_prepared_dir") or ""))
-    source = prepared_dir / f"{preparation_id}.workflow.json"
     comfyui_runtime = args.comfyui_runtime or bundle.path("comfyui_runtime")
+    metadata_path = prepared_dir / f"{preparation_id}.metadata.json"
+    metadata = {}
+    if metadata_path.is_file():
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            metadata = {}
+
+    from core.runtime.generation_derivation import restage_derivation_inputs_for_open
+
+    restage_messages, restage_errors = restage_derivation_inputs_for_open(
+        prepared_dir=prepared_dir,
+        metadata=metadata if isinstance(metadata, dict) else {},
+        comfyui_input_dir=Path(comfyui_runtime) / "input",
+    )
+
+    source = prepared_dir / f"{preparation_id}.workflow.json"
 
     result = open_prepared_workflow_for_comfyui(
         preparation_id=preparation_id,
@@ -69,10 +85,19 @@ def main() -> int:
     payload = result.to_dict()
 
     if args.json:
+        if restage_errors:
+            print(json.dumps({"restage_errors": restage_errors}, indent=2), file=sys.stderr)
+            return 1
         print(json.dumps(payload, indent=2))
     else:
         print("AI Studio — Open Prepared Workflow")
         print("=" * 40)
+        for message in restage_messages:
+            print(f"Note: {message}")
+        for error in restage_errors:
+            print(error, file=sys.stderr)
+        if restage_errors:
+            return 1
         print(f"Preparation ID:     {result.preparation_id}")
         print(f"Archival source:    {result.source_path}")
         print(f"Loading copy:       {result.filesystem_destination}")

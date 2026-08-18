@@ -198,6 +198,9 @@ def build_metadata_snapshot(
     reproduced_from_generation_id = getattr(
         record, "reproduced_from_generation_id", ""
     ) or getattr(prov, "reproduced_from_generation_id", "") or ""
+    derived_from_generation_id = getattr(record, "derived_from_generation_id", "") or getattr(
+        prov, "derived_from_generation_id", ""
+    ) or ""
     canonical_workflow_identifier = ""
     ai_meta = extract_ai_studio_extra(ui_workflow)
     if ai_meta:
@@ -212,6 +215,9 @@ def build_metadata_snapshot(
             ai_meta.get("reproduced_from_generation_id")
             or ai_meta.get("reproduction_source_generation_id")
             or ""
+        )
+        derived_from_generation_id = derived_from_generation_id or str(
+            ai_meta.get("derived_from_generation_id") or ""
         )
 
     def _nullable(value: Any) -> Any:
@@ -273,6 +279,7 @@ def build_metadata_snapshot(
         "comfyui_load_workflow_hash": _nullable(comfyui_load_workflow_hash),
         "preparation_kind": _nullable(preparation_kind),
         "reproduced_from_generation_id": _nullable(reproduced_from_generation_id),
+        "derived_from_generation_id": _nullable(derived_from_generation_id),
     }
 
 

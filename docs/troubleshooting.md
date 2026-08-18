@@ -50,7 +50,9 @@ python core/comfyui/install_models.py --dry-run
 | Out of disk space | Large model downloads | Use Drive mount; prune runtime cache |
 | `bootstrap_repo.py` fails | Repo not cloned fully | Re-clone; ensure all top-level dirs present |
 | `validate_paths.py` warns on Colab paths | First run before install | Normal — install ComfyUI via notebook first |
-| `install_nodes.py` reports clone failure | Repo unavailable or transient git transport error (e.g. curl 92 / HTTP/2 early EOF) | Re-run Full launch or `install_nodes.py --execute`. Package 4.10.1 retries transient clone failures with incomplete-clone recovery; required nodes still fail closed after retries. |
+| Variation prep fails with source SHA mismatch | Source PNG changed on disk after snapshot | Fail closed by design; restore canonical output or pick a verified generation. |
+| Variation prep fails with input path not allowed | Attempt to use outputs/ directly without archive | Use `prepare_variation_from_generation.py`; it archives into prep-scoped `derivation_source/`. |
+| After restart, img2img LoadImage missing | ComfyUI input cleared | Re-open via `open_prepared_workflow.py` — Package 4.11 restages from archived source. |
 | Full mode node install fails on ComfyUI-Manager | Required Manager clone failed (network) | Re-run Full. Incomplete `custom_nodes/ComfyUI-Manager` leftovers are recovered automatically before retry. Do not restore archived `ComfyUI.broken.*/custom_nodes` wholesale. |
 | `verify_models.py` reports required missing model | SD 1.5 or inpainting checkpoint not found at expected path | Place required checkpoint in Drive shared checkpoint path |
 

@@ -138,6 +138,10 @@ def main() -> int:
             print(f"  project={row.get('project_output_path')}")
         if row.get("snapshot_root"):
             print(f"  snapshot={row.get('snapshot_root')}")
+        if row.get("reproduced_from_generation_id"):
+            print(f"  reproduced from {row.get('reproduced_from_generation_id')}")
+        if row.get("derived_from_generation_id"):
+            print(f"  derived from {row.get('derived_from_generation_id')}")
     return 0
 
 

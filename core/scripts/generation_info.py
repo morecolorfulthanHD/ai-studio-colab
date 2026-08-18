@@ -22,6 +22,7 @@ from core.runtime.generation_identity import (
     format_generation_not_found,
     normalize_generation_id,
 )
+from core.runtime.generation_derivation import assess_derivation_eligibility
 from core.runtime.generation_reproduction import assess_reproduction_eligibility
 from core.runtime.generation_snapshot import MANIFEST_FILENAME, METADATA_FILENAME, WORKFLOW_FILENAME, load_snapshot_by_id
 from core.runtime.registry_loader import RegistryLoader, find_repo_root
@@ -100,6 +101,11 @@ def main() -> int:
         workflow_payload=workflow_payload,
         manifest=manifest,
     )
+    derivation_eligibility = assess_derivation_eligibility(
+        metadata=metadata,
+        manifest=manifest,
+        workflow_payload=workflow_payload,
+    )
 
     payload = {
         "generation_id": generation_id,
@@ -121,9 +127,14 @@ def main() -> int:
         or workflow_payload.get("workflow_snapshot_status"),
         "reproduction_eligible": eligibility.eligible,
         "reproduction_eligibility_reason": eligibility.reason if not eligibility.eligible else "eligible",
+        "derivation_eligible": derivation_eligibility.eligible,
+        "derivation_eligibility_reason": derivation_eligibility.reason
+        if not derivation_eligibility.eligible
+        else "eligible",
         "preparation_id": metadata.get("preparation_id"),
         "preparation_kind": metadata.get("preparation_kind"),
         "reproduced_from_generation_id": metadata.get("reproduced_from_generation_id"),
+        "derived_from_generation_id": metadata.get("derived_from_generation_id"),
         "metadata_path": str(metadata_path),
         "workflow_path": str(workflow_path),
         "manifest_path": str(manifest_path),
@@ -159,8 +170,13 @@ def main() -> int:
         print(f"Reproduction note:          {payload.get('reproduction_eligibility_reason')}")
     if payload.get("reproduced_from_generation_id"):
         print(f"Reproduced from:            {payload.get('reproduced_from_generation_id')}")
+    if payload.get("derived_from_generation_id"):
+        print(f"Derived from:               {payload.get('derived_from_generation_id')}")
     if payload.get("preparation_kind"):
         print(f"Preparation kind:           {payload.get('preparation_kind')}")
+    print(f"Variation eligible:         {'yes' if payload.get('derivation_eligible') else 'no'}")
+    if not payload.get("derivation_eligible"):
+        print(f"Variation note:             {payload.get('derivation_eligibility_reason')}")
     print(f"Image SHA256:               {payload.get('image_sha256') or '(unavailable)'}")
     print(f"Canonical output:           {payload.get('canonical_output_path') or '(unavailable)'}")
     return 0
