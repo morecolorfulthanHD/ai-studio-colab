@@ -26,6 +26,7 @@ from core.runtime.generation_derivation import assess_derivation_eligibility
 from core.runtime.generation_reproduction import assess_reproduction_eligibility
 from core.runtime.generation_snapshot import MANIFEST_FILENAME, METADATA_FILENAME, WORKFLOW_FILENAME, load_snapshot_by_id
 from core.runtime.registry_loader import RegistryLoader, find_repo_root
+from core.runtime.seed_mode import seed_precision_warning
 
 
 def _load_json(path: Path) -> dict:
@@ -164,6 +165,9 @@ def main() -> int:
     print(f"Workflow:                   {payload.get('workflow_identifier') or '(unavailable)'}")
     print(f"Project:                    {payload.get('project_slug') or '(global)'}")
     print(f"Seed:                       {payload.get('seed') if payload.get('seed') is not None else '(unavailable)'}")
+    seed_warn = seed_precision_warning(payload.get("seed"))
+    if seed_warn:
+        print(f"Seed note:                  {seed_warn}")
     print(f"Workflow snapshot status:   {payload.get('workflow_snapshot_status') or '(unavailable)'}")
     print(f"Reproduction eligible:      {'yes' if payload.get('reproduction_eligible') else 'no'}")
     if not payload.get("reproduction_eligible"):

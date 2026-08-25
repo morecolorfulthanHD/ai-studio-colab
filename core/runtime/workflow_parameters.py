@@ -8,6 +8,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from .seed_mode import SEED_PRECISION_ERROR, is_js_safe_seed
+
 IMAGE_PARAM_TYPES = frozenset({"image", "mask", "file"})
 
 _UNSAFE_FILENAME_CHARS = re.compile(r'[/\\:*?"<>|]')
@@ -92,6 +94,11 @@ def _coerce_value(param_name: str, spec: dict[str, Any], raw: Any) -> tuple[Any,
             )
         minimum = spec.get("minimum")
         maximum = spec.get("maximum")
+        # Seed must remain JS-safe for ComfyUI browser round-trip (Package 4.11.1).
+        # Fail closed with a clear message — never clamp/round/modulo.
+        if param_name == "seed" and not is_js_safe_seed(value):
+            errors.append(SEED_PRECISION_ERROR)
+            return value, errors
         if minimum is not None and value < minimum:
             errors.append(f"{param_name}: value {value} below minimum {minimum}")
         if maximum is not None and value > maximum:

@@ -44,7 +44,9 @@ from .project_workspace import ProjectManifest
 from .seed_mode import (
     CONTROL_AFTER_GENERATE_FIXED,
     SEED_MODE_FIXED,
+    SEED_PRECISION_ERROR,
     coerce_execution_seed,
+    is_js_safe_seed,
 )
 from .workflow_library_preparation import (
     LibraryPreparationResult,
@@ -521,6 +523,17 @@ def assess_reproduction_eligibility(
             snapshot_status=snapshot_status,
             workflow_identifier=identifier,
             missing_fields=missing,
+        )
+
+    executed_seed = _params.get("seed")
+    if executed_seed is not None and not is_js_safe_seed(executed_seed):
+        return ReproductionEligibility(
+            eligible=False,
+            reason=f"ERROR: {SEED_PRECISION_ERROR}",
+            workflow_snapshot_status=workflow_status,
+            snapshot_status=snapshot_status,
+            workflow_identifier=identifier,
+            missing_fields=[],
         )
 
     if workflow_status == "partial":

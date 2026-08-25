@@ -46,7 +46,7 @@ from core.runtime.generation_snapshot import (
 )
 from core.runtime.png_utils import write_rgb_png
 from core.runtime.project_workspace import ProjectWorkspace
-from core.runtime.seed_mode import SEED_MODE_FIXED, SEED_MODE_RANDOMIZE
+from core.runtime.seed_mode import SEED_MODE_FIXED, SEED_MODE_RANDOMIZE, MAX_SAFE_SEED, is_js_safe_seed
 from core.runtime.workflow_library_preparation import prepare_library_workflow
 from core.runtime.workflow_manifest import load_workflow_manifest
 from core.runtime.workflow_provenance import ExecutionProvenance, extract_ai_studio_extra, extract_execution_provenance
@@ -400,6 +400,8 @@ def main() -> int:
         _assert_equal("case A inherited checkpoint", var_a.parameters.get("checkpoint"), "sd15.safetensors")
         _assert_equal("case A denoise default", float(var_a.parameters.get("denoise")), 0.55)
         _assert_true("case A new seed", var_a.parameters.get("seed") != 135791357)
+        _assert_true("case A seed js-safe", is_js_safe_seed(var_a.parameters.get("seed")))
+        _assert_true("case A seed <= MAX_SAFE_SEED", int(var_a.parameters.get("seed")) <= MAX_SAFE_SEED)
         _assert_true(
             "case A save prefix",
             str(var_a.parameters.get("save_prefix") or "").startswith("ai_studio_var_"),
@@ -447,6 +449,7 @@ def main() -> int:
         _assert_true("case B ok", var_b.ok)
         _assert_equal("case B seed_mode", var_b.parameters.get("seed_mode"), SEED_MODE_RANDOMIZE)
         _assert_true("case B seed not frozen as reproduction", var_b.parameters.get("seed_mode") != "fixed")
+        _assert_true("case B seed js-safe", is_js_safe_seed(var_b.parameters.get("seed")))
         _pass(results, "Case B — randomized source uses variation seed intent")
 
         # --- Case C: two batch siblings, select A only ---

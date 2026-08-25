@@ -70,7 +70,7 @@
       "required": true,
       "default": 123456789,
       "minimum": 0,
-      "maximum": 18446744073709551615,
+      "maximum": 9007199254740991,
       "target_node_id": "7",
       "target_field": "widgets_values[0]",
       "secret": false

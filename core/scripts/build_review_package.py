@@ -98,6 +98,7 @@ def collect_files() -> list[Path]:
         "simulate_package4101_custom_node_clone_resilience.py",
         "simulate_package4102_generation_reproduction_lookup.py",
         "simulate_package411_generation_derivation.py",
+        "simulate_package4111_seed_precision.py",
         "runtime_report.py",
         "verify_models.py",
         "verify_generation.py",

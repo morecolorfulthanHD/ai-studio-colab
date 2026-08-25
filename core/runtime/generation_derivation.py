@@ -23,7 +23,6 @@ image only so Package 4.12+ can add auxiliary references without overloading lin
 from __future__ import annotations
 
 import json
-import secrets
 import shutil
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -46,9 +45,11 @@ from .seed_mode import (
     ALLOWED_SEED_MODE_SET,
     SEED_MODE_FIXED,
     SEED_MODE_RANDOMIZE,
-    coerce_execution_seed,
+    SEED_PRECISION_ERROR,
     control_after_generate_for_seed_mode,
     extract_ksampler_widgets,
+    generate_js_safe_seed,
+    validate_js_safe_seed,
 )
 from .workflow_library_preparation import (
     LibraryPreparationResult,
@@ -57,7 +58,7 @@ from .workflow_library_preparation import (
 )
 from .workflow_manifest import load_workflow_manifest
 
-PACKAGE_VERSION = "4.11"
+PACKAGE_VERSION = "4.11.1"
 PREPARATION_KIND_GENERATION_DERIVATION = "generation_derivation"
 DERIVATION_TYPE_IMAGE_VARIATION = "image_variation"
 DERIVATION_WORKFLOW_IDENTIFIER = "base/img2img"
@@ -531,7 +532,7 @@ def assess_derivation_eligibility(
 
 
 def _default_variation_seed() -> int:
-    return secrets.randbelow(2**63)
+    return generate_js_safe_seed()
 
 
 def build_default_variation_parameters(
@@ -549,9 +550,12 @@ def build_default_variation_parameters(
     seed_mode_override = overrides.pop("seed_mode", None)
     denoise_override = overrides.pop("denoise", None)
 
-    seed = coerce_execution_seed(seed_override)
-    if seed is None:
+    if seed_override is None:
         seed = _default_variation_seed()
+    else:
+        seed, seed_error = validate_js_safe_seed(seed_override)
+        if seed_error or seed is None:
+            raise ValueError(seed_error or SEED_PRECISION_ERROR)
 
     seed_mode = str(seed_mode_override or SEED_MODE_RANDOMIZE).strip() or SEED_MODE_RANDOMIZE
     denoise = DEFAULT_DENOISE if denoise_override is None else denoise_override
@@ -756,11 +760,15 @@ def prepare_variation_from_generation(
         result.errors.append(f"ERROR: Cannot load img2img workflow manifest: {exc}")
         return result
 
-    params = build_default_variation_parameters(
-        inherited=eligibility.inherited_parameters,
-        generation_id=canonical_gid,
-        parameter_overrides=parameter_overrides,
-    )
+    try:
+        params = build_default_variation_parameters(
+            inherited=eligibility.inherited_parameters,
+            generation_id=canonical_gid,
+            parameter_overrides=parameter_overrides,
+        )
+    except ValueError as exc:
+        result.errors.append(str(exc))
+        return result
     result.parameters = dict(params)
 
     if project_context is None and active_project is None:
