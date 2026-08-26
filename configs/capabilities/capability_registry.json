@@ -588,6 +588,37 @@
       "implementation_status": "benchmark",
       "production_status": "benchmark_only",
       "quality_status": "untested"
+    },
+    {
+      "id": "identity_benchmark",
+      "name": "Identity Method Benchmark",
+      "description": "Package 4.12 benchmark-only comparison of ReActor face swap vs IPAdapter FaceID SD1.5. Not a production identity capability.",
+      "category": "consistency",
+      "maturity": "experimental",
+      "status": "planned",
+      "supported_engines": [
+        "comfyui"
+      ],
+      "required_models": [
+        "sd15_checkpoint",
+        "insightface"
+      ],
+      "required_nodes": [
+        "ComfyUI-ReActor"
+      ],
+      "required_assets": [
+        "insightface_buffalo"
+      ],
+      "required_workflows": [
+        "identity_reactor_benchmark",
+        "identity_faceid_benchmark"
+      ],
+      "dependencies": [],
+      "validation_rules": [
+        "all_required_nodes_registered"
+      ],
+      "notes": "CODE/SIM plumbing + human selection gate. InstantID/SDXL deferred. No automatic 4.13 promotion.",
+      "implementation_status": "benchmark"
     }
   ]
 }

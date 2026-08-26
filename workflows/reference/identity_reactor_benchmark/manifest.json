@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "workflow_identifier": "reference/identity_reactor_benchmark",
+  "display_name": "Identity Benchmark \u2014 ReActor Face Swap",
+  "description": "Package 4.12 identity-method benchmark only (reactor_faceswap_benchmark). Not a production identity default.",
+  "category": "identity_benchmark",
+  "capability": "identity_benchmark",
+  "implementation_status": "benchmark",
+  "runtime_status": "partial",
+  "quality_status": "untested",
+  "production_status": "benchmark_only",
+  "status_reason": "Benchmark plumbing stub; operational quality requires S1-S4 Runs + human rubric. Prepare/open is not a quality claim.",
+  "model_family": "sd15",
+  "required_model_files": [
+    "insightface"
+  ],
+  "optional_model_files": [],
+  "required_nodes": [
+    "ComfyUI-ReActor"
+  ],
+  "optional_nodes": [],
+  "canonical_workflow_path": "workflows/reference/identity_reactor_benchmark/workflow.json",
+  "workflow_hash": "cb04835d5d2b8d064c718897f4c3717c4e2cefa3185aecdb102f53d3f9851401",
+  "workflow_hash_type": "ui_workflow_v1",
+  "parameter_schema": {
+    "input_image": {
+      "type": "string",
+      "required": true,
+      "default": "",
+      "target_node_id": 1,
+      "target_field": "widgets_values[0]"
+    },
+    "positive_prompt": {
+      "type": "string",
+      "required": true,
+      "default": "portrait",
+      "target_node_id": 3,
+      "target_field": "widgets_values[0]"
+    },
+    "seed": {
+      "type": "integer",
+      "required": true,
+      "default": 42,
+      "min": 0,
+      "max": 9007199254740991,
+      "target_node_id": 6,
+      "target_field": "widgets_values[0]"
+    },
+    "seed_mode": {
+      "type": "string",
+      "required": false,
+      "default": "fixed",
+      "allowed_values": [
+        "fixed",
+        "randomize"
+      ],
+      "target_node_id": 6,
+      "target_field": "widgets_values[1]"
+    },
+    "save_prefix": {
+      "type": "string",
+      "required": true,
+      "default": "ai_studio_idbench",
+      "target_node_id": 8,
+      "target_field": "widgets_values[0]"
+    }
+  },
+  "default_parameters": {
+    "input_image": "",
+    "positive_prompt": "portrait",
+    "seed": 42,
+    "seed_mode": "fixed",
+    "save_prefix": "ai_studio_idbench"
+  },
+  "output_prefix": "ai_studio_idbench",
+  "supported_environments": [
+    "colab"
+  ],
+  "license_notes": [
+    "InsightFace model cards are typically research-restricted; no auto-download; no production promotion without license review."
+  ],
+  "tags": [
+    "benchmark",
+    "identity",
+    "package412"
+  ],
+  "documentation_path": "workflows/reference/identity_reactor_benchmark/README.md",
+  "launchable": false,
+  "requires_experimental": false,
+  "requires_benchmark": true
+}

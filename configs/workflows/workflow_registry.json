@@ -216,6 +216,37 @@
       ],
       "required_nodes": [],
       "notes": "Official ComfyUI FLUX Fill inpaint workflow. Benchmark only; non-commercial weight license."
+    },
+    {
+      "id": "identity_reactor_benchmark",
+      "category": "identity_benchmark",
+      "path": "workflows/reference/identity_reactor_benchmark/workflow.json",
+      "status": "benchmark",
+      "required_models": [
+        "sd15_checkpoint",
+        "insightface"
+      ],
+      "required_nodes": [
+        "ComfyUI-ReActor"
+      ],
+      "notes": "Package 4.12 ReActor face-swap identity-method benchmark only. Not production default."
+    },
+    {
+      "id": "identity_faceid_benchmark",
+      "category": "identity_benchmark",
+      "path": "workflows/reference/identity_faceid_benchmark/workflow.json",
+      "status": "benchmark",
+      "required_models": [
+        "sd15_checkpoint",
+        "ipadapter_faceid_plusv2_sd15",
+        "ipadapter_faceid_plusv2_sd15_lora",
+        "clip_vision_sd15",
+        "insightface"
+      ],
+      "required_nodes": [
+        "ComfyUI_IPAdapter_plus"
+      ],
+      "notes": "Package 4.12 IPAdapter FaceID SD1.5 identity-method benchmark only. Not production default. InstantID/SDXL deferred."
     }
   ]
 }

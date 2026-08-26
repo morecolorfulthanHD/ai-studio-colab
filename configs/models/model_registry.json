@@ -127,7 +127,10 @@
       "intended_path": "assets/insightface/",
       "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/insightface/models/buffalo_l/w600k_r50.onnx",
       "required_for": [
-        "reactor_faceswap"
+        "reactor_faceswap",
+        "reactor_faceswap_benchmark",
+        "ipadapter_faceid_sd15_benchmark",
+        "identity_benchmark"
       ],
       "status": "planned",
       "notes": "InsightFace ONNX models for face detection and identity."
@@ -219,6 +222,43 @@
       ],
       "status": "planned",
       "notes": "FLUX autoencoder VAE."
+    },
+    {
+      "name": "ipadapter_faceid_plusv2_sd15",
+      "category": "ipadapter",
+      "intended_path": "assets/ipadapter/ip-adapter-faceid-plusv2_sd15.bin",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/ipadapter/ip-adapter-faceid-plusv2_sd15.bin",
+      "required_for": [
+        "ipadapter_faceid_sd15_benchmark",
+        "identity_benchmark"
+      ],
+      "status": "planned",
+      "notes": "Package 4.12 exact FaceID Plus v2 SD1.5 adapter. Source: h94/IP-Adapter-FaceID (Hugging Face). Research license \u2014 manual placement only; no auto-download."
+    },
+    {
+      "name": "ipadapter_faceid_plusv2_sd15_lora",
+      "category": "lora",
+      "intended_path": "assets/loras/ip-adapter-faceid-plusv2_sd15_lora.safetensors",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/loras/ip-adapter-faceid-plusv2_sd15_lora.safetensors",
+      "required_for": [
+        "ipadapter_faceid_sd15_benchmark",
+        "identity_benchmark"
+      ],
+      "status": "planned",
+      "notes": "Matching FaceID Plus v2 SD1.5 LoRA for ip-adapter-faceid-plusv2_sd15. Manual placement only."
+    },
+    {
+      "name": "clip_vision_sd15",
+      "category": "clip",
+      "intended_path": "assets/clip/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/clip/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
+      "required_for": [
+        "ipadapter_faceid_sd15_benchmark",
+        "identity_benchmark",
+        "reference_lock"
+      ],
+      "status": "planned",
+      "notes": "CLIP vision encoder used by IPAdapter FaceID workflows."
     }
   ]
 }

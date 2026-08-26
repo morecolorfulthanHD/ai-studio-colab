@@ -1,0 +1,61 @@
+{
+  "version": "1.0.0",
+  "label": "identity_method_benchmark_manifest",
+  "package": "4.12",
+  "notes": [
+    "Live candidates only: reactor_faceswap_benchmark and ipadapter_faceid_sd15_benchmark.",
+    "InstantID/SDXL is deferred and must not be treated as a live 4.12 candidate.",
+    "Prepare/open is plumbing only; operational acceptance requires candidate x S1-S4 Runs + human rubric.",
+    "No automatic promotion to Package 4.13.",
+    "Identity-model assets are manual placement only (no auto-download)."
+  ],
+  "live_candidates": [
+    "reactor_faceswap_benchmark",
+    "ipadapter_faceid_sd15_benchmark"
+  ],
+  "deferred_candidates": [
+    "instantid_sdxl_deferred"
+  ],
+  "scenarios": [
+    {
+      "id": "S1_near_front_portrait",
+      "role": "control_fidelity"
+    },
+    {
+      "id": "S2_head_angle_pose",
+      "role": "pose_tolerance"
+    },
+    {
+      "id": "S3_expression_change",
+      "role": "expression_tolerance"
+    },
+    {
+      "id": "S4_wardrobe_environment",
+      "role": "scene_composition_decisive"
+    }
+  ],
+  "human_review_rubric": [
+    "identity_recognizability",
+    "pose_head_angle_tolerance",
+    "expression_tolerance",
+    "scene_composition_preservation",
+    "visual_artifacts",
+    "usability_repeatability",
+    "runtime_resource_cost",
+    "operational_complexity"
+  ],
+  "character_policy": {
+    "primary_face_refs_required": 1,
+    "additional_refs_optional": true,
+    "drive_root_subdir": "characters",
+    "id_prefix": "char_"
+  },
+  "exact_asset_choices": {
+    "ipadapter_faceid_plusv2_sd15": "assets/ipadapter/ip-adapter-faceid-plusv2_sd15.bin",
+    "ipadapter_faceid_plusv2_sd15_lora": "assets/loras/ip-adapter-faceid-plusv2_sd15_lora.safetensors",
+    "clip_vision_sd15": "assets/clip/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
+    "insightface_buffalo": "assets/insightface/models/buffalo_l/w600k_r50.onnx",
+    "ComfyUI_IPAdapter_plus": "https://github.com/cubiq/ComfyUI_IPAdapter_plus",
+    "install_strategy": "Register node in Full/custom-node install path as planned; pin commit at live install time; do not auto-download FaceID/InsightFace weights."
+  }
+}

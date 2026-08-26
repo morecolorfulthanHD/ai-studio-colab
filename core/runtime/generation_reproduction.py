@@ -451,6 +451,18 @@ def assess_reproduction_eligibility(
     ).strip()
 
     warnings: list[str] = []
+    from .identity_benchmark import BENCHMARK_PARENT_REFUSAL, is_benchmark_generation_metadata
+
+    if is_benchmark_generation_metadata(metadata):
+        return ReproductionEligibility(
+            eligible=False,
+            reason=BENCHMARK_PARENT_REFUSAL,
+            workflow_snapshot_status=workflow_status,
+            snapshot_status=snapshot_status,
+            workflow_identifier=identifier,
+            missing_fields=["benchmark_run"],
+        )
+
     if not identifier or identifier == "unknown":
         return ReproductionEligibility(
             eligible=False,

@@ -51,6 +51,8 @@ IDENTIFIER_TO_CAPABILITY: dict[str, str] = {
     "reference/inpainting_official": "inpainting",
     "benchmark/qwen_image_edit": "qwen_image_edit_benchmark",
     "benchmark/flux_fill": "flux_fill_benchmark",
+    "reference/identity_reactor_benchmark": "identity_benchmark",
+    "reference/identity_faceid_benchmark": "identity_benchmark",
 }
 
 CHECKPOINT_TO_FAMILY: dict[str, str] = {

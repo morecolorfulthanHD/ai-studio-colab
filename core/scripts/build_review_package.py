@@ -113,6 +113,13 @@ def collect_files() -> list[Path]:
         "simulate_package4102_generation_reproduction_lookup.py",
         "simulate_package411_generation_derivation.py",
         "simulate_package4111_seed_precision.py",
+        "simulate_package412_character_identity.py",
+        "register_character.py",
+        "list_characters.py",
+        "show_character.py",
+        "prepare_identity_benchmark.py",
+        "run_identity_benchmark.py",
+        "report_identity_benchmark.py",
         "runtime_report.py",
         "verify_models.py",
         "verify_generation.py",
@@ -134,6 +141,8 @@ def collect_files() -> list[Path]:
         "workflows/reference/inpainting_official",
         "workflows/reference/qwen_image_edit",
         "workflows/reference/flux_fill",
+        "workflows/reference/identity_reactor_benchmark",
+        "workflows/reference/identity_faceid_benchmark",
     )
     for workflow_dir in workflow_dirs:
         for workflow_file in sorted((REPO_ROOT / workflow_dir).rglob("*")):
@@ -152,6 +161,8 @@ def collect_files() -> list[Path]:
         "docs/model-compatibility-modern-editing.md",
         "docs/decisions/modern-editing-selection-gate.md",
         "docs/decisions/sd15-inpainting-quality-gate.md",
+        "docs/decisions/identity-method-selection-gate.md",
+        "docs/dogfooding/identity-method-benchmark-checklist.md",
         "docs/dogfooding/img2img-checklist.md",
         "docs/dogfooding/inpainting-checklist.md",
         "docs/dogfooding/inpainting-diagnostic-checklist.md",

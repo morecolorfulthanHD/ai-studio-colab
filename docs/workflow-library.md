@@ -206,3 +206,34 @@ Project scope defaults to the source generation's project. A global source creat
 Batch policy (contrast with reproduction): one selected batch sibling may be varied independently because autosync materializes each as its own verified artifact. Variation does **not** propagate source `batch_size`.
 
 Does **not** queue `/prompt`, auto-run, or implement img2img exact reproduction (Package 4.10 reproduction semantics unchanged).
+
+## Package 4.12 — character identity foundation + identity-method benchmark
+
+**Character identity** is a Drive-backed, platform-generic `char_<uuid>` record with one required SHA-verified primary face reference under `AI_Studio/characters/<character_id>/`. It is **not** generation lineage and is not Zara-specific.
+
+```bash
+python core/scripts/register_character.py --display-name "Persona" --primary-face /path/to/face.png
+python core/scripts/list_characters.py
+python core/scripts/show_character.py --character-id char_<uuid>
+```
+
+**Identity-method benchmark** compares exactly two live candidates (benchmark-only):
+
+- `reactor_faceswap_benchmark`
+- `ipadapter_faceid_sd15_benchmark`
+
+InstantID/SDXL is deferred. Explicit `--allow-benchmark` is required. Prepare/open is **plumbing only** — not a quality claim. Operational acceptance requires candidate × S1–S4 Runs plus the eight-key human rubric. No automatic Package 4.13 promotion.
+
+```bash
+python core/scripts/prepare_identity_benchmark.py \
+  --candidate reactor_faceswap_benchmark \
+  --scenario S1_near_front_portrait \
+  --character-id char_<uuid> \
+  --allow-benchmark
+python core/scripts/run_identity_benchmark.py ...
+python core/scripts/report_identity_benchmark.py
+```
+
+Identity-benchmark generations (`benchmark_run` / `preparation_kind=identity_benchmark`) are **refused** as ordinary Package 4.10 reproduction or Package 4.11 variation parents.
+
+See `docs/decisions/identity-method-selection-gate.md` and `docs/dogfooding/identity-method-benchmark-checklist.md`.

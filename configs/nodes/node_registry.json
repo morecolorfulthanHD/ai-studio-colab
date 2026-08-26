@@ -5,7 +5,9 @@
       "name": "ComfyUI-Manager",
       "repo_url": "https://github.com/ltdrdata/ComfyUI-Manager",
       "category": "management",
-      "required_for": ["all"],
+      "required_for": [
+        "all"
+      ],
       "install_mode": "planned",
       "notes": "Node and model management UI for ComfyUI. Installed first in bootstrap sequence."
     },
@@ -13,7 +15,10 @@
       "name": "ComfyUI-Impact-Pack",
       "repo_url": "https://github.com/ltdrdata/ComfyUI-Impact-Pack",
       "category": "utility",
-      "required_for": ["segmentation_map_extraction", "environment_generation"],
+      "required_for": [
+        "segmentation_map_extraction",
+        "environment_generation"
+      ],
       "install_mode": "planned",
       "notes": "Segmentation, detailer, and utility nodes."
     },
@@ -21,7 +26,9 @@
       "name": "ComfyUI-AnimateDiff-Evolved",
       "repo_url": "https://github.com/Kosinkadink/ComfyUI-AnimateDiff-Evolved",
       "category": "animation",
-      "required_for": ["animatediff_sequence"],
+      "required_for": [
+        "animatediff_sequence"
+      ],
       "install_mode": "planned",
       "notes": "AnimateDiff nodes for image-to-animation pipelines."
     },
@@ -29,7 +36,11 @@
       "name": "ComfyUI-ReActor",
       "repo_url": "https://github.com/Gourieff/comfyui-reactor-node",
       "category": "face",
-      "required_for": ["reactor_faceswap"],
+      "required_for": [
+        "reactor_faceswap",
+        "reactor_faceswap_benchmark",
+        "identity_benchmark"
+      ],
       "install_mode": "planned",
       "notes": "Face swap and identity refinement via InsightFace."
     },
@@ -50,9 +61,23 @@
       "name": "was-node-suite-comfyui",
       "repo_url": "https://github.com/WASasquatch/was-node-suite-comfyui",
       "category": "utility",
-      "required_for": ["environment_generation", "environment_reconstruction"],
+      "required_for": [
+        "environment_generation",
+        "environment_reconstruction"
+      ],
       "install_mode": "planned",
       "notes": "Extended image processing and utility nodes."
+    },
+    {
+      "name": "ComfyUI_IPAdapter_plus",
+      "repo_url": "https://github.com/cubiq/ComfyUI_IPAdapter_plus",
+      "category": "reference",
+      "required_for": [
+        "ipadapter_faceid_sd15_benchmark",
+        "identity_benchmark"
+      ],
+      "install_mode": "planned",
+      "notes": "Package 4.12: IPAdapter FaceID SD1.5 identity-method benchmark. Pin at install time; do not auto-download weights. Not a production identity default."
     }
   ]
 }

@@ -36,6 +36,7 @@ CAPABILITY_SLUGS = frozenset(
         "unknown",
         "qwen_image_edit_benchmark",
         "flux_fill_benchmark",
+        "identity_benchmark",
     }
 )
 

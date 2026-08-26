@@ -66,12 +66,20 @@ def main() -> int:
             metadata = {}
 
     from core.runtime.generation_derivation import restage_derivation_inputs_for_open
+    from core.runtime.identity_benchmark import restage_identity_benchmark_face
 
     restage_messages, restage_errors = restage_derivation_inputs_for_open(
         prepared_dir=prepared_dir,
         metadata=metadata if isinstance(metadata, dict) else {},
         comfyui_input_dir=Path(comfyui_runtime) / "input",
     )
+    id_messages, id_errors = restage_identity_benchmark_face(
+        prepared_dir=prepared_dir,
+        metadata=metadata if isinstance(metadata, dict) else {},
+        comfyui_input_dir=Path(comfyui_runtime) / "input",
+    )
+    restage_messages = list(restage_messages) + list(id_messages)
+    restage_errors = list(restage_errors) + list(id_errors)
 
     source = prepared_dir / f"{preparation_id}.workflow.json"
 

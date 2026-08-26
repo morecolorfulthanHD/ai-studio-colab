@@ -531,6 +531,44 @@
       "source_url": "https://docs.comfy.org/tutorials/flux/flux-1-fill-dev",
       "license_notes": "Workflow from official ComfyUI tutorial; model under FLUX.1-dev NCL",
       "notes": "Benchmark reference only."
+    },
+    {
+      "id": "ipadapter_faceid_plusv2_sd15",
+      "name": "IPAdapter FaceID Plus v2 SD1.5",
+      "asset_type": "ipadapter",
+      "category": "identity",
+      "scope": "core",
+      "engine": "comfyui",
+      "intended_path": "assets/ipadapter/ip-adapter-faceid-plusv2_sd15.bin",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/ipadapter/ip-adapter-faceid-plusv2_sd15.bin",
+      "required_for": [
+        "ipadapter_faceid_sd15_benchmark",
+        "identity_benchmark"
+      ],
+      "status": "planned",
+      "source_type": "huggingface",
+      "source_url": "https://huggingface.co/h94/IP-Adapter-FaceID",
+      "license_notes": "Research / non-commercial restrictions common on FaceID cards \u2014 review before any production promotion. Manual download only.",
+      "notes": "Package 4.12 exact FaceID adapter filename choice."
+    },
+    {
+      "id": "ipadapter_faceid_plusv2_sd15_lora",
+      "name": "IPAdapter FaceID Plus v2 SD1.5 LoRA",
+      "asset_type": "lora",
+      "category": "identity",
+      "scope": "core",
+      "engine": "comfyui",
+      "intended_path": "assets/loras/ip-adapter-faceid-plusv2_sd15_lora.safetensors",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/loras/ip-adapter-faceid-plusv2_sd15_lora.safetensors",
+      "required_for": [
+        "ipadapter_faceid_sd15_benchmark",
+        "identity_benchmark"
+      ],
+      "status": "planned",
+      "source_type": "huggingface",
+      "source_url": "https://huggingface.co/h94/IP-Adapter-FaceID",
+      "license_notes": "Must match FaceID Plus v2 SD1.5 adapter. Manual download only.",
+      "notes": "Package 4.12 matching FaceID LoRA."
     }
   ]
 }

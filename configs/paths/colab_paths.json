@@ -15,7 +15,9 @@
     "runtime_identity": "/content/ai-studio-runtime/runtime_identity.json",
     "runtime_output_watcher": "/content/ai-studio-runtime/output-watcher",
     "runtime_workflows": "/content/ai-studio-runtime/workflows",
-    "drive_logs": "/content/drive/MyDrive/AI_Studio/logs"
+    "drive_logs": "/content/drive/MyDrive/AI_Studio/logs",
+    "drive_characters": "/content/drive/MyDrive/AI_Studio/characters",
+    "drive_benchmarks": "/content/drive/MyDrive/AI_Studio/benchmarks"
   },
   "repo_relative": {
     "workflows": "workflows",

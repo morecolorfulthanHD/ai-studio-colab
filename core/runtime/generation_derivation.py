@@ -454,6 +454,18 @@ def assess_derivation_eligibility(
             missing_fields=["metadata.json"],
         )
 
+    from .identity_benchmark import BENCHMARK_PARENT_REFUSAL, is_benchmark_generation_metadata
+
+    if is_benchmark_generation_metadata(metadata):
+        return DerivationEligibility(
+            eligible=False,
+            reason=BENCHMARK_PARENT_REFUSAL,
+            snapshot_status=snapshot_status,
+            workflow_snapshot_status=workflow_status,
+            workflow_identifier=identifier,
+            missing_fields=["benchmark_run"],
+        )
+
     image_sha = str(metadata.get("image_sha256") or manifest.get("image_sha256") or "").strip()
     if not image_sha:
         return DerivationEligibility(
