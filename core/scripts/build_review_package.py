@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Build a self-contained review_package.zip for Package 4 validation."""
+"""Build a self-contained review_package.zip for Package 4+ validation.
+
+Includes repository review contents plus optional generated handoff notes from
+``review_handoff/`` (gitignored), packed as ``_handoff/`` inside the ZIP so
+ChatGPT review can rely on a single upload without chat copy/paste.
+"""
 
 from __future__ import annotations
 
@@ -7,6 +12,15 @@ import zipfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+HANDOFF_SOURCE_DIR = REPO_ROOT / "review_handoff"
+HANDOFF_ZIP_PREFIX = "_handoff"
+REQUIRED_HANDOFF_FILES = (
+    "REVIEW_HANDOFF.md",
+    "STATUS.md",
+    "CHANGED_FILES.md",
+    "VALIDATION.md",
+    "NEXT_ACTION.md",
+)
 
 
 def collect_files() -> list[Path]:
@@ -162,8 +176,32 @@ def collect_files() -> list[Path]:
     return [unique[key] for key in sorted(unique)]
 
 
+def collect_handoff_files() -> list[tuple[Path, str]]:
+    """Return (source_path, zip_arcname) pairs for ``_handoff/`` entries."""
+    if not HANDOFF_SOURCE_DIR.is_dir():
+        raise FileNotFoundError(
+            f"Missing handoff staging directory: {HANDOFF_SOURCE_DIR.as_posix()}\n"
+            "Write review notes under review_handoff/ before building the ZIP."
+        )
+    entries: list[tuple[Path, str]] = []
+    for path in sorted(HANDOFF_SOURCE_DIR.rglob("*")):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(HANDOFF_SOURCE_DIR).as_posix()
+        entries.append((path, f"{HANDOFF_ZIP_PREFIX}/{rel}"))
+    missing = [name for name in REQUIRED_HANDOFF_FILES if not (HANDOFF_SOURCE_DIR / name).is_file()]
+    if missing:
+        raise FileNotFoundError(
+            "Missing required handoff files under review_handoff/: " + ", ".join(missing)
+        )
+    if not entries:
+        raise FileNotFoundError("review_handoff/ exists but contains no files")
+    return entries
+
+
 def main() -> int:
     files = collect_files()
+    handoff = collect_handoff_files()
     zip_path = REPO_ROOT / "review_package.zip"
     if zip_path.exists():
         zip_path.unlink()
@@ -171,7 +209,10 @@ def main() -> int:
         for path in files:
             rel = path.relative_to(REPO_ROOT).as_posix()
             archive.write(path, rel)
-    print(f"Created {zip_path} with {len(files)} files")
+        for source, arcname in handoff:
+            archive.write(source, arcname)
+    total = len(files) + len(handoff)
+    print(f"Created {zip_path} with {total} files ({len(files)} repo + {len(handoff)} handoff)")
     return 0
 
 
