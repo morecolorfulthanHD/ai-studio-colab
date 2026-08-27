@@ -53,9 +53,17 @@
   "exact_asset_choices": {
     "ipadapter_faceid_plusv2_sd15": "assets/ipadapter/ip-adapter-faceid-plusv2_sd15.bin",
     "ipadapter_faceid_plusv2_sd15_lora": "assets/loras/ip-adapter-faceid-plusv2_sd15_lora.safetensors",
-    "clip_vision_sd15": "assets/clip/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
+    "clip_vision_sd15": "assets/clip_vision/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
     "insightface_buffalo": "assets/insightface/models/buffalo_l/w600k_r50.onnx",
-    "ComfyUI_IPAdapter_plus": "https://github.com/cubiq/ComfyUI_IPAdapter_plus",
-    "install_strategy": "Register node in Full/custom-node install path as planned; pin commit at live install time; do not auto-download FaceID/InsightFace weights."
+    "reactor_inswapper_128": "assets/insightface/inswapper_128.onnx",
+    "ComfyUI_IPAdapter_plus": "https://github.com/cubiq/ComfyUI_IPAdapter_plus @ a0f451a5113cf9becb0847b92884cb10cbdec0ef",
+    "ComfyUI-ReActor": "https://github.com/Gourieff/ComfyUI-ReActor @ 6ad6b35a4df250d14cb2abf0808c9ffedf59f747",
+    "install_strategy": "Nodes: Full Launch runs install_nodes.py which clones/checks out pinned_commit. Restricted weights: manual Drive placement only; verify via check_identity_benchmark_deps.py; no auto-download."
+  },
+  "live_character_reuse": {
+    "character_id": "char_7471a702-55cf-4c7b-adb2-e17404d28c91",
+    "display_name": "Benchmark Persona",
+    "primary_face_sha256": "5adb838b158c6030d5ddac1cbe047a507f05ff9c4b19c570df25c3c6b3f23b8e",
+    "note": "Reuse for Case C; do not re-register."
   }
 }

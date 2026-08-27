@@ -224,12 +224,13 @@
       "status": "benchmark",
       "required_models": [
         "sd15_checkpoint",
-        "insightface"
+        "insightface",
+        "reactor_inswapper_128"
       ],
       "required_nodes": [
         "ComfyUI-ReActor"
       ],
-      "notes": "Package 4.12 ReActor face-swap identity-method benchmark only. Not production default."
+      "notes": "Package 4.12 executable ReActor face-swap identity-method benchmark only. Not production default."
     },
     {
       "id": "identity_faceid_benchmark",
@@ -246,7 +247,7 @@
       "required_nodes": [
         "ComfyUI_IPAdapter_plus"
       ],
-      "notes": "Package 4.12 IPAdapter FaceID SD1.5 identity-method benchmark only. Not production default. InstantID/SDXL deferred."
+      "notes": "Package 4.12 executable IPAdapter FaceID Plus v2 SD1.5 identity-method benchmark only. Not production default. InstantID/SDXL deferred."
     }
   ]
 }

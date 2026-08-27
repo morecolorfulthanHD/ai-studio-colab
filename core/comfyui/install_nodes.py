@@ -101,6 +101,74 @@ def is_valid_git_checkout(path: Path) -> bool:
     return True
 
 
+def _pinned_commit(entry: dict) -> str:
+    return str(entry.get("pinned_commit") or entry.get("commit") or "").strip()
+
+
+def current_git_head(path: Path) -> str:
+    completed = subprocess.run(
+        ["git", "-C", str(path), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return ""
+    return (completed.stdout or "").strip()
+
+
+def commit_matches(head: str, pinned: str) -> bool:
+    if not head or not pinned:
+        return False
+    return head.startswith(pinned) or pinned.startswith(head)
+
+
+def checkout_pinned_commit(target: Path, pinned: str, *, dry_run: bool = False) -> tuple[bool, str]:
+    """Ensure ``target`` git checkout is at ``pinned`` (supports shallow clones)."""
+    if not pinned:
+        return True, "no pin requested"
+    if not is_valid_git_checkout(target):
+        return False, "target is not a valid git checkout"
+    head = current_git_head(target)
+    if commit_matches(head, pinned):
+        return True, f"already at pin {pinned[:12]}"
+    if dry_run:
+        return True, f"would checkout pin {pinned}"
+    fetch = subprocess.run(
+        ["git", "-C", str(target), "fetch", "--depth", "1", "origin", pinned],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if fetch.returncode != 0:
+        subprocess.run(
+            ["git", "-C", str(target), "fetch", "--unshallow"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        fetch = subprocess.run(
+            ["git", "-C", str(target), "fetch", "origin", pinned],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if fetch.returncode != 0:
+            return False, f"git fetch pin failed: {(fetch.stderr or fetch.stdout or '').strip()}"
+    checkout = subprocess.run(
+        ["git", "-C", str(target), "checkout", "--detach", pinned],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if checkout.returncode != 0:
+        return False, f"git checkout pin failed: {(checkout.stderr or checkout.stdout or '').strip()}"
+    head_after = current_git_head(target)
+    if not commit_matches(head_after, pinned):
+        return False, f"pin checkout mismatch: head={head_after} pinned={pinned}"
+    return True, f"checked out pin {pinned[:12]}"
+
+
 def inspect_clone_target(path: Path) -> str:
     """Classify a custom-node target directory.
 
@@ -396,19 +464,37 @@ def build_node_install_plan(bundle: RegistryBundle) -> list[InstallStep]:
         repo_url = entry.get("repo_url", "")
         required_for = entry.get("required_for", [])
         required = "all" in required_for or entry.get("install_mode") == "required"
+        pinned = _pinned_commit(entry)
 
         if state == "installed":
-            steps.append(
-                InstallStep(
-                    action="skip",
-                    name=name,
-                    target_path=str(target),
-                    source=repo_url,
-                    status="installed",
-                    notes="Valid git checkout already present.",
-                    required=required,
+            head = current_git_head(target)
+            if pinned and not commit_matches(head, pinned):
+                steps.append(
+                    InstallStep(
+                        action="git_checkout_pin",
+                        name=name,
+                        target_path=str(target),
+                        source=pinned,
+                        status="pin_mismatch",
+                        notes=f"Present at {head[:12] or '?'} but registry pin is {pinned[:12]}.",
+                        required=required,
+                    )
                 )
-            )
+            else:
+                notes = "Valid git checkout already present."
+                if pinned:
+                    notes = f"Valid git checkout already at pin {pinned[:12]}."
+                steps.append(
+                    InstallStep(
+                        action="skip",
+                        name=name,
+                        target_path=str(target),
+                        source=repo_url,
+                        status="installed",
+                        notes=notes,
+                        required=required,
+                    )
+                )
         elif detailed == "present_non_git":
             steps.append(
                 InstallStep(
@@ -428,6 +514,8 @@ def build_node_install_plan(bundle: RegistryBundle) -> list[InstallStep]:
                     (notes + " " if notes else "")
                     + "Incomplete/partial clone detected; will recover then clone."
                 ).strip()
+            if pinned:
+                notes = ((notes + " " if notes else "") + f"Will checkout pinned_commit {pinned}.").strip()
             steps.append(
                 InstallStep(
                     action="git_clone",
@@ -439,6 +527,18 @@ def build_node_install_plan(bundle: RegistryBundle) -> list[InstallStep]:
                     required=required,
                 )
             )
+            if pinned:
+                steps.append(
+                    InstallStep(
+                        action="git_checkout_pin",
+                        name=name,
+                        target_path=str(target),
+                        source=pinned,
+                        status="planned",
+                        notes=f"Checkout pinned_commit {pinned}.",
+                        required=required,
+                    )
+                )
             steps.append(
                 InstallStep(
                     action="pip_requirements",
@@ -542,6 +642,22 @@ def execute_plan(
                         f"{result.attempts} attempt(s): {result.error}"
                     )
                 print("  note: optional node step failure tolerated")
+                continue
+
+            if step.action == "git_checkout_pin":
+                pinned = step.source
+                ok, note = checkout_pinned_commit(target, pinned, dry_run=dry_run)
+                if ok:
+                    installed += 1
+                    print(f"  status: {note}")
+                    continue
+                failed += 1
+                print(f"  status: failed ({note})")
+                if step.required:
+                    raise RuntimeError(
+                        f"Required pin checkout failed for {step.name}: {note}"
+                    )
+                print("  note: optional pin checkout failure tolerated")
                 continue
 
             if step.action == "pip_requirements":

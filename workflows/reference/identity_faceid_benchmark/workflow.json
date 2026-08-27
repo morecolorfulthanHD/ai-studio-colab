@@ -1,6 +1,6 @@
 {
-  "last_node_id": 8,
-  "last_link_id": 10,
+  "last_node_id": 10,
+  "last_link_id": 14,
   "nodes": [
     {
       "id": 1,
@@ -10,8 +10,8 @@
         0
       ],
       "size": [
-        300,
-        200
+        315,
+        314
       ],
       "flags": {},
       "order": 0,
@@ -23,7 +23,8 @@
           "type": "IMAGE",
           "links": [
             1
-          ]
+          ],
+          "slot_index": 0
         },
         {
           "name": "MASK",
@@ -31,7 +32,9 @@
           "links": null
         }
       ],
-      "properties": {},
+      "properties": {
+        "Node name for S&R": "LoadImage"
+      },
       "widgets_values": [
         "example.png",
         "image"
@@ -42,10 +45,10 @@
       "type": "CheckpointLoaderSimple",
       "pos": [
         0,
-        250
+        350
       ],
       "size": [
-        300,
+        320,
         100
       ],
       "flags": {},
@@ -58,7 +61,8 @@
           "type": "MODEL",
           "links": [
             2
-          ]
+          ],
+          "slot_index": 0
         },
         {
           "name": "CLIP",
@@ -66,17 +70,21 @@
           "links": [
             3,
             4
-          ]
+          ],
+          "slot_index": 1
         },
         {
           "name": "VAE",
           "type": "VAE",
           "links": [
             5
-          ]
+          ],
+          "slot_index": 2
         }
       ],
-      "properties": {},
+      "properties": {
+        "Node name for S&R": "CheckpointLoaderSimple"
+      },
       "widgets_values": [
         "sd15.safetensors"
       ]
@@ -85,7 +93,7 @@
       "id": 3,
       "type": "CLIPTextEncode",
       "pos": [
-        350,
+        400,
         0
       ],
       "size": [
@@ -108,10 +116,13 @@
           "type": "CONDITIONING",
           "links": [
             6
-          ]
+          ],
+          "slot_index": 0
         }
       ],
-      "properties": {},
+      "properties": {
+        "Node name for S&R": "CLIPTextEncode"
+      },
       "widgets_values": [
         "portrait"
       ]
@@ -120,7 +131,7 @@
       "id": 4,
       "type": "CLIPTextEncode",
       "pos": [
-        350,
+        400,
         250
       ],
       "size": [
@@ -128,7 +139,7 @@
         200
       ],
       "flags": {},
-      "order": 3,
+      "order": 2,
       "mode": 0,
       "inputs": [
         {
@@ -143,27 +154,30 @@
           "type": "CONDITIONING",
           "links": [
             7
-          ]
+          ],
+          "slot_index": 0
         }
       ],
-      "properties": {},
+      "properties": {
+        "Node name for S&R": "CLIPTextEncode"
+      },
       "widgets_values": [
-        ""
+        "blurry, lowres, jpeg artifacts, deformed, bad anatomy, extra limbs, watermark, text"
       ]
     },
     {
       "id": 5,
       "type": "EmptyLatentImage",
       "pos": [
-        350,
-        500
+        400,
+        520
       ],
       "size": [
         300,
         100
       ],
       "flags": {},
-      "order": 4,
+      "order": 3,
       "mode": 0,
       "inputs": [],
       "outputs": [
@@ -172,10 +186,13 @@
           "type": "LATENT",
           "links": [
             8
-          ]
+          ],
+          "slot_index": 0
         }
       ],
-      "properties": {},
+      "properties": {
+        "Node name for S&R": "EmptyLatentImage"
+      },
       "widgets_values": [
         512,
         768,
@@ -183,15 +200,68 @@
       ]
     },
     {
-      "id": 6,
-      "type": "KSampler",
+      "id": 9,
+      "type": "IPAdapterUnifiedLoaderFaceID",
       "pos": [
-        800,
-        100
+        750,
+        350
       ],
       "size": [
-        300,
-        260
+        320,
+        120
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 2
+        },
+        {
+          "name": "ipadapter",
+          "type": "IPADAPTER",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            12
+          ],
+          "slot_index": 0
+        },
+        {
+          "name": "ipadapter",
+          "type": "IPADAPTER",
+          "links": [
+            13
+          ],
+          "slot_index": 1
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "IPAdapterUnifiedLoaderFaceID"
+      },
+      "widgets_values": [
+        "FACEID PLUS V2",
+        0.6,
+        "CPU"
+      ]
+    },
+    {
+      "id": 10,
+      "type": "IPAdapterFaceID",
+      "pos": [
+        1100,
+        300
+      ],
+      "size": [
+        320,
+        280
       ],
       "flags": {},
       "order": 5,
@@ -200,7 +270,80 @@
         {
           "name": "model",
           "type": "MODEL",
-          "link": 2
+          "link": 12
+        },
+        {
+          "name": "ipadapter",
+          "type": "IPADAPTER",
+          "link": 13
+        },
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 1
+        },
+        {
+          "name": "image_negative",
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "name": "attn_mask",
+          "type": "MASK",
+          "link": null
+        },
+        {
+          "name": "clip_vision",
+          "type": "CLIP_VISION",
+          "link": null
+        },
+        {
+          "name": "insightface",
+          "type": "INSIGHTFACE",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            14
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "IPAdapterFaceID"
+      },
+      "widgets_values": [
+        1,
+        2,
+        "linear",
+        "concat",
+        0,
+        1
+      ]
+    },
+    {
+      "id": 6,
+      "type": "KSampler",
+      "pos": [
+        1450,
+        100
+      ],
+      "size": [
+        315,
+        262
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 14
         },
         {
           "name": "positive",
@@ -224,10 +367,13 @@
           "type": "LATENT",
           "links": [
             9
-          ]
+          ],
+          "slot_index": 0
         }
       ],
-      "properties": {},
+      "properties": {
+        "Node name for S&R": "KSampler"
+      },
       "widgets_values": [
         42,
         "fixed",
@@ -242,11 +388,11 @@
       "id": 7,
       "type": "VAEDecode",
       "pos": [
-        1150,
+        1800,
         100
       ],
       "size": [
-        200,
+        210,
         50
       ],
       "flags": {},
@@ -270,17 +416,19 @@
           "type": "IMAGE",
           "links": [
             10
-          ]
+          ],
+          "slot_index": 0
         }
       ],
-      "properties": {},
-      "widgets_values": []
+      "properties": {
+        "Node name for S&R": "VAEDecode"
+      }
     },
     {
       "id": 8,
       "type": "SaveImage",
       "pos": [
-        1400,
+        2050,
         100
       ],
       "size": [
@@ -288,7 +436,7 @@
         100
       ],
       "flags": {},
-      "order": 7,
+      "order": 8,
       "mode": 0,
       "inputs": [
         {
@@ -300,7 +448,7 @@
       "outputs": [],
       "properties": {},
       "widgets_values": [
-        "ai_studio_idbench"
+        "ai_studio_idbench_faceid"
       ]
     }
   ],
@@ -309,15 +457,15 @@
       1,
       1,
       0,
-      7,
-      0,
+      10,
+      2,
       "IMAGE"
     ],
     [
       2,
       2,
       0,
-      6,
+      9,
       0,
       "MODEL"
     ],
@@ -384,12 +532,43 @@
       8,
       0,
       "IMAGE"
+    ],
+    [
+      12,
+      9,
+      0,
+      10,
+      0,
+      "MODEL"
+    ],
+    [
+      13,
+      9,
+      1,
+      10,
+      1,
+      "IPADAPTER"
+    ],
+    [
+      14,
+      10,
+      0,
+      6,
+      0,
+      "MODEL"
     ]
   ],
   "groups": [],
   "config": {},
   "extra": {
-    "workflow_identifier_note": "Package 4.12 identity benchmark stub \u2014 live wiring adds ReActor or IPAdapter FaceID when assets present"
+    "ai_studio": {
+      "workflow_identifier": "reference/identity_faceid_benchmark",
+      "package_version": "4.12",
+      "candidate": "ipadapter_faceid_sd15_benchmark",
+      "identity_method": "ipadapter_faceid_plusv2_sd15",
+      "ipadapter_preset": "FACEID PLUS V2",
+      "note": "Executable IPAdapter FaceID Plus v2 SD1.5 benchmark graph (not a quality claim)."
+    }
   },
   "version": 0.4
 }

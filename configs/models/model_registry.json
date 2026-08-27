@@ -133,7 +133,25 @@
         "identity_benchmark"
       ],
       "status": "planned",
-      "notes": "InsightFace ONNX models for face detection and identity."
+      "notes": "InsightFace buffalo_l w600k_r50.onnx. Research-restricted — manual placement only; no auto-download.",
+      "source_url": "InsightFace buffalo_l pack (operator-obtained; review license before use)",
+      "filename": "w600k_r50.onnx",
+      "install_policy": "manual_only"
+    },
+    {
+      "name": "reactor_inswapper_128",
+      "category": "face",
+      "intended_path": "assets/insightface/inswapper_128.onnx",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/insightface/inswapper_128.onnx",
+      "required_for": [
+        "reactor_faceswap_benchmark",
+        "identity_benchmark"
+      ],
+      "status": "planned",
+      "notes": "ReActor face-swap model (inswapper_128.onnx) under ComfyUI models/insightface/. Research-restricted — manual placement only; no auto-download.",
+      "source_url": "Operator-obtained inswapper_128.onnx (review InsightFace/ReActor license before use)",
+      "filename": "inswapper_128.onnx",
+      "install_policy": "manual_only"
     },
     {
       "name": "ipadapter",
@@ -233,7 +251,10 @@
         "identity_benchmark"
       ],
       "status": "planned",
-      "notes": "Package 4.12 exact FaceID Plus v2 SD1.5 adapter. Source: h94/IP-Adapter-FaceID (Hugging Face). Research license \u2014 manual placement only; no auto-download."
+      "notes": "Package 4.12 exact FaceID Plus v2 SD1.5 adapter. Source: h94/IP-Adapter-FaceID (Hugging Face). Research license — manual placement only; no auto-download.",
+      "source_url": "https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid-plusv2_sd15.bin",
+      "filename": "ip-adapter-faceid-plusv2_sd15.bin",
+      "install_policy": "manual_only"
     },
     {
       "name": "ipadapter_faceid_plusv2_sd15_lora",
@@ -245,20 +266,26 @@
         "identity_benchmark"
       ],
       "status": "planned",
-      "notes": "Matching FaceID Plus v2 SD1.5 LoRA for ip-adapter-faceid-plusv2_sd15. Manual placement only."
+      "notes": "Matching FaceID Plus v2 SD1.5 LoRA for ip-adapter-faceid-plusv2_sd15. Manual placement only.",
+      "source_url": "https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid-plusv2_sd15_lora.safetensors",
+      "filename": "ip-adapter-faceid-plusv2_sd15_lora.safetensors",
+      "install_policy": "manual_only"
     },
     {
       "name": "clip_vision_sd15",
       "category": "clip",
-      "intended_path": "assets/clip/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
-      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/clip/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
+      "intended_path": "assets/clip_vision/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/clip_vision/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
       "required_for": [
         "ipadapter_faceid_sd15_benchmark",
         "identity_benchmark",
         "reference_lock"
       ],
       "status": "planned",
-      "notes": "CLIP vision encoder used by IPAdapter FaceID workflows."
+      "notes": "CLIP ViT-H vision encoder for IPAdapter FaceID. Must live under ComfyUI models/clip_vision/ (Drive shared/clip_vision/). Manual placement only.",
+      "source_url": "https://huggingface.co/h94/IP-Adapter/resolve/main/models/image_encoder/model.safetensors",
+      "filename": "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
+      "install_policy": "manual_only"
     }
   ]
 }

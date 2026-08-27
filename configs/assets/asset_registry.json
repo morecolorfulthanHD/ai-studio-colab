@@ -185,16 +185,18 @@
       "category": "reference",
       "scope": "core",
       "engine": "comfyui",
-      "intended_path": "assets/clip/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
-      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/clip/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
+      "intended_path": "assets/clip_vision/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/clip_vision/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
       "required_for": [
-        "reference_lock"
+        "reference_lock",
+        "ipadapter_faceid_sd15_benchmark",
+        "identity_benchmark"
       ],
       "status": "planned",
       "source_type": "huggingface",
       "source_url": "https://huggingface.co/h94/IP-Adapter",
       "license_notes": "Check model card",
-      "notes": "CLIP vision encoder for IPAdapter."
+      "notes": "CLIP ViT-H for IPAdapter FaceID; must be under models/clip_vision/."
     },
     {
       "id": "insightface_buffalo",
@@ -206,13 +208,35 @@
       "intended_path": "assets/insightface/models/buffalo_l/w600k_r50.onnx",
       "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/insightface/models/buffalo_l/w600k_r50.onnx",
       "required_for": [
-        "reactor_faceswap"
+        "reactor_faceswap",
+        "reactor_faceswap_benchmark",
+        "ipadapter_faceid_sd15_benchmark",
+        "identity_benchmark"
       ],
       "status": "planned",
       "source_type": "external",
       "source_url": "",
       "license_notes": "Check InsightFace license",
       "notes": "Face detection and identity models."
+    },
+    {
+      "id": "reactor_inswapper_128",
+      "name": "ReActor inswapper_128",
+      "asset_type": "insightface",
+      "category": "face",
+      "scope": "core",
+      "engine": "comfyui",
+      "intended_path": "assets/insightface/inswapper_128.onnx",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/insightface/inswapper_128.onnx",
+      "required_for": [
+        "reactor_faceswap_benchmark",
+        "identity_benchmark"
+      ],
+      "status": "planned",
+      "source_type": "external",
+      "source_url": "",
+      "license_notes": "Check InsightFace / ReActor license — manual only",
+      "notes": "Face-swap ONNX consumed by ReActorFaceSwap (models/insightface/inswapper_128.onnx)."
     },
     {
       "id": "svd_xt",

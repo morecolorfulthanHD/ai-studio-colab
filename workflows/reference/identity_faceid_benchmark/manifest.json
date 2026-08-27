@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "workflow_identifier": "reference/identity_faceid_benchmark",
-  "display_name": "Identity Benchmark \u2014 IPAdapter FaceID SD1.5",
+  "display_name": "Identity Benchmark — IPAdapter FaceID SD1.5",
   "description": "Package 4.12 identity-method benchmark only (ipadapter_faceid_sd15_benchmark). Not a production identity default.",
   "category": "identity_benchmark",
   "capability": "identity_benchmark",
@@ -9,7 +9,7 @@
   "runtime_status": "partial",
   "quality_status": "untested",
   "production_status": "benchmark_only",
-  "status_reason": "Benchmark plumbing stub; operational quality requires S1-S4 Runs + human rubric. Prepare/open is not a quality claim.",
+  "status_reason": "Executable FaceID Plus v2 SD1.5 benchmark graph ready for Case C once pinned IPAdapter_plus + FaceID/CLIP/InsightFace assets are present. Prepare/open is not a quality claim.",
   "model_family": "sd15",
   "required_model_files": [
     "ipadapter_faceid_plusv2_sd15",
@@ -23,7 +23,7 @@
   ],
   "optional_nodes": [],
   "canonical_workflow_path": "workflows/reference/identity_faceid_benchmark/workflow.json",
-  "workflow_hash": "cb04835d5d2b8d064c718897f4c3717c4e2cefa3185aecdb102f53d3f9851401",
+  "workflow_hash": "58f8872f87ef7746d162a955851aa8502f855aac59daf2b70a16d5ef2e83389a",
   "workflow_hash_type": "ui_workflow_v1",
   "parameter_schema": {
     "input_image": {
@@ -63,7 +63,7 @@
     "save_prefix": {
       "type": "string",
       "required": true,
-      "default": "ai_studio_idbench",
+      "default": "ai_studio_idbench_faceid",
       "target_node_id": 8,
       "target_field": "widgets_values[0]"
     }
@@ -73,9 +73,9 @@
     "positive_prompt": "portrait",
     "seed": 42,
     "seed_mode": "fixed",
-    "save_prefix": "ai_studio_idbench"
+    "save_prefix": "ai_studio_idbench_faceid"
   },
-  "output_prefix": "ai_studio_idbench",
+  "output_prefix": "ai_studio_idbench_faceid",
   "supported_environments": [
     "colab"
   ],
@@ -85,7 +85,8 @@
   "tags": [
     "benchmark",
     "identity",
-    "package412"
+    "package412",
+    "faceid"
   ],
   "documentation_path": "workflows/reference/identity_faceid_benchmark/README.md",
   "launchable": false,

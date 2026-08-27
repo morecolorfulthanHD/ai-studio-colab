@@ -8,6 +8,7 @@ No automatic method promotion. Human rubric only — no invented perceptual scor
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -67,9 +68,38 @@ FACEID_REQUIRED_MODEL_NAMES = (
     "clip_vision_sd15",
     "insightface",
 )
-REACTOR_REQUIRED_MODEL_NAMES = ("insightface",)
+REACTOR_REQUIRED_MODEL_NAMES = ("insightface", "reactor_inswapper_128")
 FACEID_REQUIRED_NODE = "ComfyUI_IPAdapter_plus"
 REACTOR_REQUIRED_NODE = "ComfyUI-ReActor"
+
+REACTOR_REQUIRED_GRAPH_NODES = frozenset(
+    {
+        "LoadImage",
+        "CheckpointLoaderSimple",
+        "CLIPTextEncode",
+        "EmptyLatentImage",
+        "KSampler",
+        "VAEDecode",
+        "ReActorFaceSwap",
+        "SaveImage",
+    }
+)
+FACEID_REQUIRED_GRAPH_NODES = frozenset(
+    {
+        "LoadImage",
+        "CheckpointLoaderSimple",
+        "CLIPTextEncode",
+        "EmptyLatentImage",
+        "IPAdapterUnifiedLoaderFaceID",
+        "IPAdapterFaceID",
+        "KSampler",
+        "VAEDecode",
+        "SaveImage",
+    }
+)
+
+IPADAPTER_PINNED_COMMIT = "a0f451a5113cf9becb0847b92884cb10cbdec0ef"
+REACTOR_PINNED_COMMIT = "6ad6b35a4df250d14cb2abf0808c9ffedf59f747"
 
 SCENARIO_PROMPTS = {
     "S1_near_front_portrait": (
@@ -226,6 +256,14 @@ def _candidate_workflow_relpath(candidate: str) -> str:
     raise ValueError(f"Unknown identity benchmark candidate: {candidate}")
 
 
+def _candidate_manifest_relpath(candidate: str) -> str:
+    if candidate == CANDIDATE_REACTOR:
+        return "workflows/reference/identity_reactor_benchmark/manifest.json"
+    if candidate == CANDIDATE_FACEID:
+        return "workflows/reference/identity_faceid_benchmark/manifest.json"
+    raise ValueError(f"Unknown identity benchmark candidate: {candidate}")
+
+
 def _candidate_workflow_identifier(candidate: str) -> str:
     if candidate == CANDIDATE_REACTOR:
         return "reference/identity_reactor_benchmark"
@@ -250,6 +288,60 @@ def _required_nodes_for_candidate(candidate: str) -> tuple[str, ...]:
     return ()
 
 
+def _required_graph_nodes_for_candidate(candidate: str) -> frozenset[str]:
+    if candidate == CANDIDATE_REACTOR:
+        return REACTOR_REQUIRED_GRAPH_NODES
+    if candidate == CANDIDATE_FACEID:
+        return FACEID_REQUIRED_GRAPH_NODES
+    return frozenset()
+
+
+def assert_identity_benchmark_graph(workflow_data: dict[str, Any], candidate: str) -> list[str]:
+    """Structural readiness checks only — never a visual/quality PASS."""
+    errors: list[str] = []
+    nodes = workflow_data.get("nodes") or []
+    types = {str(node.get("type") or "") for node in nodes if isinstance(node, dict)}
+    required = _required_graph_nodes_for_candidate(candidate)
+    missing = sorted(required - types)
+    if missing:
+        errors.append(
+            "ERROR: Benchmark workflow missing required candidate nodes: " + ", ".join(missing)
+        )
+    if candidate == CANDIDATE_REACTOR:
+        reactor = next((n for n in nodes if isinstance(n, dict) and n.get("type") == "ReActorFaceSwap"), None)
+        if reactor is not None:
+            inputs = {str(i.get("name") or ""): i for i in (reactor.get("inputs") or []) if isinstance(i, dict)}
+            if not inputs.get("source_image") or inputs["source_image"].get("link") is None:
+                errors.append("ERROR: ReActorFaceSwap source_image is not bound.")
+            if not inputs.get("input_image") or inputs["input_image"].get("link") is None:
+                errors.append("ERROR: ReActorFaceSwap input_image is not bound.")
+            widgets = reactor.get("widgets_values") or []
+            if len(widgets) < 2 or str(widgets[1]) != "inswapper_128.onnx":
+                errors.append("ERROR: ReActorFaceSwap must select inswapper_128.onnx.")
+    if candidate == CANDIDATE_FACEID:
+        loader = next(
+            (n for n in nodes if isinstance(n, dict) and n.get("type") == "IPAdapterUnifiedLoaderFaceID"),
+            None,
+        )
+        faceid = next(
+            (n for n in nodes if isinstance(n, dict) and n.get("type") == "IPAdapterFaceID"),
+            None,
+        )
+        if loader is not None:
+            widgets = loader.get("widgets_values") or []
+            if not widgets or str(widgets[0]) != "FACEID PLUS V2":
+                errors.append("ERROR: IPAdapterUnifiedLoaderFaceID must use FACEID PLUS V2.")
+        if faceid is not None:
+            inputs = {str(i.get("name") or ""): i for i in (faceid.get("inputs") or []) if isinstance(i, dict)}
+            if not inputs.get("image") or inputs["image"].get("link") is None:
+                errors.append("ERROR: IPAdapterFaceID image input is not bound.")
+            if not inputs.get("model") or inputs["model"].get("link") is None:
+                errors.append("ERROR: IPAdapterFaceID model input is not bound.")
+            if not inputs.get("ipadapter") or inputs["ipadapter"].get("link") is None:
+                errors.append("ERROR: IPAdapterFaceID ipadapter input is not bound.")
+    return errors
+
+
 def verify_named_model_files(bundle_models: list[dict[str, Any]], names: list[str]) -> tuple[list[str], list[str]]:
     present: list[str] = []
     missing: list[str] = []
@@ -267,21 +359,348 @@ def verify_named_model_files(bundle_models: list[dict[str, Any]], names: list[st
     return present, missing
 
 
-def verify_named_nodes(bundle_nodes: list[dict[str, Any]], names: list[str], comfyui_custom_nodes: Path | None) -> tuple[list[str], list[str]]:
+def verify_named_nodes(
+    bundle_nodes: list[dict[str, Any]],
+    names: list[str],
+    comfyui_custom_nodes: Path | None,
+) -> tuple[list[str], list[str]]:
     present: list[str] = []
     missing: list[str] = []
-    registered = {str(entry.get("name") or "") for entry in bundle_nodes}
+    by_name = {str(entry.get("name") or ""): entry for entry in bundle_nodes}
     for name in names:
-        if name not in registered:
+        entry = by_name.get(name)
+        if entry is None:
             missing.append(name)
             continue
+        folder = str(entry.get("folder_name") or name)
         if comfyui_custom_nodes is not None:
-            node_dir = Path(comfyui_custom_nodes) / name
+            node_dir = Path(comfyui_custom_nodes) / folder
             if not node_dir.is_dir():
                 missing.append(name)
                 continue
         present.append(name)
     return present, missing
+
+
+def format_manual_asset_instructions(bundle_models: list[dict[str, Any]], missing_names: list[str]) -> list[str]:
+    """Exact fail-closed instructions for restricted assets (no auto-download)."""
+    by_name = {str(entry.get("name") or ""): entry for entry in bundle_models}
+    lines: list[str] = []
+    for name in missing_names:
+        entry = by_name.get(name) or {}
+        filename = str(entry.get("filename") or Path(str(entry.get("runtime_path") or "")).name or name)
+        dest = str(entry.get("runtime_path") or "(unknown Drive destination)")
+        source = str(entry.get("source_url") or entry.get("notes") or "Operator-obtained; review license")
+        lines.append(
+            f"MISSING {name}: obtain '{filename}' from {source}; place at {dest}; "
+            "then re-run check_identity_benchmark_deps.py / prepare (AI Studio verifies "
+            "presence via model_registry runtime_path)."
+        )
+    return lines
+
+
+def _model_presence_map(
+    bundle_models: list[dict[str, Any]], names: tuple[str, ...]
+) -> dict[str, dict[str, Any]]:
+    by_name = {str(entry.get("name") or ""): entry for entry in bundle_models}
+    out: dict[str, dict[str, Any]] = {}
+    for name in names:
+        entry = by_name.get(name) or {}
+        runtime = str(entry.get("runtime_path") or "")
+        present = bool(runtime and Path(runtime).is_file())
+        out[name] = {
+            "present": present,
+            "runtime_path": runtime or None,
+            "filename": str(entry.get("filename") or Path(runtime).name if runtime else name),
+        }
+    return out
+
+
+def _scan_node_class_mappings(node_dir: Path) -> set[str]:
+    """Best-effort scan for NODE_CLASS_MAPPINGS keys declared in custom-node sources."""
+    found: set[str] = set()
+    if not node_dir.is_dir():
+        return found
+    for path in node_dir.rglob("*.py"):
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        if "NODE_CLASS_MAPPINGS" not in text:
+            continue
+        # Lightweight extraction: quoted keys near mappings assignments.
+        for match in re.finditer(r'["\']([A-Za-z0-9_]+)["\']\s*:', text):
+            key = match.group(1)
+            if key.startswith(("ReActor", "IPAdapter")):
+                found.add(key)
+    return found
+
+
+def _fetch_comfy_object_info_keys(base_url: str | None = None) -> tuple[str, set[str] | None, str]:
+    """Return (status, keys|None, notes). status: ok|unreachable|error."""
+    try:
+        from .comfyui_userdata import DEFAULT_COMFY_BASE_URL, comfyui_reachable, normalize_comfy_base_url
+    except Exception:  # noqa: BLE001
+        return "error", None, "comfyui helper import failed"
+    base = normalize_comfy_base_url(base_url or DEFAULT_COMFY_BASE_URL)
+    if not comfyui_reachable(base):
+        return "unreachable", None, f"ComfyUI not reachable at {base}; registration not live-verified"
+    try:
+        import urllib.request
+
+        with urllib.request.urlopen(f"{base.rstrip('/')}/object_info", timeout=8) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        if not isinstance(payload, dict):
+            return "error", None, "object_info returned non-object"
+        return "ok", set(payload.keys()), "object_info loaded"
+    except Exception as exc:  # noqa: BLE001
+        return "error", None, f"object_info fetch failed: {exc}"
+
+
+def node_pin_status(
+    bundle_nodes: list[dict[str, Any]],
+    name: str,
+    comfyui_custom_nodes: Path | None,
+    *,
+    required_node_types: tuple[str, ...] = (),
+    object_info_keys: set[str] | None = None,
+    object_info_status: str = "unchecked",
+) -> dict[str, Any]:
+    entry = next((n for n in bundle_nodes if str(n.get("name") or "") == name), None)
+    payload: dict[str, Any] = {
+        "name": name,
+        "registered": entry is not None,
+        "pinned_commit": (entry or {}).get("pinned_commit") or "",
+        "repo_url": (entry or {}).get("repo_url") or "",
+        "present": False,
+        "current_commit": "",
+        "pin_match": False,
+        "pin_determinable": False,
+        "source_declares_required_types": False,
+        "declared_types_found": [],
+        "registration_status": "unchecked",
+        "registration_notes": "",
+        "notes": "",
+    }
+    if entry is None or comfyui_custom_nodes is None:
+        payload["registration_status"] = "missing"
+        payload["registration_notes"] = "Node not registered or custom_nodes path unavailable."
+        return payload
+    folder = str(entry.get("folder_name") or name)
+    node_dir = Path(comfyui_custom_nodes) / folder
+    payload["present"] = node_dir.is_dir()
+    if not payload["present"]:
+        payload["notes"] = "Custom node folder missing after Full Reset until install_nodes runs."
+        payload["registration_status"] = "missing"
+        payload["registration_notes"] = "Filesystem folder absent."
+        return payload
+
+    declared = _scan_node_class_mappings(node_dir)
+    if required_node_types:
+        found_types = [t for t in required_node_types if t in declared]
+        payload["declared_types_found"] = found_types
+        payload["source_declares_required_types"] = len(found_types) == len(required_node_types)
+        if not payload["source_declares_required_types"]:
+            missing_decl = [t for t in required_node_types if t not in declared]
+            payload["notes"] = (
+                "Folder present but source scan did not find required NODE_CLASS_MAPPINGS keys: "
+                + ", ".join(missing_decl)
+            )
+
+    git_dir = node_dir / ".git"
+    if git_dir.exists():
+        import subprocess
+
+        completed = subprocess.run(
+            ["git", "-C", str(node_dir), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if completed.returncode == 0:
+            head = (completed.stdout or "").strip()
+            payload["current_commit"] = head
+            payload["pin_determinable"] = True
+            pinned = str(entry.get("pinned_commit") or "").strip()
+            if pinned and (head.startswith(pinned) or pinned.startswith(head)):
+                payload["pin_match"] = True
+                payload["notes"] = (payload["notes"] + " " if payload["notes"] else "") + "Pinned commit matched."
+            elif pinned:
+                payload["pin_match"] = False
+                payload["notes"] = (
+                    (payload["notes"] + " " if payload["notes"] else "")
+                    + f"Checkout present but not at pinned commit {pinned}."
+                ).strip()
+            else:
+                payload["pin_match"] = True
+                payload["notes"] = (payload["notes"] + " " if payload["notes"] else "") + "No pinned_commit in registry."
+        else:
+            payload["notes"] = (payload["notes"] + " " if payload["notes"] else "") + "Failed to read HEAD commit."
+    else:
+        payload["notes"] = (
+            (payload["notes"] + " " if payload["notes"] else "")
+            + "Present but not a git checkout; cannot verify pin."
+        ).strip()
+
+    # Live ComfyUI registration (preferred): folder present but missing object_info types = import/reg failure.
+    if object_info_status == "ok" and object_info_keys is not None and required_node_types:
+        missing_live = [t for t in required_node_types if t not in object_info_keys]
+        if missing_live:
+            payload["registration_status"] = "failed"
+            payload["registration_notes"] = (
+                "Custom node folder is present but ComfyUI object_info is missing required types "
+                f"(import/registration failure): {', '.join(missing_live)}"
+            )
+        else:
+            payload["registration_status"] = "ok"
+            payload["registration_notes"] = "Required node types present in live ComfyUI object_info."
+    elif object_info_status in {"unreachable", "error", "unchecked"}:
+        if required_node_types and not payload["source_declares_required_types"]:
+            payload["registration_status"] = "failed"
+            payload["registration_notes"] = (
+                "ComfyUI object_info unavailable; source scan did not declare required node types."
+            )
+        else:
+            payload["registration_status"] = "unchecked"
+            payload["registration_notes"] = (
+                "ComfyUI object_info unavailable; filesystem/source checks only. "
+                "Re-run after ComfyUI is up to verify import/registration."
+            )
+    return payload
+
+
+def assess_identity_benchmark_dependencies(
+    *,
+    bundle_models: list[dict[str, Any]],
+    bundle_nodes: list[dict[str, Any]],
+    comfyui_custom_nodes: Path | None,
+    candidate: str | None = None,
+    comfyui_base_url: str | None = None,
+) -> dict[str, Any]:
+    candidates = [candidate] if candidate else list(LIVE_CANDIDATES)
+    object_info_status, object_info_keys, object_info_notes = _fetch_comfy_object_info_keys(comfyui_base_url)
+
+    reactor_node = node_pin_status(
+        bundle_nodes,
+        REACTOR_REQUIRED_NODE,
+        comfyui_custom_nodes,
+        required_node_types=("ReActorFaceSwap",),
+        object_info_keys=object_info_keys,
+        object_info_status=object_info_status,
+    )
+    faceid_node = node_pin_status(
+        bundle_nodes,
+        FACEID_REQUIRED_NODE,
+        comfyui_custom_nodes,
+        required_node_types=("IPAdapterUnifiedLoaderFaceID", "IPAdapterFaceID"),
+        object_info_keys=object_info_keys,
+        object_info_status=object_info_status,
+    )
+
+    report: dict[str, Any] = {
+        "package_version": PACKAGE_VERSION,
+        "quality_claim": "none — dependency readiness only; not a visual identity PASS",
+        "comfyui_object_info": {
+            "status": object_info_status,
+            "notes": object_info_notes,
+        },
+        "nodes": {
+            REACTOR_REQUIRED_NODE: reactor_node,
+            FACEID_REQUIRED_NODE: faceid_node,
+        },
+        "candidates": {},
+        "manual_instructions": [],
+        "download_instructions_deferred": True,
+        "download_instructions_note": (
+            "Do not obtain manual assets until this live checker reports which items are missing."
+        ),
+    }
+
+    all_missing: list[str] = []
+    for cand in candidates:
+        models = list(_required_models_for_candidate(cand))
+        present_m, missing_m = verify_named_model_files(bundle_models, models)
+        model_map = _model_presence_map(bundle_models, tuple(models))
+        if cand == CANDIDATE_REACTOR:
+            node_row = reactor_node
+            detail = {
+                "custom_node": REACTOR_REQUIRED_NODE,
+                "custom_node_present": bool(node_row.get("present")),
+                "pinned_revision_match": bool(node_row.get("pin_match")),
+                "pinned_revision_determinable": bool(node_row.get("pin_determinable")),
+                "pinned_commit": node_row.get("pinned_commit") or "",
+                "current_commit": node_row.get("current_commit") or "",
+                "registration_status": node_row.get("registration_status"),
+                "registration_notes": node_row.get("registration_notes"),
+                "w600k_r50_onnx": model_map.get("insightface", {}).get("present", False),
+                "inswapper_128_onnx": model_map.get("reactor_inswapper_128", {}).get("present", False),
+                "assets": {
+                    "insightface_w600k_r50": model_map.get("insightface"),
+                    "reactor_inswapper_128": model_map.get("reactor_inswapper_128"),
+                },
+            }
+        else:
+            node_row = faceid_node
+            detail = {
+                "custom_node": FACEID_REQUIRED_NODE,
+                "custom_node_present": bool(node_row.get("present")),
+                "pinned_revision_match": bool(node_row.get("pin_match")),
+                "pinned_revision_determinable": bool(node_row.get("pin_determinable")),
+                "pinned_commit": node_row.get("pinned_commit") or "",
+                "current_commit": node_row.get("current_commit") or "",
+                "registration_status": node_row.get("registration_status"),
+                "registration_notes": node_row.get("registration_notes"),
+                "faceid_plusv2_bin": model_map.get("ipadapter_faceid_plusv2_sd15", {}).get("present", False),
+                "faceid_plusv2_lora": model_map.get("ipadapter_faceid_plusv2_sd15_lora", {}).get(
+                    "present", False
+                ),
+                "clip_vit_h": model_map.get("clip_vision_sd15", {}).get("present", False),
+                "w600k_r50_onnx": model_map.get("insightface", {}).get("present", False),
+                "assets": {
+                    "ipadapter_faceid_plusv2_sd15": model_map.get("ipadapter_faceid_plusv2_sd15"),
+                    "ipadapter_faceid_plusv2_sd15_lora": model_map.get(
+                        "ipadapter_faceid_plusv2_sd15_lora"
+                    ),
+                    "clip_vision_sd15": model_map.get("clip_vision_sd15"),
+                    "insightface_w600k_r50": model_map.get("insightface"),
+                },
+            }
+
+        registration_ok = node_row.get("registration_status") in {"ok", "unchecked"}
+        pin_ok = bool(node_row.get("pin_match")) if node_row.get("pin_determinable") else bool(
+            node_row.get("present")
+        )
+        # If pin is determinable and mismatched, fail closed.
+        if node_row.get("pin_determinable") and not node_row.get("pin_match"):
+            pin_ok = False
+        ready = (
+            bool(node_row.get("present"))
+            and pin_ok
+            and registration_ok
+            and not missing_m
+            and node_row.get("registration_status") != "failed"
+        )
+        report["candidates"][cand] = {
+            "models_present": present_m,
+            "models_missing": missing_m,
+            "nodes_present": [node_row["name"]] if node_row.get("present") else [],
+            "nodes_missing": [] if node_row.get("present") else [node_row["name"]],
+            "ready": ready,
+            "detail": detail,
+        }
+        all_missing.extend(missing_m)
+
+    seen: set[str] = set()
+    unique_missing: list[str] = []
+    for name in all_missing:
+        if name not in seen:
+            seen.add(name)
+            unique_missing.append(name)
+    # Keep instructions available in JSON, but human printer should defer until after probe.
+    report["manual_instructions"] = format_manual_asset_instructions(bundle_models, unique_missing)
+    report["missing_model_names"] = unique_missing
+    report["ready_for_case_c"] = all(row.get("ready") for row in report["candidates"].values())
+    return report
 
 
 def prepare_identity_benchmark(
@@ -302,6 +721,9 @@ def prepare_identity_benchmark(
     dry_run: bool = False,
     allow_benchmark: bool = False,
 ) -> IdentityBenchmarkPrepResult:
+    from .workflow_parameters import apply_parameter_bindings
+    from .workflow_provenance import hash_ui_workflow
+
     result = IdentityBenchmarkPrepResult(
         ok=False,
         candidate=candidate,
@@ -347,10 +769,15 @@ def prepare_identity_benchmark(
             "ERROR: Required identity-benchmark model files missing (no auto-download): "
             + ", ".join(missing_models)
         )
+        result.errors.extend(format_manual_asset_instructions(bundle_models, missing_models))
     if require_nodes and missing_nodes:
         result.errors.append(
             "ERROR: Required identity-benchmark custom nodes missing: "
             + ", ".join(missing_nodes)
+        )
+        result.errors.append(
+            "Install via Full Launch (install_nodes.py --execute) or Node Manager; "
+            "pins are enforced from node_registry.json."
         )
     if result.errors:
         return result
@@ -360,6 +787,22 @@ def prepare_identity_benchmark(
     if not workflow_src.is_file():
         result.errors.append(f"ERROR: Benchmark workflow missing: {workflow_rel}")
         return result
+    try:
+        workflow_data = json.loads(workflow_src.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        result.errors.append(f"ERROR: Invalid benchmark workflow JSON: {exc}")
+        return result
+    graph_errors = assert_identity_benchmark_graph(workflow_data, candidate)
+    if graph_errors:
+        result.errors.extend(graph_errors)
+        return result
+
+    manifest_path = repo_root / _candidate_manifest_relpath(candidate)
+    if not manifest_path.is_file():
+        result.errors.append(f"ERROR: Benchmark manifest missing: {manifest_path.name}")
+        return result
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    schema = manifest.get("parameter_schema") or {}
 
     if seed is None:
         seed = generate_js_safe_seed()
@@ -378,6 +821,7 @@ def prepare_identity_benchmark(
     result.seed = int(seed)
     result.positive_prompt = SCENARIO_PROMPTS[scenario]
     result.staged_face_filename = f"ai_studio_idbench_{record.character_id[-8:]}_face.png"
+    save_prefix = f"ai_studio_idbench_{candidate.split('_')[0]}"
 
     if dry_run:
         result.ok = True
@@ -403,8 +847,31 @@ def prepare_identity_benchmark(
     staged = comfyui_input_dir / result.staged_face_filename
     shutil.copy2(archived_face, staged)
 
+    params = {
+        "input_image": result.staged_face_filename,
+        "positive_prompt": result.positive_prompt,
+        "seed": int(seed),
+        "seed_mode": "fixed",
+        "save_prefix": save_prefix,
+    }
+    bound = apply_parameter_bindings(workflow_data, schema, params)
+    # Ensure LoadImage widget is the staged basename even if schema typing differs.
+    for node in bound.get("nodes") or []:
+        if isinstance(node, dict) and node.get("type") == "LoadImage" and str(node.get("id")) == "1":
+            widgets = list(node.get("widgets_values") or ["", "image"])
+            widgets[0] = result.staged_face_filename
+            if len(widgets) < 2:
+                widgets.append("image")
+            node["widgets_values"] = widgets
+    bind_errors = assert_identity_benchmark_graph(bound, candidate)
+    if bind_errors:
+        shutil.rmtree(prepared_dir, ignore_errors=True)
+        result.errors.extend(bind_errors)
+        return result
+
     workflow_dest = prepared_dir / f"{preparation_id}.workflow.json"
-    shutil.copy2(workflow_src, workflow_dest)
+    workflow_dest.write_text(json.dumps(bound, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    prepared_hash = hash_ui_workflow(bound)
     metadata = {
         "preparation_id": preparation_id,
         "preparation_kind": PREPARATION_KIND_IDENTITY_BENCHMARK,
@@ -416,20 +883,17 @@ def prepare_identity_benchmark(
         "character_id": record.character_id,
         "workflow_identifier": result.workflow_identifier,
         "package_version": PACKAGE_VERSION,
-        "parameters": {
-            "seed": int(seed),
-            "seed_mode": "fixed",
-            "positive_prompt": result.positive_prompt,
-            "input_image": result.staged_face_filename,
-            "save_prefix": f"ai_studio_idbench_{candidate.split('_')[0]}",
-        },
+        "prepared_workflow_hash": prepared_hash,
+        "canonical_workflow_hash": hash_ui_workflow(workflow_data),
+        "parameters": params,
         "character_face_sha256": file_sha256(archived_face),
         "character_face_archived_path": "benchmark_source/primary_face.png",
         "license_notes": [
-            "InsightFace / FaceID weights are typically research-restricted; "
+            "InsightFace / FaceID / inswapper weights are typically research-restricted; "
             "no production promotion without explicit license review."
         ],
         "quality_claim": "none — prepare/open is plumbing only",
+        "graph_readiness": "structural_only",
     }
     (prepared_dir / f"{preparation_id}.metadata.json").write_text(
         json.dumps(metadata, indent=2, ensure_ascii=False) + "\n",
@@ -439,6 +903,7 @@ def prepare_identity_benchmark(
     result.ok = True
     result.messages.append(f"Identity benchmark preparation created: {preparation_id}")
     result.messages.append(f"Staged face: {result.staged_face_filename}")
+    result.messages.append(f"Bound candidate graph hash: {prepared_hash[:16]}…")
     result.warnings.append(
         "CODE/SIM prepare/open does NOT mean this identity method was quality-benchmarked."
     )

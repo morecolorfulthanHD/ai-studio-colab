@@ -34,6 +34,8 @@ from core.runtime.identity_benchmark import (
     PREPARATION_KIND_IDENTITY_BENCHMARK,
     SCENARIO_IDS,
     append_identity_benchmark_record,
+    assert_identity_benchmark_graph,
+    assess_identity_benchmark_dependencies,
     is_benchmark_generation_metadata,
     load_identity_benchmark_records,
     prepare_identity_benchmark,
@@ -79,10 +81,21 @@ def _setup_temp_repo(repo_root: Path) -> dict[str, Path]:
     (comfy / "input").mkdir(parents=True, exist_ok=True)
     (comfy / "custom_nodes" / "ComfyUI-ReActor").mkdir(parents=True, exist_ok=True)
     (comfy / "custom_nodes" / "ComfyUI_IPAdapter_plus").mkdir(parents=True, exist_ok=True)
+    (comfy / "custom_nodes" / "ComfyUI-ReActor" / "nodes.py").write_text(
+        'NODE_CLASS_MAPPINGS = {"ReActorFaceSwap": object}\n',
+        encoding="utf-8",
+    )
+    (comfy / "custom_nodes" / "ComfyUI_IPAdapter_plus" / "nodes.py").write_text(
+        'NODE_CLASS_MAPPINGS = {"IPAdapterUnifiedLoaderFaceID": object, "IPAdapterFaceID": object}\n',
+        encoding="utf-8",
+    )
     # Model stubs for fail-open allow-missing tests and optional present-path tests.
     insight = drive / "models" / "shared" / "insightface" / "models" / "buffalo_l" / "w600k_r50.onnx"
     insight.parent.mkdir(parents=True, exist_ok=True)
     insight.write_bytes(b"onnx-stub")
+    inswapper = drive / "models" / "shared" / "insightface" / "inswapper_128.onnx"
+    inswapper.parent.mkdir(parents=True, exist_ok=True)
+    inswapper.write_bytes(b"inswapper-stub")
     return {
         "drive": drive,
         "runtime": runtime,
@@ -90,6 +103,7 @@ def _setup_temp_repo(repo_root: Path) -> dict[str, Path]:
         "prepared": prepared,
         "input": comfy / "input",
         "insight": insight,
+        "inswapper": inswapper,
     }
 
 
@@ -142,13 +156,38 @@ def main() -> int:
         _assert_true("unknown missing", missing is None)
         _pass(results, "Unknown character ID fails closed")
 
-        # Patch model runtime paths for present InsightFace in temp drive
+        # Patch model runtime paths for present InsightFace + inswapper in temp drive
         models = []
         for entry in bundle.models:
             row = dict(entry)
             if row.get("name") == "insightface":
                 row["runtime_path"] = str(paths["insight"])
+            if row.get("name") == "reactor_inswapper_128":
+                row["runtime_path"] = str(paths["inswapper"])
             models.append(row)
+
+        # Canonical graphs contain real candidate nodes (structural readiness)
+        reactor_wf = json.loads(
+            (repo_root / "workflows/reference/identity_reactor_benchmark/workflow.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        faceid_wf = json.loads(
+            (repo_root / "workflows/reference/identity_faceid_benchmark/workflow.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        _assert_equal(
+            "reactor graph structural",
+            assert_identity_benchmark_graph(reactor_wf, CANDIDATE_REACTOR),
+            [],
+        )
+        _assert_equal(
+            "faceid graph structural",
+            assert_identity_benchmark_graph(faceid_wf, CANDIDATE_FACEID),
+            [],
+        )
+        _pass(results, "Canonical workflows include real ReActor/FaceID nodes (structural)")
 
         # Prepare without --allow-benchmark fails
         blocked = prepare_identity_benchmark(
@@ -187,9 +226,40 @@ def main() -> int:
         )
         _assert_false("faceid missing models", faceid_missing.ok)
         _assert_true("reports missing models", bool(faceid_missing.missing_models))
+        _assert_true(
+            "manual instructions",
+            any("MISSING" in e for e in faceid_missing.errors),
+        )
         _pass(results, "FaceID missing weights fail closed (no auto-download)")
 
-        # ReActor prepare with present node + insightface
+        # Missing ReActor inswapper fails closed
+        models_no_swap = [dict(m) for m in models]
+        for row in models_no_swap:
+            if row.get("name") == "reactor_inswapper_128":
+                row["runtime_path"] = str(paths["drive"] / "models" / "shared" / "insightface" / "missing.onnx")
+        reactor_missing = prepare_identity_benchmark(
+            repo_root,
+            drive_root=paths["drive"],
+            candidate=CANDIDATE_REACTOR,
+            scenario="S1_near_front_portrait",
+            character_id=reg.character.character_id,
+            runtime_prepared_root=paths["prepared"],
+            comfyui_input_dir=paths["input"],
+            bundle_models=models_no_swap,
+            bundle_nodes=list(bundle.nodes),
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            require_models=True,
+            require_nodes=True,
+            allow_benchmark=True,
+        )
+        _assert_false("reactor missing inswapper", reactor_missing.ok)
+        _assert_true(
+            "inswapper listed",
+            "reactor_inswapper_128" in reactor_missing.missing_models,
+        )
+        _pass(results, "ReActor missing inswapper fails closed (no auto-download)")
+
+        # ReActor prepare with present node + insightface + inswapper
         prep = prepare_identity_benchmark(
             repo_root,
             drive_root=paths["drive"],
@@ -212,7 +282,26 @@ def main() -> int:
         _assert_equal("benchmark_run", meta.get("benchmark_run"), True)
         _assert_equal("kind", meta.get("preparation_kind"), PREPARATION_KIND_IDENTITY_BENCHMARK)
         _assert_true("staged face", (paths["input"] / prep.staged_face_filename).is_file())
-        _pass(results, "ReActor identity benchmark prepare stages archived face")
+        bound_wf = json.loads(
+            (Path(prep.prepared_dir) / f"{prep.preparation_id}.workflow.json").read_text(encoding="utf-8")
+        )
+        _assert_equal(
+            "prepared reactor structural",
+            assert_identity_benchmark_graph(bound_wf, CANDIDATE_REACTOR),
+            [],
+        )
+        load = next(n for n in bound_wf["nodes"] if n.get("type") == "LoadImage")
+        pos = next(
+            n
+            for n in bound_wf["nodes"]
+            if n.get("type") == "CLIPTextEncode" and str(n.get("id")) == "3"
+        )
+        sampler = next(n for n in bound_wf["nodes"] if n.get("type") == "KSampler")
+        _assert_equal("bound face filename", load["widgets_values"][0], prep.staged_face_filename)
+        _assert_equal("bound prompt", pos["widgets_values"][0], prep.positive_prompt)
+        _assert_equal("bound seed", sampler["widgets_values"][0], 135791357)
+        _assert_equal("bound seed mode", sampler["widgets_values"][1], "fixed")
+        _pass(results, "ReActor prepare binds face/prompt/seed on executable graph")
 
         # Restage after clearing Comfy input
         for item in paths["input"].glob("*"):
@@ -244,7 +333,26 @@ def main() -> int:
             allow_benchmark=True,
         )
         _assert_true(f"faceid prep plumbing ({faceid_prep.errors})", faceid_prep.ok)
-        _pass(results, "FaceID benchmark prepare works as plumbing with allow-missing-models")
+        faceid_bound = json.loads(
+            (
+                Path(faceid_prep.prepared_dir) / f"{faceid_prep.preparation_id}.workflow.json"
+            ).read_text(encoding="utf-8")
+        )
+        _assert_equal(
+            "prepared faceid structural",
+            assert_identity_benchmark_graph(faceid_bound, CANDIDATE_FACEID),
+            [],
+        )
+        _pass(results, "FaceID prepare binds executable FaceID graph (allow-missing-models)")
+
+        # Dependency assessor does not claim quality PASS
+        dep = assess_identity_benchmark_dependencies(
+            bundle_models=models,
+            bundle_nodes=list(bundle.nodes),
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+        )
+        _assert_true("dep quality disclaimer", "not a visual" in str(dep.get("quality_claim") or "").lower())
+        _pass(results, "Dependency assessor is structural/readiness only (no quality PASS)")
 
         # Deferred InstantID rejected
         bad = prepare_identity_benchmark(

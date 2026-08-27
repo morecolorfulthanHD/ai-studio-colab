@@ -1,6 +1,6 @@
 {
-  "last_node_id": 8,
-  "last_link_id": 10,
+  "last_node_id": 9,
+  "last_link_id": 11,
   "nodes": [
     {
       "id": 1,
@@ -10,8 +10,8 @@
         0
       ],
       "size": [
-        300,
-        200
+        315,
+        314
       ],
       "flags": {},
       "order": 0,
@@ -23,7 +23,8 @@
           "type": "IMAGE",
           "links": [
             1
-          ]
+          ],
+          "slot_index": 0
         },
         {
           "name": "MASK",
@@ -31,7 +32,9 @@
           "links": null
         }
       ],
-      "properties": {},
+      "properties": {
+        "Node name for S&R": "LoadImage"
+      },
       "widgets_values": [
         "example.png",
         "image"
@@ -42,10 +45,10 @@
       "type": "CheckpointLoaderSimple",
       "pos": [
         0,
-        250
+        350
       ],
       "size": [
-        300,
+        320,
         100
       ],
       "flags": {},
@@ -58,7 +61,8 @@
           "type": "MODEL",
           "links": [
             2
-          ]
+          ],
+          "slot_index": 0
         },
         {
           "name": "CLIP",
@@ -66,17 +70,21 @@
           "links": [
             3,
             4
-          ]
+          ],
+          "slot_index": 1
         },
         {
           "name": "VAE",
           "type": "VAE",
           "links": [
             5
-          ]
+          ],
+          "slot_index": 2
         }
       ],
-      "properties": {},
+      "properties": {
+        "Node name for S&R": "CheckpointLoaderSimple"
+      },
       "widgets_values": [
         "sd15.safetensors"
       ]
@@ -85,7 +93,7 @@
       "id": 3,
       "type": "CLIPTextEncode",
       "pos": [
-        350,
+        400,
         0
       ],
       "size": [
@@ -108,10 +116,13 @@
           "type": "CONDITIONING",
           "links": [
             6
-          ]
+          ],
+          "slot_index": 0
         }
       ],
-      "properties": {},
+      "properties": {
+        "Node name for S&R": "CLIPTextEncode"
+      },
       "widgets_values": [
         "portrait"
       ]
@@ -120,7 +131,7 @@
       "id": 4,
       "type": "CLIPTextEncode",
       "pos": [
-        350,
+        400,
         250
       ],
       "size": [
@@ -128,7 +139,7 @@
         200
       ],
       "flags": {},
-      "order": 3,
+      "order": 2,
       "mode": 0,
       "inputs": [
         {
@@ -143,27 +154,30 @@
           "type": "CONDITIONING",
           "links": [
             7
-          ]
+          ],
+          "slot_index": 0
         }
       ],
-      "properties": {},
+      "properties": {
+        "Node name for S&R": "CLIPTextEncode"
+      },
       "widgets_values": [
-        ""
+        "blurry, lowres, jpeg artifacts, deformed, bad anatomy, extra limbs, watermark, text"
       ]
     },
     {
       "id": 5,
       "type": "EmptyLatentImage",
       "pos": [
-        350,
-        500
+        400,
+        520
       ],
       "size": [
         300,
         100
       ],
       "flags": {},
-      "order": 4,
+      "order": 3,
       "mode": 0,
       "inputs": [],
       "outputs": [
@@ -172,10 +186,13 @@
           "type": "LATENT",
           "links": [
             8
-          ]
+          ],
+          "slot_index": 0
         }
       ],
-      "properties": {},
+      "properties": {
+        "Node name for S&R": "EmptyLatentImage"
+      },
       "widgets_values": [
         512,
         768,
@@ -186,12 +203,12 @@
       "id": 6,
       "type": "KSampler",
       "pos": [
-        800,
+        900,
         100
       ],
       "size": [
-        300,
-        260
+        315,
+        262
       ],
       "flags": {},
       "order": 5,
@@ -224,10 +241,13 @@
           "type": "LATENT",
           "links": [
             9
-          ]
+          ],
+          "slot_index": 0
         }
       ],
-      "properties": {},
+      "properties": {
+        "Node name for S&R": "KSampler"
+      },
       "widgets_values": [
         42,
         "fixed",
@@ -242,11 +262,11 @@
       "id": 7,
       "type": "VAEDecode",
       "pos": [
-        1150,
+        1250,
         100
       ],
       "size": [
-        200,
+        210,
         50
       ],
       "flags": {},
@@ -270,17 +290,82 @@
           "type": "IMAGE",
           "links": [
             10
-          ]
+          ],
+          "slot_index": 0
         }
       ],
-      "properties": {},
-      "widgets_values": []
+      "properties": {
+        "Node name for S&R": "VAEDecode"
+      }
+    },
+    {
+      "id": 9,
+      "type": "ReActorFaceSwap",
+      "pos": [
+        1500,
+        80
+      ],
+      "size": [
+        320,
+        340
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "input_image",
+          "type": "IMAGE",
+          "link": 10
+        },
+        {
+          "name": "source_image",
+          "type": "IMAGE",
+          "link": 1
+        },
+        {
+          "name": "face_model",
+          "type": "FACE_MODEL",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            11
+          ],
+          "slot_index": 0
+        },
+        {
+          "name": "FACE_MODEL",
+          "type": "FACE_MODEL",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "ReActorFaceSwap"
+      },
+      "widgets_values": [
+        true,
+        "inswapper_128.onnx",
+        "retinaface_resnet50",
+        "none",
+        1,
+        1,
+        "no",
+        "no",
+        "0",
+        "0",
+        1
+      ]
     },
     {
       "id": 8,
       "type": "SaveImage",
       "pos": [
-        1400,
+        1850,
         100
       ],
       "size": [
@@ -288,19 +373,19 @@
         100
       ],
       "flags": {},
-      "order": 7,
+      "order": 8,
       "mode": 0,
       "inputs": [
         {
           "name": "images",
           "type": "IMAGE",
-          "link": 10
+          "link": 11
         }
       ],
       "outputs": [],
       "properties": {},
       "widgets_values": [
-        "ai_studio_idbench"
+        "ai_studio_idbench_reactor"
       ]
     }
   ],
@@ -309,8 +394,8 @@
       1,
       1,
       0,
-      7,
-      0,
+      9,
+      1,
       "IMAGE"
     ],
     [
@@ -381,6 +466,14 @@
       10,
       7,
       0,
+      9,
+      0,
+      "IMAGE"
+    ],
+    [
+      11,
+      9,
+      0,
       8,
       0,
       "IMAGE"
@@ -389,7 +482,13 @@
   "groups": [],
   "config": {},
   "extra": {
-    "workflow_identifier_note": "Package 4.12 identity benchmark stub \u2014 live wiring adds ReActor or IPAdapter FaceID when assets present"
+    "ai_studio": {
+      "workflow_identifier": "reference/identity_reactor_benchmark",
+      "package_version": "4.12",
+      "candidate": "reactor_faceswap_benchmark",
+      "identity_method": "reactor_faceswap",
+      "note": "Executable ReActor face-swap benchmark graph (not a quality claim)."
+    }
   },
   "version": 0.4
 }
