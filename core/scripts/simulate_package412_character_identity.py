@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import shutil
 import sys
 import tempfile
@@ -30,6 +31,11 @@ from core.runtime.generation_reproduction import assess_reproduction_eligibility
 from core.runtime.identity_benchmark import (
     CANDIDATE_FACEID,
     CANDIDATE_REACTOR,
+    INTEGRITY_MISSING,
+    INTEGRITY_PRESENT,
+    INTEGRITY_SHA256_MISMATCH,
+    INTEGRITY_SIZE_MISMATCH,
+    INTEGRITY_VERIFIED,
     IdentityBenchmarkRecord,
     PREPARATION_KIND_IDENTITY_BENCHMARK,
     SCENARIO_IDS,
@@ -40,6 +46,8 @@ from core.runtime.identity_benchmark import (
     load_identity_benchmark_records,
     prepare_identity_benchmark,
     restage_identity_benchmark_face,
+    verify_model_asset_integrity,
+    verify_required_model_assets,
 )
 from core.runtime.registry_loader import RegistryLoader
 
@@ -105,6 +113,72 @@ def _setup_temp_repo(repo_root: Path) -> dict[str, Path]:
         "insight": insight,
         "inswapper": inswapper,
     }
+
+
+def _sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _faceid_integrity_models(
+    bundle_models: list[dict],
+    drive: Path,
+    *,
+    bin_content: bytes | None = b"faceid-bin-ok",
+    lora_content: bytes | None = b"faceid-lora-ok",
+    clip_content: bytes | None = b"faceid-clip-ok",
+    bin_size_override: int | None = None,
+    lora_size_override: int | None = None,
+    clip_size_override: int | None = None,
+) -> list[dict]:
+    asset_specs = {
+        "ipadapter_faceid_plusv2_sd15": (
+            drive / "models/shared/ipadapter/ip-adapter-faceid-plusv2_sd15.bin",
+            bin_content,
+            bin_size_override,
+        ),
+        "ipadapter_faceid_plusv2_sd15_lora": (
+            drive / "models/shared/loras/ip-adapter-faceid-plusv2_sd15_lora.safetensors",
+            lora_content,
+            lora_size_override,
+        ),
+        "clip_vision_sd15": (
+            drive / "models/shared/clip_vision/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
+            clip_content,
+            clip_size_override,
+        ),
+    }
+    models: list[dict] = []
+    for entry in bundle_models:
+        row = dict(entry)
+        name = str(row.get("name") or "")
+        if name == "insightface":
+            row["runtime_path"] = str(
+                drive / "models/shared/insightface/models/buffalo_l/w600k_r50.onnx"
+            )
+            insight = Path(row["runtime_path"])
+            insight.parent.mkdir(parents=True, exist_ok=True)
+            if not insight.is_file():
+                insight.write_bytes(b"onnx-stub")
+        elif name == "reactor_inswapper_128":
+            row["runtime_path"] = str(drive / "models/shared/insightface/inswapper_128.onnx")
+            swap = Path(row["runtime_path"])
+            swap.parent.mkdir(parents=True, exist_ok=True)
+            if not swap.is_file():
+                swap.write_bytes(b"inswapper-stub")
+        elif name in asset_specs:
+            path, content, size_override = asset_specs[name]
+            row["runtime_path"] = str(path)
+            if content is not None:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(content)
+                row["expected_sha256"] = _sha256_bytes(content)
+                row["expected_size_bytes"] = (
+                    size_override if size_override is not None else len(content)
+                )
+            elif size_override is not None:
+                row["expected_size_bytes"] = size_override
+        models.append(row)
+    return models
 
 
 def main() -> int:
@@ -353,6 +427,129 @@ def main() -> int:
         )
         _assert_true("dep quality disclaimer", "not a visual" in str(dep.get("quality_claim") or "").lower())
         _pass(results, "Dependency assessor is structural/readiness only (no quality PASS)")
+
+        # --- FaceID integrity verification (deterministic registry metadata) ---
+        missing_models = _faceid_integrity_models(
+            bundle.models,
+            paths["drive"],
+            bin_content=None,
+            lora_content=None,
+            clip_content=None,
+        )
+        _, not_ready, integrity = verify_required_model_assets(
+            missing_models,
+            [
+                "ipadapter_faceid_plusv2_sd15",
+                "ipadapter_faceid_plusv2_sd15_lora",
+                "clip_vision_sd15",
+            ],
+        )
+        _assert_equal("missing count", len(not_ready), 3)
+        _assert_equal(
+            "missing bin status",
+            integrity["ipadapter_faceid_plusv2_sd15"]["status"],
+            INTEGRITY_MISSING,
+        )
+        dep_missing = assess_identity_benchmark_dependencies(
+            bundle_models=missing_models,
+            bundle_nodes=list(bundle.nodes),
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+        )
+        _assert_false("missing assets not ready", dep_missing["candidates"][CANDIDATE_FACEID]["ready"])
+        _pass(results, "FaceID missing asset -> not ready (MISSING)")
+
+        wrong_size_models = _faceid_integrity_models(
+            bundle.models,
+            paths["drive"],
+            bin_size_override=999,
+        )
+        _, not_ready_size, integrity_size = verify_required_model_assets(
+            wrong_size_models,
+            ["ipadapter_faceid_plusv2_sd15"],
+        )
+        _assert_true("wrong size not ready", "ipadapter_faceid_plusv2_sd15" in not_ready_size)
+        _assert_equal(
+            "wrong size status",
+            integrity_size["ipadapter_faceid_plusv2_sd15"]["status"],
+            INTEGRITY_SIZE_MISMATCH,
+        )
+        _pass(results, "FaceID wrong-size asset -> SIZE MISMATCH -> not ready")
+
+        wrong_hash_models = _faceid_integrity_models(bundle.models, paths["drive"])
+        for row in wrong_hash_models:
+            if row.get("name") == "ipadapter_faceid_plusv2_sd15_lora":
+                row["expected_sha256"] = _sha256_bytes(b"expected-not-actual")
+        _, not_ready_sha, integrity_sha = verify_required_model_assets(
+            wrong_hash_models,
+            ["ipadapter_faceid_plusv2_sd15_lora"],
+        )
+        _assert_true("wrong sha not ready", "ipadapter_faceid_plusv2_sd15_lora" in not_ready_sha)
+        _assert_equal(
+            "wrong sha status",
+            integrity_sha["ipadapter_faceid_plusv2_sd15_lora"]["status"],
+            INTEGRITY_SHA256_MISMATCH,
+        )
+        _pass(results, "FaceID wrong-content (matching size) -> SHA256 MISMATCH -> not ready")
+
+        verified_models = _faceid_integrity_models(bundle.models, paths["drive"])
+        ready_names, not_ready_ok, integrity_ok = verify_required_model_assets(
+            verified_models,
+            [
+                "ipadapter_faceid_plusv2_sd15",
+                "ipadapter_faceid_plusv2_sd15_lora",
+                "clip_vision_sd15",
+            ],
+        )
+        _assert_equal("verified count", len(ready_names), 3)
+        _assert_equal("verified bin", integrity_ok["ipadapter_faceid_plusv2_sd15"]["status"], INTEGRITY_VERIFIED)
+        _pass(results, "FaceID correct hash/size -> VERIFIED")
+
+        dep_all_verified = assess_identity_benchmark_dependencies(
+            bundle_models=verified_models,
+            bundle_nodes=list(bundle.nodes),
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+        )
+        _assert_true(
+            "faceid ready when verified",
+            dep_all_verified["candidates"][CANDIDATE_FACEID]["ready"],
+        )
+        _assert_true("case c ready when all verified", dep_all_verified["ready_for_case_c"])
+        _pass(results, "All three FaceID assets VERIFIED -> FaceID candidate ready")
+
+        one_bad_models = _faceid_integrity_models(bundle.models, paths["drive"], clip_content=None)
+        dep_one_bad = assess_identity_benchmark_dependencies(
+            bundle_models=one_bad_models,
+            bundle_nodes=list(bundle.nodes),
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+        )
+        _assert_false(
+            "one invalid blocks faceid",
+            dep_one_bad["candidates"][CANDIDATE_FACEID]["ready"],
+        )
+        _assert_false("one invalid blocks case c", dep_one_bad["ready_for_case_c"])
+        _pass(results, "Any one invalid FaceID asset -> ready_for_case_c false")
+
+        no_meta_row = verify_model_asset_integrity(
+            {
+                "name": "reactor_inswapper_128",
+                "runtime_path": str(paths["inswapper"]),
+                "filename": "inswapper_128.onnx",
+            }
+        )
+        _assert_equal("no metadata status", no_meta_row["status"], INTEGRITY_PRESENT)
+        _assert_true("no metadata verified", no_meta_row["verified"])
+        _pass(results, "Registry entries without integrity metadata still presence-only")
+
+        dep_reactor = assess_identity_benchmark_dependencies(
+            bundle_models=one_bad_models,
+            bundle_nodes=list(bundle.nodes),
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+        )
+        _assert_true(
+            "reactor unchanged when faceid invalid",
+            dep_reactor["candidates"][CANDIDATE_REACTOR]["ready"],
+        )
+        _pass(results, "ReActor readiness unchanged (regression)")
 
         # Deferred InstantID rejected
         bad = prepare_identity_benchmark(

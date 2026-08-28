@@ -72,6 +72,22 @@ REACTOR_REQUIRED_MODEL_NAMES = ("insightface", "reactor_inswapper_128")
 FACEID_REQUIRED_NODE = "ComfyUI_IPAdapter_plus"
 REACTOR_REQUIRED_NODE = "ComfyUI-ReActor"
 
+# Registry entries with optional expected_sha256 / expected_size_bytes use strict verification.
+FACEID_INTEGRITY_MODEL_NAMES = frozenset(
+    {
+        "ipadapter_faceid_plusv2_sd15",
+        "ipadapter_faceid_plusv2_sd15_lora",
+        "clip_vision_sd15",
+    }
+)
+
+INTEGRITY_MISSING = "MISSING"
+INTEGRITY_SIZE_MISMATCH = "SIZE MISMATCH"
+INTEGRITY_SHA256_MISMATCH = "SHA256 MISMATCH"
+INTEGRITY_UNREADABLE = "UNREADABLE"
+INTEGRITY_VERIFIED = "VERIFIED"
+INTEGRITY_PRESENT = "PRESENT"  # file exists; no integrity metadata configured
+
 REACTOR_REQUIRED_GRAPH_NODES = frozenset(
     {
         "LoadImage",
@@ -359,6 +375,141 @@ def verify_named_model_files(bundle_models: list[dict[str, Any]], names: list[st
     return present, missing
 
 
+def _entry_expects_integrity(entry: dict[str, Any]) -> bool:
+    if str(entry.get("expected_sha256") or "").strip():
+        return True
+    return entry.get("expected_size_bytes") is not None
+
+
+def verify_model_asset_integrity(
+    entry: dict[str, Any],
+    *,
+    hash_status_callback: Any | None = None,
+) -> dict[str, Any]:
+    """Fail-closed integrity check when expected_sha256 / expected_size_bytes are set."""
+    name = str(entry.get("name") or "")
+    runtime_raw = str(entry.get("runtime_path") or "").strip()
+    filename = str(
+        entry.get("filename") or (Path(runtime_raw).name if runtime_raw else name)
+    )
+    expected_sha = str(entry.get("expected_sha256") or "").strip().lower()
+    expected_size = entry.get("expected_size_bytes")
+    expects_integrity = _entry_expects_integrity(entry)
+
+    result: dict[str, Any] = {
+        "name": name,
+        "filename": filename,
+        "runtime_path": runtime_raw or None,
+        "status": INTEGRITY_MISSING,
+        "verified": False,
+        "present": False,
+        "expected_sha256": expected_sha or None,
+        "expected_size_bytes": int(expected_size) if expected_size is not None else None,
+        "actual_size_bytes": None,
+        "actual_sha256": None,
+    }
+
+    if not runtime_raw:
+        return result
+
+    path = Path(runtime_raw)
+    if not path.is_file():
+        return result
+
+    result["present"] = True
+
+    try:
+        actual_size = path.stat().st_size
+    except OSError:
+        result["status"] = INTEGRITY_UNREADABLE
+        return result
+
+    result["actual_size_bytes"] = actual_size
+
+    if not expects_integrity:
+        result["status"] = INTEGRITY_PRESENT
+        result["verified"] = True
+        return result
+
+    if expected_size is not None and actual_size != int(expected_size):
+        result["status"] = INTEGRITY_SIZE_MISMATCH
+        return result
+
+    if expected_sha:
+        if hash_status_callback is not None:
+            hash_status_callback(filename)
+        try:
+            actual_sha = file_sha256(path).lower()
+        except OSError:
+            result["status"] = INTEGRITY_UNREADABLE
+            return result
+        result["actual_sha256"] = actual_sha
+        if actual_sha != expected_sha:
+            result["status"] = INTEGRITY_SHA256_MISMATCH
+            return result
+
+    result["status"] = INTEGRITY_VERIFIED
+    result["verified"] = True
+    return result
+
+
+def verify_required_model_assets(
+    bundle_models: list[dict[str, Any]],
+    names: list[str],
+    *,
+    hash_status_callback: Any | None = None,
+) -> tuple[list[str], list[str], dict[str, dict[str, Any]]]:
+    """Return (ready_names, not_ready_names, integrity_by_name).
+
+    Entries with integrity metadata must reach VERIFIED; others need filesystem presence only.
+    """
+    by_name = {str(entry.get("name") or ""): entry for entry in bundle_models}
+    ready: list[str] = []
+    not_ready: list[str] = []
+    integrity: dict[str, dict[str, Any]] = {}
+
+    for name in names:
+        entry = by_name.get(name)
+        if entry is None:
+            not_ready.append(name)
+            integrity[name] = {
+                "name": name,
+                "status": INTEGRITY_MISSING,
+                "verified": False,
+                "present": False,
+            }
+            continue
+        row = verify_model_asset_integrity(entry, hash_status_callback=hash_status_callback)
+        integrity[name] = row
+        if row.get("verified"):
+            ready.append(name)
+        else:
+            not_ready.append(name)
+
+    return ready, not_ready, integrity
+
+
+def format_integrity_failure_message(name: str, row: dict[str, Any]) -> str:
+    status = str(row.get("status") or INTEGRITY_MISSING)
+    filename = row.get("filename") or name
+    path = row.get("runtime_path") or "(unknown path)"
+    if status == INTEGRITY_MISSING:
+        return f"{name} ({filename}): MISSING at {path}"
+    if status == INTEGRITY_SIZE_MISMATCH:
+        return (
+            f"{name} ({filename}): SIZE MISMATCH at {path} "
+            f"(expected {row.get('expected_size_bytes')} bytes, got {row.get('actual_size_bytes')})"
+        )
+    if status == INTEGRITY_SHA256_MISMATCH:
+        return (
+            f"{name} ({filename}): SHA256 MISMATCH at {path} "
+            f"(expected {row.get('expected_sha256')}, got {row.get('actual_sha256')})"
+        )
+    if status == INTEGRITY_UNREADABLE:
+        return f"{name} ({filename}): UNREADABLE at {path}"
+    return f"{name} ({filename}): {status} at {path}"
+
+
 def verify_named_nodes(
     bundle_nodes: list[dict[str, Any]],
     names: list[str],
@@ -576,6 +727,7 @@ def assess_identity_benchmark_dependencies(
     comfyui_custom_nodes: Path | None,
     candidate: str | None = None,
     comfyui_base_url: str | None = None,
+    hash_status_callback: Any | None = None,
 ) -> dict[str, Any]:
     candidates = [candidate] if candidate else list(LIVE_CANDIDATES)
     object_info_status, object_info_keys, object_info_notes = _fetch_comfy_object_info_keys(comfyui_base_url)
@@ -600,6 +752,10 @@ def assess_identity_benchmark_dependencies(
     report: dict[str, Any] = {
         "package_version": PACKAGE_VERSION,
         "quality_claim": "none — dependency readiness only; not a visual identity PASS",
+        "faceid_license_note": (
+            "IP-Adapter-FaceID weights are non-commercial/research-only per upstream model card. "
+            "Package 4.12 benchmark use does NOT approve production/commercial FaceID deployment."
+        ),
         "comfyui_object_info": {
             "status": object_info_status,
             "notes": object_info_notes,
@@ -610,17 +766,41 @@ def assess_identity_benchmark_dependencies(
         },
         "candidates": {},
         "manual_instructions": [],
-        "download_instructions_deferred": True,
-        "download_instructions_note": (
-            "Do not obtain manual assets until this live checker reports which items are missing."
-        ),
+        "integrity_failures": [],
+        "missing_model_names": [],
     }
 
-    all_missing: list[str] = []
+    all_not_ready: list[str] = []
+    integrity_failures: list[str] = []
     for cand in candidates:
         models = list(_required_models_for_candidate(cand))
-        present_m, missing_m = verify_named_model_files(bundle_models, models)
-        model_map = _model_presence_map(bundle_models, tuple(models))
+        integrity_map: dict[str, dict[str, Any]] = {}
+        if cand == CANDIDATE_REACTOR:
+            present_m, missing_m = verify_named_model_files(bundle_models, models)
+            for name in models:
+                entry = next((m for m in bundle_models if str(m.get("name") or "") == name), {})
+                runtime = str(entry.get("runtime_path") or "")
+                integrity_map[name] = {
+                    "name": name,
+                    "status": INTEGRITY_PRESENT if name in present_m else INTEGRITY_MISSING,
+                    "verified": name in present_m,
+                    "present": name in present_m,
+                    "runtime_path": runtime or None,
+                    "filename": entry.get("filename") or name,
+                }
+        else:
+            present_m, missing_m, integrity_map = verify_required_model_assets(
+                bundle_models,
+                models,
+                hash_status_callback=hash_status_callback,
+            )
+            for name in missing_m:
+                row = integrity_map.get(name) or {}
+                if row.get("status") not in {INTEGRITY_MISSING, INTEGRITY_PRESENT, INTEGRITY_VERIFIED}:
+                    integrity_failures.append(format_integrity_failure_message(name, row))
+                elif row.get("status") == INTEGRITY_MISSING:
+                    integrity_failures.append(format_integrity_failure_message(name, row))
+
         if cand == CANDIDATE_REACTOR:
             node_row = reactor_node
             detail = {
@@ -632,15 +812,19 @@ def assess_identity_benchmark_dependencies(
                 "current_commit": node_row.get("current_commit") or "",
                 "registration_status": node_row.get("registration_status"),
                 "registration_notes": node_row.get("registration_notes"),
-                "w600k_r50_onnx": model_map.get("insightface", {}).get("present", False),
-                "inswapper_128_onnx": model_map.get("reactor_inswapper_128", {}).get("present", False),
+                "w600k_r50_onnx": integrity_map.get("insightface", {}).get("verified", False),
+                "inswapper_128_onnx": integrity_map.get("reactor_inswapper_128", {}).get("verified", False),
                 "assets": {
-                    "insightface_w600k_r50": model_map.get("insightface"),
-                    "reactor_inswapper_128": model_map.get("reactor_inswapper_128"),
+                    "insightface_w600k_r50": integrity_map.get("insightface"),
+                    "reactor_inswapper_128": integrity_map.get("reactor_inswapper_128"),
                 },
             }
         else:
             node_row = faceid_node
+            bin_row = integrity_map.get("ipadapter_faceid_plusv2_sd15") or {}
+            lora_row = integrity_map.get("ipadapter_faceid_plusv2_sd15_lora") or {}
+            clip_row = integrity_map.get("clip_vision_sd15") or {}
+            insight_row = integrity_map.get("insightface") or {}
             detail = {
                 "custom_node": FACEID_REQUIRED_NODE,
                 "custom_node_present": bool(node_row.get("present")),
@@ -650,19 +834,18 @@ def assess_identity_benchmark_dependencies(
                 "current_commit": node_row.get("current_commit") or "",
                 "registration_status": node_row.get("registration_status"),
                 "registration_notes": node_row.get("registration_notes"),
-                "faceid_plusv2_bin": model_map.get("ipadapter_faceid_plusv2_sd15", {}).get("present", False),
-                "faceid_plusv2_lora": model_map.get("ipadapter_faceid_plusv2_sd15_lora", {}).get(
-                    "present", False
-                ),
-                "clip_vit_h": model_map.get("clip_vision_sd15", {}).get("present", False),
-                "w600k_r50_onnx": model_map.get("insightface", {}).get("present", False),
+                "faceid_plusv2_bin_status": bin_row.get("status"),
+                "faceid_plusv2_lora_status": lora_row.get("status"),
+                "clip_vit_h_status": clip_row.get("status"),
+                "faceid_plusv2_bin": bin_row.get("status") == INTEGRITY_VERIFIED,
+                "faceid_plusv2_lora": lora_row.get("status") == INTEGRITY_VERIFIED,
+                "clip_vit_h": clip_row.get("status") == INTEGRITY_VERIFIED,
+                "w600k_r50_onnx": insight_row.get("verified", False),
                 "assets": {
-                    "ipadapter_faceid_plusv2_sd15": model_map.get("ipadapter_faceid_plusv2_sd15"),
-                    "ipadapter_faceid_plusv2_sd15_lora": model_map.get(
-                        "ipadapter_faceid_plusv2_sd15_lora"
-                    ),
-                    "clip_vision_sd15": model_map.get("clip_vision_sd15"),
-                    "insightface_w600k_r50": model_map.get("insightface"),
+                    "ipadapter_faceid_plusv2_sd15": bin_row,
+                    "ipadapter_faceid_plusv2_sd15_lora": lora_row,
+                    "clip_vision_sd15": clip_row,
+                    "insightface_w600k_r50": insight_row,
                 },
             }
 
@@ -670,7 +853,6 @@ def assess_identity_benchmark_dependencies(
         pin_ok = bool(node_row.get("pin_match")) if node_row.get("pin_determinable") else bool(
             node_row.get("present")
         )
-        # If pin is determinable and mismatched, fail closed.
         if node_row.get("pin_determinable") and not node_row.get("pin_match"):
             pin_ok = False
         ready = (
@@ -683,22 +865,23 @@ def assess_identity_benchmark_dependencies(
         report["candidates"][cand] = {
             "models_present": present_m,
             "models_missing": missing_m,
+            "models_integrity": integrity_map,
             "nodes_present": [node_row["name"]] if node_row.get("present") else [],
             "nodes_missing": [] if node_row.get("present") else [node_row["name"]],
             "ready": ready,
             "detail": detail,
         }
-        all_missing.extend(missing_m)
+        all_not_ready.extend(missing_m)
 
     seen: set[str] = set()
     unique_missing: list[str] = []
-    for name in all_missing:
+    for name in all_not_ready:
         if name not in seen:
             seen.add(name)
             unique_missing.append(name)
-    # Keep instructions available in JSON, but human printer should defer until after probe.
     report["manual_instructions"] = format_manual_asset_instructions(bundle_models, unique_missing)
     report["missing_model_names"] = unique_missing
+    report["integrity_failures"] = integrity_failures
     report["ready_for_case_c"] = all(row.get("ready") for row in report["candidates"].values())
     return report
 
@@ -760,16 +943,22 @@ def prepare_identity_benchmark(
 
     required_models = list(_required_models_for_candidate(candidate))
     required_nodes = list(_required_nodes_for_candidate(candidate))
-    _, missing_models = verify_named_model_files(bundle_models, required_models)
+    _, missing_models, model_integrity = verify_required_model_assets(bundle_models, required_models)
     _, missing_nodes = verify_named_nodes(bundle_nodes, required_nodes, comfyui_custom_nodes)
     result.missing_models = missing_models
     result.missing_nodes = missing_nodes
     if require_models and missing_models:
         result.errors.append(
-            "ERROR: Required identity-benchmark model files missing (no auto-download): "
+            "ERROR: Required identity-benchmark model files missing or failed integrity verification "
+            "(no auto-download): "
             + ", ".join(missing_models)
         )
-        result.errors.extend(format_manual_asset_instructions(bundle_models, missing_models))
+        for name in missing_models:
+            row = model_integrity.get(name)
+            if row:
+                result.errors.append(format_integrity_failure_message(name, row))
+            else:
+                result.errors.extend(format_manual_asset_instructions(bundle_models, [name]))
     if require_nodes and missing_nodes:
         result.errors.append(
             "ERROR: Required identity-benchmark custom nodes missing: "

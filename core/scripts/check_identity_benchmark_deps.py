@@ -19,6 +19,7 @@ _activate.activate(__file__)
 from core.runtime.identity_benchmark import (
     CANDIDATE_FACEID,
     CANDIDATE_REACTOR,
+    INTEGRITY_VERIFIED,
     LIVE_CANDIDATES,
     assess_identity_benchmark_dependencies,
 )
@@ -33,11 +34,32 @@ def _yn(value: bool | None) -> str:
     return "unknown"
 
 
+def _integrity_label(status: str | None, *, verified: bool | None = None) -> str:
+    if status:
+        return str(status)
+    if verified:
+        return "VERIFIED"
+    return "MISSING"
+
+
+def _print_asset_status(label: str, row: dict | None) -> None:
+    row = row or {}
+    status = _integrity_label(row.get("status"), verified=row.get("verified"))
+    filename = row.get("filename") or label
+    print(f"  {label}: {status} ({filename})")
+    if status not in {INTEGRITY_VERIFIED, "PRESENT"}:
+        path = row.get("runtime_path")
+        if path:
+            print(f"    path: {path}")
+
+
 def _print_human(report: dict) -> None:
     print("AI Studio — Identity Benchmark Dependency Check")
     print("=" * 40)
     print(f"Package: {report['package_version']}")
     print(f"Quality claim: {report['quality_claim']}")
+    if report.get("faceid_license_note"):
+        print(f"FaceID license: {report['faceid_license_note']}")
     oi = report.get("comfyui_object_info") or {}
     print(f"ComfyUI object_info: {oi.get('status')} — {oi.get('notes')}")
     print()
@@ -63,6 +85,7 @@ def _print_human(report: dict) -> None:
 
     faceid = (report.get("candidates") or {}).get(CANDIDATE_FACEID) or {}
     fd = faceid.get("detail") or {}
+    assets = fd.get("assets") or {}
     print("IPADAPTER FACEID")
     print(f"  custom node present: {_yn(fd.get('custom_node_present'))} ({fd.get('custom_node')})")
     if fd.get("pinned_revision_determinable"):
@@ -75,10 +98,10 @@ def _print_human(report: dict) -> None:
     print(f"  registration/import: {fd.get('registration_status')}")
     if fd.get("registration_notes"):
         print(f"    notes: {fd.get('registration_notes')}")
-    print(f"  FaceID Plus v2 .bin present: {_yn(fd.get('faceid_plusv2_bin'))}")
-    print(f"  matching LoRA present: {_yn(fd.get('faceid_plusv2_lora'))}")
-    print(f"  CLIP ViT-H present: {_yn(fd.get('clip_vit_h'))}")
-    print(f"  w600k_r50.onnx present: {_yn(fd.get('w600k_r50_onnx'))}")
+    _print_asset_status("FaceID Plus v2 .bin", assets.get("ipadapter_faceid_plusv2_sd15"))
+    _print_asset_status("matching LoRA", assets.get("ipadapter_faceid_plusv2_sd15_lora"))
+    _print_asset_status("CLIP ViT-H", assets.get("clip_vision_sd15"))
+    _print_asset_status("w600k_r50.onnx", assets.get("insightface_w600k_r50"))
     print(f"  candidate ready: {_yn(faceid.get('ready'))}")
     print()
 
@@ -86,18 +109,25 @@ def _print_human(report: dict) -> None:
     print(f"  ready_for_case_c={report.get('ready_for_case_c')}")
     print()
     print(
-        "Manual asset download instructions are deferred until this live probe "
-        "identifies what is actually missing. Restricted weights are never auto-downloaded."
+        "Restricted FaceID weights are never auto-downloaded. "
+        "When registry integrity metadata is configured, assets must be VERIFIED "
+        "(existence + size + SHA256)."
     )
+    failures = report.get("integrity_failures") or []
+    if failures:
+        print()
+        print("Integrity failures:")
+        for line in failures:
+            print(f"  - {line}")
     missing = report.get("missing_model_names") or []
     if missing:
-        print(f"Missing model registry names (probe only): {', '.join(missing)}")
+        print(f"Not-ready model registry names: {', '.join(missing)}")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Report ReActor/FaceID node pins and manual model presence for Case C readiness. "
+            "Report ReActor/FaceID node pins and model integrity for Case C readiness. "
             "Does not download restricted weights. Does not claim visual quality."
         )
     )
@@ -110,12 +140,18 @@ def main() -> int:
     repo_root = args.repo_root.resolve() if args.repo_root else find_repo_root(script_file=Path(__file__))
     bundle = RegistryLoader(repo_root).load_all()
     comfy = bundle.path("comfyui_runtime") / "custom_nodes"
+
+    def _hash_status(filename: str) -> None:
+        if not args.json:
+            print(f"Verifying SHA256: {filename} ...", flush=True)
+
     report = assess_identity_benchmark_dependencies(
         bundle_models=list(bundle.models),
         bundle_nodes=list(bundle.nodes),
         comfyui_custom_nodes=comfy if comfy.parent.is_dir() else None,
         candidate=args.candidate,
         comfyui_base_url=args.comfyui_base_url,
+        hash_status_callback=None if args.json else _hash_status,
     )
     if args.json:
         print(json.dumps(report, indent=2))

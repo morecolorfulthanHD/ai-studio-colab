@@ -254,7 +254,9 @@
       "notes": "Package 4.12 exact FaceID Plus v2 SD1.5 adapter. Source: h94/IP-Adapter-FaceID (Hugging Face). Research license — manual placement only; no auto-download.",
       "source_url": "https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid-plusv2_sd15.bin",
       "filename": "ip-adapter-faceid-plusv2_sd15.bin",
-      "install_policy": "manual_only"
+      "install_policy": "manual_only",
+      "expected_sha256": "26d0d86a1d60d6cc811d3b8862178b461e1eeb651e6fe2b72ba17aa95411e313",
+      "expected_size_bytes": 156558509
     },
     {
       "name": "ipadapter_faceid_plusv2_sd15_lora",
@@ -266,10 +268,12 @@
         "identity_benchmark"
       ],
       "status": "planned",
-      "notes": "Matching FaceID Plus v2 SD1.5 LoRA for ip-adapter-faceid-plusv2_sd15. Manual placement only.",
+      "notes": "Matching FaceID Plus v2 SD1.5 LoRA for ip-adapter-faceid-plusv2_sd15. Manual placement only. Non-commercial/research-only per h94/IP-Adapter-FaceID model card.",
       "source_url": "https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid-plusv2_sd15_lora.safetensors",
       "filename": "ip-adapter-faceid-plusv2_sd15_lora.safetensors",
-      "install_policy": "manual_only"
+      "install_policy": "manual_only",
+      "expected_sha256": "8abff87a15a049f3e0186c2e82c1c8e77783baf2cfb63f34c412656052eb57b0",
+      "expected_size_bytes": 51059544
     },
     {
       "name": "clip_vision_sd15",
@@ -282,10 +286,12 @@
         "reference_lock"
       ],
       "status": "planned",
-      "notes": "CLIP ViT-H vision encoder for IPAdapter FaceID. Must live under ComfyUI models/clip_vision/ (Drive shared/clip_vision/). Manual placement only.",
+      "notes": "CLIP ViT-H vision encoder for IPAdapter FaceID. Upstream: h94/IP-Adapter models/image_encoder/model.safetensors renamed on placement. Manual only.",
       "source_url": "https://huggingface.co/h94/IP-Adapter/resolve/main/models/image_encoder/model.safetensors",
       "filename": "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
-      "install_policy": "manual_only"
+      "install_policy": "manual_only",
+      "expected_sha256": "6ca9667da1ca9e0b0f75e46bb030f7e011f44f86cbfb8d5a36590fcd7507b030",
+      "expected_size_bytes": 2528373448
     }
   ]
 }
