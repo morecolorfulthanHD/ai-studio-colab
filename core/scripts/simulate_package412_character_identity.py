@@ -42,13 +42,16 @@ from core.runtime.identity_benchmark import (
     append_identity_benchmark_record,
     assert_identity_benchmark_graph,
     assess_identity_benchmark_dependencies,
+    backfill_identity_benchmark_preparation,
     is_benchmark_generation_metadata,
     load_identity_benchmark_records,
+    normalize_scenario_id,
     prepare_identity_benchmark,
     restage_identity_benchmark_face,
     verify_model_asset_integrity,
     verify_required_model_assets,
 )
+from core.runtime.prepared_workflow_index import find_by_preparation_id, preparations_log_path
 from core.runtime.registry_loader import RegistryLoader
 
 
@@ -112,6 +115,7 @@ def _setup_temp_repo(repo_root: Path) -> dict[str, Path]:
         "input": comfy / "input",
         "insight": insight,
         "inswapper": inswapper,
+        "drive_prepared": drive / "workflows" / "prepared",
     }
 
 
@@ -275,6 +279,7 @@ def main() -> int:
             bundle_models=models,
             bundle_nodes=list(bundle.nodes),
             comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            drive_prepared_root=paths["drive_prepared"],
             require_models=False,
             require_nodes=True,
             allow_benchmark=False,
@@ -294,6 +299,7 @@ def main() -> int:
             bundle_models=models,
             bundle_nodes=list(bundle.nodes),
             comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            drive_prepared_root=paths["drive_prepared"],
             require_models=True,
             require_nodes=True,
             allow_benchmark=True,
@@ -345,6 +351,7 @@ def main() -> int:
             bundle_models=models,
             bundle_nodes=list(bundle.nodes),
             comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            drive_prepared_root=paths["drive_prepared"],
             seed=135791357,
             require_models=True,
             require_nodes=True,
@@ -377,6 +384,175 @@ def main() -> int:
         _assert_equal("bound seed mode", sampler["widgets_values"][1], "fixed")
         _pass(results, "ReActor prepare binds face/prompt/seed on executable graph")
 
+        prep_log = preparations_log_path(paths["drive"])
+        index_row = find_by_preparation_id(prep_log, prep.preparation_id)
+        _assert_true("identity prep indexed", index_row is not None)
+        _assert_equal("index kind", index_row.get("preparation_kind"), PREPARATION_KIND_IDENTITY_BENCHMARK)
+        _assert_true("index benchmark_run", index_row.get("benchmark_run") is True)
+        drive_prep_dir = paths["drive_prepared"] / prep.preparation_id
+        _assert_true("drive mirror dir", drive_prep_dir.is_dir())
+        _assert_true(
+            "archived face mirrored",
+            (drive_prep_dir / "benchmark_source" / "primary_face.png").is_file(),
+        )
+        _pass(results, "Identity benchmark prep appends standard preparation index + Drive mirror")
+
+        prep_s1 = prepare_identity_benchmark(
+            repo_root,
+            drive_root=paths["drive"],
+            candidate=CANDIDATE_REACTOR,
+            scenario="S1",
+            character_id=reg.character.character_id,
+            runtime_prepared_root=paths["prepared"],
+            comfyui_input_dir=paths["input"],
+            bundle_models=models,
+            bundle_nodes=list(bundle.nodes),
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            drive_prepared_root=paths["drive_prepared"],
+            require_models=True,
+            require_nodes=True,
+            allow_benchmark=True,
+            seed=42424242,
+        )
+        _assert_true("shorthand S1 prep", prep_s1.ok)
+        _assert_equal("shorthand maps canonical", prep_s1.scenario, "S1_near_front_portrait")
+        _pass(results, "Scenario shorthand S1 maps to S1_near_front_portrait")
+
+        _assert_equal("normalize S2", normalize_scenario_id("S2"), "S2_head_angle_pose")
+        _assert_equal(
+            "canonical unchanged",
+            normalize_scenario_id("S3_expression_change"),
+            "S3_expression_change",
+        )
+        _assert_true("invalid shorthand closed", normalize_scenario_id("S9") is None)
+        _pass(results, "Scenario shorthand + canonical IDs validated")
+
+        bad_scenario = prepare_identity_benchmark(
+            repo_root,
+            drive_root=paths["drive"],
+            candidate=CANDIDATE_REACTOR,
+            scenario="S9",
+            character_id=reg.character.character_id,
+            runtime_prepared_root=paths["prepared"],
+            comfyui_input_dir=paths["input"],
+            bundle_models=models,
+            bundle_nodes=list(bundle.nodes),
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            drive_prepared_root=paths["drive_prepared"],
+            require_models=False,
+            require_nodes=True,
+            allow_benchmark=True,
+        )
+        _assert_false("invalid scenario prep", bad_scenario.ok)
+        _pass(results, "Invalid scenario shorthand fails closed")
+
+        # Backfill: strip index + drive mirror, recover from runtime tree only
+        shutil.rmtree(drive_prep_dir, ignore_errors=True)
+        kept_lines = [
+            line
+            for line in prep_log.read_text(encoding="utf-8").splitlines()
+            if prep.preparation_id not in line
+        ]
+        prep_log.write_text("\n".join(kept_lines) + ("\n" if kept_lines else ""), encoding="utf-8")
+        _assert_true("index removed for backfill test", find_by_preparation_id(prep_log, prep.preparation_id) is None)
+        backfill = backfill_identity_benchmark_preparation(
+            drive_root=paths["drive"],
+            preparation_id=prep.preparation_id,
+            runtime_prepared_dir=Path(prep.prepared_dir),
+            drive_prepared_root=paths["drive_prepared"],
+        )
+        _assert_true(f"backfill ok ({backfill.errors})", backfill.ok)
+        _assert_true("backfill re-indexed", find_by_preparation_id(prep_log, prep.preparation_id) is not None)
+        _assert_true("backfill drive mirror", drive_prep_dir.is_dir())
+        _pass(results, "Backfill recovers runtime-only identity benchmark prep into index + Drive")
+
+        # Backfill refuses when workflow file no longer matches prepared_workflow_hash
+        orphan_dir = paths["prepared"] / prep.preparation_id
+        wf_path = orphan_dir / f"{prep.preparation_id}.workflow.json"
+        meta_path = orphan_dir / f"{prep.preparation_id}.metadata.json"
+        shutil.rmtree(drive_prep_dir, ignore_errors=True)
+        kept_lines = [
+            line
+            for line in prep_log.read_text(encoding="utf-8").splitlines()
+            if prep.preparation_id not in line
+        ]
+        prep_log.write_text("\n".join(kept_lines) + ("\n" if kept_lines else ""), encoding="utf-8")
+        tampered = json.loads(wf_path.read_text(encoding="utf-8"))
+        nodes = tampered.get("nodes") or []
+        load = next(n for n in nodes if isinstance(n, dict) and n.get("type") == "LoadImage")
+        widgets = list(load.get("widgets_values") or ["face.png", "image"])
+        widgets[0] = "tampered_face_after_prepare.png"
+        load["widgets_values"] = widgets
+        wf_path.write_text(json.dumps(tampered, indent=2) + "\n", encoding="utf-8")
+        mismatch = backfill_identity_benchmark_preparation(
+            drive_root=paths["drive"],
+            preparation_id=prep.preparation_id,
+            runtime_prepared_dir=orphan_dir,
+            drive_prepared_root=paths["drive_prepared"],
+        )
+        _assert_false("tampered workflow backfill refused", mismatch.ok)
+        _assert_true(
+            "hash mismatch message",
+            any("hash mismatch" in e.lower() for e in mismatch.errors),
+        )
+        _assert_false("no drive mirror after mismatch", drive_prep_dir.is_dir())
+        _assert_true(
+            "no index after mismatch",
+            find_by_preparation_id(prep_log, prep.preparation_id) is None,
+        )
+        _pass(results, "Backfill refuses modified workflow (hash mismatch; no Drive/index write)")
+
+        # Restore matching workflow from Drive-less runtime by re-writing from metadata hash path:
+        # recreate a clean prep for missing-hash refusal (separate orphan).
+        missing_hash_prep = prepare_identity_benchmark(
+            repo_root,
+            drive_root=paths["drive"],
+            candidate=CANDIDATE_REACTOR,
+            scenario="S2_head_angle_pose",
+            character_id=reg.character.character_id,
+            runtime_prepared_root=paths["prepared"],
+            comfyui_input_dir=paths["input"],
+            bundle_models=models,
+            bundle_nodes=list(bundle.nodes),
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            drive_prepared_root=paths["drive_prepared"],
+            require_models=True,
+            require_nodes=True,
+            allow_benchmark=True,
+            seed=55555555,
+        )
+        _assert_true("missing-hash fixture prep", missing_hash_prep.ok)
+        miss_drive = paths["drive_prepared"] / missing_hash_prep.preparation_id
+        miss_runtime = Path(missing_hash_prep.prepared_dir)
+        miss_meta = miss_runtime / f"{missing_hash_prep.preparation_id}.metadata.json"
+        shutil.rmtree(miss_drive, ignore_errors=True)
+        kept_lines = [
+            line
+            for line in prep_log.read_text(encoding="utf-8").splitlines()
+            if missing_hash_prep.preparation_id not in line
+        ]
+        prep_log.write_text("\n".join(kept_lines) + ("\n" if kept_lines else ""), encoding="utf-8")
+        meta_obj = json.loads(miss_meta.read_text(encoding="utf-8"))
+        del meta_obj["prepared_workflow_hash"]
+        miss_meta.write_text(json.dumps(meta_obj, indent=2) + "\n", encoding="utf-8")
+        missing = backfill_identity_benchmark_preparation(
+            drive_root=paths["drive"],
+            preparation_id=missing_hash_prep.preparation_id,
+            runtime_prepared_dir=miss_runtime,
+            drive_prepared_root=paths["drive_prepared"],
+        )
+        _assert_false("missing hash backfill refused", missing.ok)
+        _assert_true(
+            "missing hash message",
+            any("prepared_workflow_hash" in e and "missing" in e.lower() for e in missing.errors),
+        )
+        _assert_false("no drive mirror after missing hash", miss_drive.is_dir())
+        _assert_true(
+            "no index after missing hash",
+            find_by_preparation_id(prep_log, missing_hash_prep.preparation_id) is None,
+        )
+        _pass(results, "Backfill refuses missing prepared_workflow_hash (no Drive/index write)")
+
         # Restage after clearing Comfy input
         for item in paths["input"].glob("*"):
             if item.is_file():
@@ -402,6 +578,7 @@ def main() -> int:
             bundle_models=models,
             bundle_nodes=list(bundle.nodes),
             comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            drive_prepared_root=paths["drive_prepared"],
             require_models=False,
             require_nodes=True,
             allow_benchmark=True,

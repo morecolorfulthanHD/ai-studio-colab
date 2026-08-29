@@ -21,8 +21,14 @@ from .character_identity import (
     resolve_primary_face_path,
     verify_character_face,
 )
-from .generation_evidence_ledger import file_sha256
+from .generation_evidence_ledger import file_sha256, utc_now
+from .prepared_workflow_index import (
+    append_preparation_record,
+    find_by_preparation_id,
+    preparations_log_path,
+)
 from .seed_mode import generate_js_safe_seed, is_js_safe_seed
+from .workflow_library_preparation import _copy_preparation_tree
 
 PACKAGE_VERSION = "4.12"
 PREPARATION_KIND_IDENTITY_BENCHMARK = "identity_benchmark"
@@ -39,6 +45,24 @@ SCENARIO_IDS = (
     "S3_expression_change",
     "S4_wardrobe_environment",
 )
+
+SCENARIO_SHORTHAND: dict[str, str] = {
+    "S1": "S1_near_front_portrait",
+    "S2": "S2_head_angle_pose",
+    "S3": "S3_expression_change",
+    "S4": "S4_wardrobe_environment",
+}
+
+
+def normalize_scenario_id(scenario: str) -> str | None:
+    """Map S1–S4 shorthand or canonical scenario IDs to canonical IDs."""
+    raw = str(scenario or "").strip()
+    if not raw:
+        return None
+    if raw in SCENARIO_IDS:
+        return raw
+    shorthand = raw.upper()
+    return SCENARIO_SHORTHAND.get(shorthand)
 
 HUMAN_REVIEW_RUBRIC = [
     "identity_recognizability",
@@ -249,6 +273,11 @@ class IdentityBenchmarkPrepResult:
     character_id: str = ""
     preparation_id: str = ""
     prepared_dir: str = ""
+    runtime_prepared_dir: str = ""
+    drive_prepared_dir: str = ""
+    prepared_workflow_hash: str = ""
+    canonical_workflow_hash: str = ""
+    index_appended: bool = False
     workflow_identifier: str = ""
     seed: int | None = None
     staged_face_filename: str = ""
@@ -262,6 +291,244 @@ class IdentityBenchmarkPrepResult:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+def _drive_prepared_root(drive_root: Path) -> Path:
+    return drive_root / "workflows" / "prepared"
+
+
+def build_identity_benchmark_index_record(
+    *,
+    preparation_id: str,
+    runtime_prepared_dir: Path,
+    drive_prepared_dir: Path,
+    workflow_identifier: str,
+    candidate: str,
+    scenario: str,
+    character_id: str,
+    prepared_workflow_hash: str,
+    canonical_workflow_hash: str,
+    seed: int,
+    positive_prompt: str,
+    created_timestamp: str | None = None,
+) -> dict[str, Any]:
+    ts = created_timestamp or utc_now()
+    return {
+        "preparation_id": preparation_id,
+        "preparation_kind": PREPARATION_KIND_IDENTITY_BENCHMARK,
+        "workflow_identifier": workflow_identifier,
+        "created_timestamp": ts,
+        "created_at": ts,
+        "benchmark_run": True,
+        "benchmark_acknowledged": True,
+        "candidate": candidate,
+        "scenario": scenario,
+        "character_id": character_id,
+        "prepared_workflow_path": str(runtime_prepared_dir / f"{preparation_id}.workflow.json"),
+        "prepared_drive_path": str(drive_prepared_dir),
+        "runtime_prepared_dir": str(runtime_prepared_dir),
+        "drive_prepared_dir": str(drive_prepared_dir),
+        "parameter_summary": {
+            "positive_prompt": positive_prompt,
+            "seed": seed,
+            "seed_mode": "fixed",
+            "save_prefix": f"ai_studio_idbench_{candidate.split('_')[0]}",
+        },
+        "prepared_workflow_hash": prepared_workflow_hash,
+        "canonical_workflow_hash": canonical_workflow_hash,
+        "package_version": PACKAGE_VERSION,
+        "readiness_status": "structural_only",
+    }
+
+
+def finalize_identity_benchmark_preparation(
+    *,
+    drive_root: Path,
+    preparation_id: str,
+    runtime_prepared_dir: Path,
+    drive_prepared_root: Path | None = None,
+    metadata: dict[str, Any],
+    workflow_identifier: str,
+    candidate: str,
+    scenario: str,
+    character_id: str,
+    prepared_workflow_hash: str,
+    canonical_workflow_hash: str,
+    seed: int,
+    positive_prompt: str,
+    skip_drive_mirror: bool = False,
+    skip_index_append: bool = False,
+) -> tuple[list[str], list[str]]:
+    """Mirror runtime prep to Drive and append workflow_preparations.jsonl index."""
+    messages: list[str] = []
+    errors: list[str] = []
+    drive_root = Path(drive_root)
+    runtime_prepared_dir = Path(runtime_prepared_dir)
+    drive_root_prepared = drive_prepared_root or _drive_prepared_root(drive_root)
+    drive_dir = drive_root_prepared / preparation_id
+
+    if not skip_drive_mirror:
+        drive_root_prepared.mkdir(parents=True, exist_ok=True)
+        if drive_dir.is_dir():
+            messages.append(f"Drive prepared copy already exists: {drive_dir}")
+        else:
+            try:
+                _copy_preparation_tree(runtime_prepared_dir, drive_dir)
+                messages.append(f"Drive prepared copy: {drive_dir}")
+            except (OSError, FileExistsError) as exc:
+                errors.append(f"ERROR: Failed to mirror identity benchmark prep to Drive: {exc}")
+                return messages, errors
+
+    log_path = preparations_log_path(drive_root)
+    existing = find_by_preparation_id(log_path, preparation_id)
+    if skip_index_append or existing is not None:
+        if existing is not None:
+            messages.append(f"Preparation index record already present: {preparation_id}")
+        return messages, errors
+
+    index_record = build_identity_benchmark_index_record(
+        preparation_id=preparation_id,
+        runtime_prepared_dir=runtime_prepared_dir,
+        drive_prepared_dir=drive_dir,
+        workflow_identifier=workflow_identifier,
+        candidate=candidate,
+        scenario=scenario,
+        character_id=character_id,
+        prepared_workflow_hash=prepared_workflow_hash,
+        canonical_workflow_hash=canonical_workflow_hash,
+        seed=seed,
+        positive_prompt=positive_prompt,
+        created_timestamp=str(metadata.get("created_timestamp") or metadata.get("created_at") or utc_now()),
+    )
+    append_preparation_record(log_path, index_record)
+    messages.append(f"Appended preparation record to {log_path}")
+    return messages, errors
+
+
+def backfill_identity_benchmark_preparation(
+    *,
+    drive_root: Path,
+    preparation_id: str,
+    runtime_prepared_dir: Path,
+    drive_prepared_root: Path | None = None,
+    dry_run: bool = False,
+) -> IdentityBenchmarkPrepResult:
+    """Recover an existing runtime-only identity benchmark prep into the standard index."""
+    runtime_prepared_dir = Path(runtime_prepared_dir)
+    metadata_path = runtime_prepared_dir / f"{preparation_id}.metadata.json"
+    workflow_path = runtime_prepared_dir / f"{preparation_id}.workflow.json"
+    result = IdentityBenchmarkPrepResult(
+        ok=False,
+        preparation_id=preparation_id,
+        prepared_dir=str(runtime_prepared_dir),
+        runtime_prepared_dir=str(runtime_prepared_dir),
+        dry_run=dry_run,
+    )
+    if not metadata_path.is_file() or not workflow_path.is_file():
+        result.errors.append(
+            f"ERROR: Missing workflow or metadata under runtime prepared dir: {runtime_prepared_dir}"
+        )
+        return result
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        result.errors.append(f"ERROR: Invalid metadata JSON: {exc}")
+        return result
+    if str(metadata.get("preparation_kind") or "") != PREPARATION_KIND_IDENTITY_BENCHMARK:
+        result.errors.append("ERROR: Preparation is not an identity benchmark prep.")
+        return result
+    if str(metadata.get("preparation_id") or "") != preparation_id:
+        result.errors.append("ERROR: Metadata preparation_id does not match requested ID.")
+        return result
+
+    prepared_hash = str(metadata.get("prepared_workflow_hash") or "").strip()
+    if not prepared_hash:
+        result.errors.append(
+            "ERROR: Metadata prepared_workflow_hash is missing or empty; "
+            "refusing backfill (will not invent or rewrite a hash)."
+        )
+        return result
+
+    from .workflow_provenance import hash_ui_workflow
+
+    try:
+        workflow_data = json.loads(workflow_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        result.errors.append(f"ERROR: Unreadable or invalid workflow JSON: {exc}")
+        return result
+    if not isinstance(workflow_data, dict):
+        result.errors.append("ERROR: Workflow JSON must be an object.")
+        return result
+
+    # prepared_workflow_hash is the UI-workflow content hash written at prepare time.
+    # Recompute it from the on-disk workflow file; do not trust metadata alone.
+    actual_hash = hash_ui_workflow(workflow_data)
+    # Also require the workflow file itself to be readable (fail-closed on I/O).
+    try:
+        file_sha256(workflow_path)
+    except OSError as exc:
+        result.errors.append(f"ERROR: Workflow file unreadable for integrity check: {exc}")
+        return result
+    if actual_hash.lower() != prepared_hash.lower():
+        result.errors.append(
+            "ERROR: Workflow hash mismatch — refusing backfill "
+            f"(expected prepared_workflow_hash={prepared_hash}, "
+            f"actual from {workflow_path.name}={actual_hash}). "
+            "Drive mirror and preparation index were not written."
+        )
+        return result
+
+    candidate = str(metadata.get("candidate") or "")
+    scenario = str(metadata.get("scenario") or "")
+    character_id = str(metadata.get("character_id") or "")
+    workflow_identifier = str(metadata.get("workflow_identifier") or "")
+    canonical_hash = str(metadata.get("canonical_workflow_hash") or "")
+    params = metadata.get("parameters") if isinstance(metadata.get("parameters"), dict) else {}
+    seed_raw = params.get("seed")
+    seed = int(seed_raw) if seed_raw is not None else 0
+    positive_prompt = str(params.get("positive_prompt") or "")
+
+    result.candidate = candidate
+    result.scenario = scenario
+    result.character_id = character_id
+    result.workflow_identifier = workflow_identifier
+    result.prepared_workflow_hash = prepared_hash
+    result.canonical_workflow_hash = canonical_hash
+    result.seed = seed
+    result.positive_prompt = positive_prompt
+
+    if dry_run:
+        result.ok = True
+        result.messages.append(
+            "Dry run: workflow hash verified; would mirror to Drive and append preparation index."
+        )
+        return result
+
+    messages, errors = finalize_identity_benchmark_preparation(
+        drive_root=drive_root,
+        preparation_id=preparation_id,
+        runtime_prepared_dir=runtime_prepared_dir,
+        drive_prepared_root=drive_prepared_root,
+        metadata=metadata,
+        workflow_identifier=workflow_identifier,
+        candidate=candidate,
+        scenario=scenario,
+        character_id=character_id,
+        prepared_workflow_hash=prepared_hash,
+        canonical_workflow_hash=canonical_hash,
+        seed=seed,
+        positive_prompt=positive_prompt,
+    )
+    result.messages.extend(messages)
+    result.errors.extend(errors)
+    if errors:
+        return result
+    drive_dir = (drive_prepared_root or _drive_prepared_root(drive_root)) / preparation_id
+    result.drive_prepared_dir = str(drive_dir)
+    result.index_appended = find_by_preparation_id(preparations_log_path(drive_root), preparation_id) is not None
+    result.ok = True
+    result.messages.append(f"Backfilled identity benchmark preparation: {preparation_id}")
+    return result
 
 
 def _candidate_workflow_relpath(candidate: str) -> str:
@@ -898,6 +1165,7 @@ def prepare_identity_benchmark(
     bundle_models: list[dict[str, Any]],
     bundle_nodes: list[dict[str, Any]],
     comfyui_custom_nodes: Path | None = None,
+    drive_prepared_root: Path | None = None,
     seed: int | None = None,
     require_models: bool = True,
     require_nodes: bool = True,
@@ -926,9 +1194,15 @@ def prepare_identity_benchmark(
             f"Deferred: {', '.join(DEFERRED_CANDIDATES)}"
         )
         return result
-    if scenario not in SCENARIO_IDS:
-        result.errors.append(f"ERROR: Unknown scenario: {scenario}")
+    canonical_scenario = normalize_scenario_id(scenario)
+    if canonical_scenario is None:
+        result.errors.append(
+            f"ERROR: Unknown scenario: {scenario}. "
+            f"Use S1–S4 shorthand or one of: {', '.join(SCENARIO_IDS)}"
+        )
         return result
+    scenario = canonical_scenario
+    result.scenario = scenario
 
     record = load_character(drive_root, character_id)
     if record is None:
@@ -1061,9 +1335,16 @@ def prepare_identity_benchmark(
     workflow_dest = prepared_dir / f"{preparation_id}.workflow.json"
     workflow_dest.write_text(json.dumps(bound, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     prepared_hash = hash_ui_workflow(bound)
+    canonical_hash = hash_ui_workflow(workflow_data)
+    created_ts = utc_now()
+    drive_root_prepared = drive_prepared_root or _drive_prepared_root(drive_root)
+    drive_dir = drive_root_prepared / preparation_id
     metadata = {
+        "schema_version": 1,
         "preparation_id": preparation_id,
         "preparation_kind": PREPARATION_KIND_IDENTITY_BENCHMARK,
+        "created_timestamp": created_ts,
+        "created_at": created_ts,
         "benchmark_run": True,
         "benchmark_acknowledged": True,
         "capability": BENCHMARK_CAPABILITY,
@@ -1073,7 +1354,9 @@ def prepare_identity_benchmark(
         "workflow_identifier": result.workflow_identifier,
         "package_version": PACKAGE_VERSION,
         "prepared_workflow_hash": prepared_hash,
-        "canonical_workflow_hash": hash_ui_workflow(workflow_data),
+        "canonical_workflow_hash": canonical_hash,
+        "prepared_runtime_path": str(prepared_dir),
+        "prepared_drive_path": str(drive_dir),
         "parameters": params,
         "character_face_sha256": file_sha256(archived_face),
         "character_face_archived_path": "benchmark_source/primary_face.png",
@@ -1089,10 +1372,43 @@ def prepare_identity_benchmark(
         encoding="utf-8",
     )
     result.prepared_dir = str(prepared_dir)
+    result.runtime_prepared_dir = str(prepared_dir)
+    result.prepared_workflow_hash = prepared_hash
+    result.canonical_workflow_hash = canonical_hash
+
+    finalize_messages, finalize_errors = finalize_identity_benchmark_preparation(
+        drive_root=drive_root,
+        preparation_id=preparation_id,
+        runtime_prepared_dir=prepared_dir,
+        drive_prepared_root=drive_root_prepared,
+        metadata=metadata,
+        workflow_identifier=result.workflow_identifier,
+        candidate=candidate,
+        scenario=scenario,
+        character_id=record.character_id,
+        prepared_workflow_hash=prepared_hash,
+        canonical_workflow_hash=canonical_hash,
+        seed=int(seed),
+        positive_prompt=result.positive_prompt,
+    )
+    result.messages.extend(finalize_messages)
+    if finalize_errors:
+        shutil.rmtree(prepared_dir, ignore_errors=True)
+        if drive_dir.is_dir():
+            shutil.rmtree(drive_dir, ignore_errors=True)
+        result.errors.extend(finalize_errors)
+        return result
+
+    result.drive_prepared_dir = str(drive_dir)
+    result.index_appended = find_by_preparation_id(preparations_log_path(drive_root), preparation_id) is not None
     result.ok = True
     result.messages.append(f"Identity benchmark preparation created: {preparation_id}")
     result.messages.append(f"Staged face: {result.staged_face_filename}")
     result.messages.append(f"Bound candidate graph hash: {prepared_hash[:16]}…")
+    result.messages.append(
+        "Next: open_prepared_workflow.py --preparation-id "
+        f"{preparation_id} (registers with ComfyUI; does not auto-run)."
+    )
     result.warnings.append(
         "CODE/SIM prepare/open does NOT mean this identity method was quality-benchmarked."
     )
