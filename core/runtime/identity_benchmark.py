@@ -27,6 +27,11 @@ from .prepared_workflow_index import (
     find_by_preparation_id,
     preparations_log_path,
 )
+from .reactor_model_bridge import (
+    assess_reactor_runtime_asset,
+    reactor_runtime_buffalo_path,
+    reactor_runtime_inswapper_path,
+)
 from .seed_mode import generate_js_safe_seed, is_js_safe_seed
 from .workflow_library_preparation import _copy_preparation_tree
 
@@ -642,6 +647,106 @@ def verify_named_model_files(bundle_models: list[dict[str, Any]], names: list[st
     return present, missing
 
 
+def _resolve_comfyui_runtime(
+    comfyui_runtime: Path | None,
+    comfyui_custom_nodes: Path | None,
+) -> Path | None:
+    if comfyui_runtime is not None:
+        return Path(comfyui_runtime)
+    if comfyui_custom_nodes is not None:
+        return Path(comfyui_custom_nodes).parent
+    return None
+
+
+def assess_reactor_model_readiness(
+    *,
+    bundle_models: list[dict[str, Any]],
+    comfyui_runtime: Path | None,
+) -> tuple[list[str], list[str], dict[str, dict[str, Any]]]:
+    """Canonical Drive presence + ReActor runtime-visible path for InsightFace assets.
+
+    Registry ``runtime_path`` remains the Drive-canonical location. ReActor itself
+    loads from ``{ComfyUI}/models/insightface/...``; both must resolve to the same asset.
+    """
+    present: list[str] = []
+    missing: list[str] = []
+    integrity_map: dict[str, dict[str, Any]] = {}
+    by_name = {str(entry.get("name") or ""): entry for entry in bundle_models}
+    runtime_root = Path(comfyui_runtime) if comfyui_runtime is not None else None
+
+    for name in REACTOR_REQUIRED_MODEL_NAMES:
+        entry = by_name.get(name) or {}
+        canonical_raw = str(entry.get("runtime_path") or "").strip()
+        canonical_path = Path(canonical_raw) if canonical_raw else None
+        if name == "reactor_inswapper_128":
+            reactor_path = (
+                reactor_runtime_inswapper_path(runtime_root) if runtime_root is not None else None
+            )
+        else:
+            reactor_path = (
+                reactor_runtime_buffalo_path(runtime_root) if runtime_root is not None else None
+            )
+
+        row: dict[str, Any] = {
+            "name": name,
+            "filename": entry.get("filename") or name,
+            "runtime_path": canonical_raw or None,
+            "canonical_path": canonical_raw or None,
+            "reactor_runtime_path": str(reactor_path) if reactor_path is not None else None,
+            "status": INTEGRITY_MISSING,
+            "verified": False,
+            "present": False,
+            "canonical_present": False,
+            "reactor_runtime_status": "RUNTIME_UNCHECKED",
+            "reactor_runtime_verified": False,
+        }
+
+        if canonical_path is None or not canonical_raw:
+            row["status"] = "CANONICAL_MISSING"
+            integrity_map[name] = row
+            missing.append(name)
+            continue
+
+        if not canonical_path.is_file():
+            row["status"] = "CANONICAL_MISSING"
+            integrity_map[name] = row
+            missing.append(name)
+            continue
+
+        row["canonical_present"] = True
+        row["present"] = True
+
+        if reactor_path is None:
+            row["reactor_runtime_status"] = "RUNTIME_PATH_UNKNOWN"
+            row["status"] = "RUNTIME_MISSING"
+            integrity_map[name] = row
+            missing.append(name)
+            continue
+
+        runtime_assessment = assess_reactor_runtime_asset(
+            canonical_path=canonical_path,
+            runtime_path=reactor_path,
+        )
+        row["reactor_runtime"] = runtime_assessment
+        row["reactor_runtime_status"] = runtime_assessment.get("status")
+        row["reactor_runtime_verified"] = bool(runtime_assessment.get("verified"))
+        row["actual_size_bytes"] = runtime_assessment.get("actual_size_bytes")
+        row["actual_sha256"] = runtime_assessment.get("actual_sha256")
+        row["canonical_size_bytes"] = runtime_assessment.get("canonical_size_bytes")
+        row["canonical_sha256"] = runtime_assessment.get("canonical_sha256")
+
+        if runtime_assessment.get("verified"):
+            row["status"] = INTEGRITY_PRESENT
+            row["verified"] = True
+            present.append(name)
+        else:
+            row["status"] = str(runtime_assessment.get("status") or "RUNTIME_MISSING")
+            missing.append(name)
+        integrity_map[name] = row
+
+    return present, missing, integrity_map
+
+
 def _entry_expects_integrity(entry: dict[str, Any]) -> bool:
     if str(entry.get("expected_sha256") or "").strip():
         return True
@@ -994,10 +1099,12 @@ def assess_identity_benchmark_dependencies(
     comfyui_custom_nodes: Path | None,
     candidate: str | None = None,
     comfyui_base_url: str | None = None,
+    comfyui_runtime: Path | None = None,
     hash_status_callback: Any | None = None,
 ) -> dict[str, Any]:
     candidates = [candidate] if candidate else list(LIVE_CANDIDATES)
     object_info_status, object_info_keys, object_info_notes = _fetch_comfy_object_info_keys(comfyui_base_url)
+    resolved_runtime = _resolve_comfyui_runtime(comfyui_runtime, comfyui_custom_nodes)
 
     reactor_node = node_pin_status(
         bundle_nodes,
@@ -1023,6 +1130,12 @@ def assess_identity_benchmark_dependencies(
             "IP-Adapter-FaceID weights are non-commercial/research-only per upstream model card. "
             "Package 4.12 benchmark use does NOT approve production/commercial FaceID deployment."
         ),
+        "reactor_model_discovery": (
+            "Pinned ReActor resolves inswapper_128.onnx under "
+            "{ComfyUI}/models/insightface/ (folder_paths.models_dir). "
+            "Drive models/shared/insightface is canonical durable storage and is NOT "
+            "automatically visible to ReActor via extra_model_paths; Full Launch bridges it."
+        ),
         "comfyui_object_info": {
             "status": object_info_status,
             "notes": object_info_notes,
@@ -1043,18 +1156,23 @@ def assess_identity_benchmark_dependencies(
         models = list(_required_models_for_candidate(cand))
         integrity_map: dict[str, dict[str, Any]] = {}
         if cand == CANDIDATE_REACTOR:
-            present_m, missing_m = verify_named_model_files(bundle_models, models)
-            for name in models:
-                entry = next((m for m in bundle_models if str(m.get("name") or "") == name), {})
-                runtime = str(entry.get("runtime_path") or "")
-                integrity_map[name] = {
-                    "name": name,
-                    "status": INTEGRITY_PRESENT if name in present_m else INTEGRITY_MISSING,
-                    "verified": name in present_m,
-                    "present": name in present_m,
-                    "runtime_path": runtime or None,
-                    "filename": entry.get("filename") or name,
-                }
+            present_m, missing_m, integrity_map = assess_reactor_model_readiness(
+                bundle_models=bundle_models,
+                comfyui_runtime=resolved_runtime,
+            )
+            for name in missing_m:
+                row = integrity_map.get(name) or {}
+                status = str(row.get("status") or "")
+                if status == "CANONICAL_MISSING":
+                    integrity_failures.append(
+                        f"{name}: Canonical Drive asset MISSING "
+                        f"({row.get('canonical_path') or row.get('runtime_path')})"
+                    )
+                else:
+                    integrity_failures.append(
+                        f"{name}: Canonical Drive asset PRESENT; ReActor runtime asset "
+                        f"{status} ({row.get('reactor_runtime_path')})"
+                    )
         else:
             present_m, missing_m, integrity_map = verify_required_model_assets(
                 bundle_models,
@@ -1070,6 +1188,8 @@ def assess_identity_benchmark_dependencies(
 
         if cand == CANDIDATE_REACTOR:
             node_row = reactor_node
+            swap_row = integrity_map.get("reactor_inswapper_128") or {}
+            insight_row = integrity_map.get("insightface") or {}
             detail = {
                 "custom_node": REACTOR_REQUIRED_NODE,
                 "custom_node_present": bool(node_row.get("present")),
@@ -1079,11 +1199,23 @@ def assess_identity_benchmark_dependencies(
                 "current_commit": node_row.get("current_commit") or "",
                 "registration_status": node_row.get("registration_status"),
                 "registration_notes": node_row.get("registration_notes"),
-                "w600k_r50_onnx": integrity_map.get("insightface", {}).get("verified", False),
-                "inswapper_128_onnx": integrity_map.get("reactor_inswapper_128", {}).get("verified", False),
+                "w600k_r50_onnx": insight_row.get("verified", False),
+                "inswapper_128_onnx": swap_row.get("verified", False),
+                "canonical_inswapper_present": bool(swap_row.get("canonical_present")),
+                "reactor_runtime_inswapper_verified": bool(swap_row.get("reactor_runtime_verified")),
+                "canonical_inswapper_status": (
+                    "PRESENT" if swap_row.get("canonical_present") else "MISSING"
+                ),
+                "reactor_runtime_inswapper_status": swap_row.get("reactor_runtime_status"),
+                "canonical_buffalo_present": bool(insight_row.get("canonical_present")),
+                "reactor_runtime_buffalo_verified": bool(insight_row.get("reactor_runtime_verified")),
+                "canonical_buffalo_status": (
+                    "PRESENT" if insight_row.get("canonical_present") else "MISSING"
+                ),
+                "reactor_runtime_buffalo_status": insight_row.get("reactor_runtime_status"),
                 "assets": {
-                    "insightface_w600k_r50": integrity_map.get("insightface"),
-                    "reactor_inswapper_128": integrity_map.get("reactor_inswapper_128"),
+                    "insightface_w600k_r50": insight_row,
+                    "reactor_inswapper_128": swap_row,
                 },
             }
         else:
@@ -1217,7 +1349,16 @@ def prepare_identity_benchmark(
 
     required_models = list(_required_models_for_candidate(candidate))
     required_nodes = list(_required_nodes_for_candidate(candidate))
-    _, missing_models, model_integrity = verify_required_model_assets(bundle_models, required_models)
+    if candidate == CANDIDATE_REACTOR:
+        resolved_runtime = _resolve_comfyui_runtime(None, comfyui_custom_nodes)
+        _, missing_models, model_integrity = assess_reactor_model_readiness(
+            bundle_models=bundle_models,
+            comfyui_runtime=resolved_runtime,
+        )
+    else:
+        _, missing_models, model_integrity = verify_required_model_assets(
+            bundle_models, required_models
+        )
     _, missing_nodes = verify_named_nodes(bundle_nodes, required_nodes, comfyui_custom_nodes)
     result.missing_models = missing_models
     result.missing_nodes = missing_nodes
@@ -1229,7 +1370,21 @@ def prepare_identity_benchmark(
         )
         for name in missing_models:
             row = model_integrity.get(name)
-            if row:
+            if row and candidate == CANDIDATE_REACTOR:
+                status = str(row.get("status") or "")
+                if status == "CANONICAL_MISSING":
+                    result.errors.append(
+                        f"{name}: Canonical Drive asset MISSING "
+                        f"({row.get('canonical_path') or row.get('runtime_path')})"
+                    )
+                else:
+                    result.errors.append(
+                        f"{name}: Canonical Drive asset PRESENT; ReActor runtime asset "
+                        f"{status} ({row.get('reactor_runtime_path')}). "
+                        "Re-run Full Launch so ensure_reactor_insightface_bridge recreates "
+                        "ComfyUI/models/insightface from Drive."
+                    )
+            elif row:
                 result.errors.append(format_integrity_failure_message(name, row))
             else:
                 result.errors.extend(format_manual_asset_instructions(bundle_models, [name]))

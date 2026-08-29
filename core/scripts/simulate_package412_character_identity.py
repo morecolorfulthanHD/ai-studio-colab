@@ -42,6 +42,7 @@ from core.runtime.identity_benchmark import (
     append_identity_benchmark_record,
     assert_identity_benchmark_graph,
     assess_identity_benchmark_dependencies,
+    assess_reactor_model_readiness,
     backfill_identity_benchmark_preparation,
     is_benchmark_generation_metadata,
     load_identity_benchmark_records,
@@ -52,6 +53,11 @@ from core.runtime.identity_benchmark import (
     verify_required_model_assets,
 )
 from core.runtime.prepared_workflow_index import find_by_preparation_id, preparations_log_path
+from core.runtime.reactor_model_bridge import (
+    default_canonical_insightface_dir,
+    ensure_reactor_insightface_bridge,
+    reactor_runtime_inswapper_path,
+)
 from core.runtime.registry_loader import RegistryLoader
 
 
@@ -339,7 +345,191 @@ def main() -> int:
         )
         _pass(results, "ReActor missing inswapper fails closed (no auto-download)")
 
-        # ReActor prepare with present node + insightface + inswapper
+        # --- ReActor Drive->runtime InsightFace bridge (Package 4.12 Case C) ---
+        canonical_insight = default_canonical_insightface_dir(
+            paths["drive"] / "models" / "shared"
+        )
+        runtime_inswapper = reactor_runtime_inswapper_path(paths["comfy"])
+        _assert_false("bridge absent initially", runtime_inswapper.exists())
+        dep_no_bridge = assess_identity_benchmark_dependencies(
+            bundle_models=models,
+            bundle_nodes=list(bundle.nodes),
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            candidate=CANDIDATE_REACTOR,
+        )
+        _assert_true(
+            "canonical present without bridge",
+            dep_no_bridge["candidates"][CANDIDATE_REACTOR]["detail"]["canonical_inswapper_present"],
+        )
+        _assert_false(
+            "runtime not verified without bridge",
+            dep_no_bridge["candidates"][CANDIDATE_REACTOR]["detail"]["reactor_runtime_inswapper_verified"],
+        )
+        _assert_false(
+            "candidate not ready without bridge",
+            dep_no_bridge["candidates"][CANDIDATE_REACTOR]["ready"],
+        )
+        prep_no_bridge = prepare_identity_benchmark(
+            repo_root,
+            drive_root=paths["drive"],
+            candidate=CANDIDATE_REACTOR,
+            scenario="S1_near_front_portrait",
+            character_id=reg.character.character_id,
+            runtime_prepared_root=paths["prepared"],
+            comfyui_input_dir=paths["input"],
+            bundle_models=models,
+            bundle_nodes=list(bundle.nodes),
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            require_models=True,
+            require_nodes=True,
+            allow_benchmark=True,
+        )
+        _assert_false("prepare fails without runtime bridge", prep_no_bridge.ok)
+        _assert_true(
+            "reports runtime missing",
+            "reactor_inswapper_128" in prep_no_bridge.missing_models,
+        )
+        _pass(results, "Canonical present + runtime bridge absent -> candidate not ready")
+
+        bridge1 = ensure_reactor_insightface_bridge(
+            comfyui_runtime=paths["comfy"],
+            canonical_insightface_dir=canonical_insight,
+            dry_run=False,
+            require_inswapper=True,
+        )
+        _assert_true(f"bridge create ok ({bridge1.errors})", bridge1.ok)
+        _assert_true("runtime inswapper exists after bridge", runtime_inswapper.exists())
+        _assert_true("inswapper verified after bridge", bridge1.inswapper_verified)
+        _pass(results, "Canonical exists + runtime bridge absent -> setup creates valid bridge")
+
+        bridge2 = ensure_reactor_insightface_bridge(
+            comfyui_runtime=paths["comfy"],
+            canonical_insightface_dir=canonical_insight,
+            dry_run=False,
+            require_inswapper=True,
+        )
+        _assert_true("bridge idempotent ok", bridge2.ok)
+        _assert_true(
+            "idempotent unchanged/create only",
+            all(a.action in {"unchanged", "create"} for a in bridge2.actions)
+            or not bridge2.actions
+            or any(a.action == "unchanged" for a in bridge2.actions),
+        )
+        _pass(results, "Repeated bridge setup is idempotent")
+
+        # Stale/broken runtime link -> repaired
+        if runtime_inswapper.is_symlink() or runtime_inswapper.parent.is_symlink():
+            stale_target = paths["drive"] / "models" / "shared" / "insightface" / "stale_missing.onnx"
+            link_path = runtime_inswapper
+            if runtime_inswapper.parent.is_symlink():
+                # Whole-dir bridge: break by replacing dir symlink with stale file link slot
+                import os
+
+                insight_runtime = runtime_inswapper.parent
+                insight_runtime.unlink()
+                insight_runtime.mkdir(parents=True, exist_ok=True)
+                try:
+                    os.symlink(str(stale_target), str(runtime_inswapper))
+                except OSError:
+                    runtime_inswapper.write_bytes(b"wrong-inswapper-bytes")
+            else:
+                import os
+
+                runtime_inswapper.unlink()
+                try:
+                    os.symlink(str(stale_target), str(runtime_inswapper))
+                except OSError:
+                    runtime_inswapper.write_bytes(b"wrong-inswapper-bytes")
+        else:
+            runtime_inswapper.unlink(missing_ok=True)
+            runtime_inswapper.write_bytes(b"wrong-inswapper-bytes")
+
+        bridge_repair = ensure_reactor_insightface_bridge(
+            comfyui_runtime=paths["comfy"],
+            canonical_insightface_dir=canonical_insight,
+            dry_run=False,
+            require_inswapper=True,
+        )
+        _assert_true(f"bridge repair ok ({bridge_repair.errors})", bridge_repair.ok)
+        _assert_true("repaired matches canonical", bridge_repair.inswapper_verified)
+        _pass(results, "Stale/broken runtime link repaired")
+
+        # Canonical missing -> fail closed
+        missing_canonical_dir = paths["drive"] / "models" / "shared" / "insightface_missing"
+        bridge_missing = ensure_reactor_insightface_bridge(
+            comfyui_runtime=paths["comfy"],
+            canonical_insightface_dir=missing_canonical_dir,
+            dry_run=False,
+            require_inswapper=True,
+        )
+        _assert_false("bridge fails when canonical missing", bridge_missing.ok)
+        models_no_canonical = [dict(m) for m in models]
+        for row in models_no_canonical:
+            if row.get("name") == "reactor_inswapper_128":
+                row["runtime_path"] = str(missing_canonical_dir / "inswapper_128.onnx")
+        present_m, missing_m, _ = assess_reactor_model_readiness(
+            bundle_models=models_no_canonical,
+            comfyui_runtime=paths["comfy"],
+        )
+        _assert_true("canonical missing listed", "reactor_inswapper_128" in missing_m)
+        _pass(results, "Canonical inswapper missing -> fail closed / candidate not ready")
+
+        # Runtime points at wrong file -> checker refuses
+        wrong = paths["comfy"] / "models" / "insightface" / "inswapper_128.onnx"
+        # Ensure a real directory with a wrong file (not bridged to canonical)
+        insight_rt = paths["comfy"] / "models" / "insightface"
+        if insight_rt.is_symlink():
+            insight_rt.unlink()
+            insight_rt.mkdir(parents=True, exist_ok=True)
+        if wrong.exists() or wrong.is_symlink():
+            wrong.unlink()
+        wrong.write_bytes(b"totally-wrong-inswapper")
+        dep_wrong = assess_identity_benchmark_dependencies(
+            bundle_models=models,
+            bundle_nodes=list(bundle.nodes),
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            candidate=CANDIDATE_REACTOR,
+        )
+        _assert_false(
+            "wrong runtime file not ready",
+            dep_wrong["candidates"][CANDIDATE_REACTOR]["ready"],
+        )
+        _assert_true(
+            "wrong file status mismatch",
+            dep_wrong["candidates"][CANDIDATE_REACTOR]["detail"]["reactor_runtime_inswapper_status"]
+            in {"RUNTIME_SIZE_MISMATCH", "RUNTIME_SHA256_MISMATCH"},
+        )
+        _pass(results, "Runtime-visible asset points to wrong file -> checker refuses readiness")
+
+        # Restore valid bridge for remaining happy-path tests
+        if wrong.exists() or wrong.is_symlink():
+            wrong.unlink()
+        if insight_rt.is_dir() and not insight_rt.is_symlink():
+            shutil.rmtree(insight_rt)
+        bridge_ok = ensure_reactor_insightface_bridge(
+            comfyui_runtime=paths["comfy"],
+            canonical_insightface_dir=canonical_insight,
+            dry_run=False,
+            require_inswapper=True,
+        )
+        _assert_true(f"restore bridge ({bridge_ok.errors})", bridge_ok.ok)
+        dep_bridged = assess_identity_benchmark_dependencies(
+            bundle_models=models,
+            bundle_nodes=list(bundle.nodes),
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            candidate=CANDIDATE_REACTOR,
+        )
+        _assert_true(
+            "reactor ready with valid bridge",
+            dep_bridged["candidates"][CANDIDATE_REACTOR]["ready"],
+        )
+        _assert_true(
+            "runtime verified label",
+            dep_bridged["candidates"][CANDIDATE_REACTOR]["detail"]["reactor_runtime_inswapper_verified"],
+        )
+        _pass(results, "Valid canonical + valid runtime bridge -> ReActor readiness passes")
+
+        # ReActor prepare with present node + insightface + inswapper + runtime bridge
         prep = prepare_identity_benchmark(
             repo_root,
             drive_root=paths["drive"],

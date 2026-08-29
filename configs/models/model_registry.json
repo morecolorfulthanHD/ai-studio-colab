@@ -148,7 +148,7 @@
         "identity_benchmark"
       ],
       "status": "planned",
-      "notes": "ReActor face-swap model (inswapper_128.onnx) under ComfyUI models/insightface/. Research-restricted — manual placement only; no auto-download.",
+      "notes": "ReActor face-swap model. Canonical durable path is Drive models/shared/insightface/inswapper_128.onnx. Pinned ReActor loads from ComfyUI/models/insightface/inswapper_128.onnx via Full Launch runtime bridge (symlink). Research-restricted — manual placement on Drive only; no auto-download.",
       "source_url": "Operator-obtained inswapper_128.onnx (review InsightFace/ReActor license before use)",
       "filename": "inswapper_128.onnx",
       "install_policy": "manual_only"

@@ -739,6 +739,39 @@ def main() -> int:
     print(f"Skipped actions:   {skipped}")
     print(f"Failed actions:    {failed}")
 
+    # ReActor resolves inswapper under ComfyUI/models/insightface (not extra_model_paths).
+    # Bridge Drive-canonical InsightFace assets into that runtime-visible path.
+    from core.runtime.reactor_model_bridge import (
+        default_canonical_insightface_dir,
+        ensure_reactor_insightface_bridge,
+    )
+
+    print("\nReActor InsightFace runtime bridge")
+    print("=" * 40)
+    bridge = ensure_reactor_insightface_bridge(
+        comfyui_runtime=bundle.path("comfyui_runtime"),
+        canonical_insightface_dir=default_canonical_insightface_dir(bundle.path("drive_models")),
+        dry_run=dry_run,
+        require_inswapper=True,
+        require_buffalo=False,
+    )
+    for action in bridge.actions:
+        print(f"  [{action.action}] {action.path}")
+        if action.target:
+            print(f"    -> {action.target}")
+    for msg in bridge.messages:
+        print(f"  {msg}")
+    for err in bridge.errors:
+        print(f"  {err}", file=sys.stderr)
+    if not bridge.ok:
+        # Canonical missing is expected until operator places restricted weights;
+        # do not fail node install. Readiness checkers remain fail-closed.
+        print(
+            "  WARN: ReActor InsightFace bridge not fully verified "
+            "(canonical missing or link failed). Dependency checker will report not ready.",
+            file=sys.stderr,
+        )
+
     if failed > 0:
         print("\nRESULT: WARN — one or more optional node steps failed.", file=sys.stderr)
         return 0

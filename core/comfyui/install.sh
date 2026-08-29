@@ -812,14 +812,33 @@ main() {
   manage_extra_model_paths
 
   # Package 4.8.4: multi-segment userdata routes for Colab proxy (%2F decoded to /).
+  _script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  _repo_root="$(cd "${_script_dir}/../.." && pwd)"
   if [[ "${EXECUTE}" -eq 1 ]]; then
-    _script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    _repo_root="$(cd "${_script_dir}/../.." && pwd)"
     if [[ -f "${_repo_root}/core/scripts/apply_comfyui_userdata_route_compat.py" ]]; then
       log "Applying ComfyUI userdata route compatibility (Colab proxy)"
       "${PYTHON}" "${_repo_root}/core/scripts/apply_comfyui_userdata_route_compat.py" \
         --comfyui-runtime "${COMFYUI_DIR}" \
         --apply || log "WARN: userdata route compat apply returned non-zero"
+    fi
+  fi
+
+  # Package 4.12: ReActor hardcodes models/insightface/inswapper_128.onnx under
+  # folder_paths.models_dir (ignores extra_model_paths). Bridge Drive canonical.
+  if [[ -f "${_repo_root}/core/scripts/ensure_reactor_insightface_bridge.py" ]]; then
+    log "Ensuring ReActor InsightFace runtime bridge (Drive canonical -> ComfyUI/models/insightface)"
+    if [[ "${EXECUTE}" -eq 1 ]]; then
+      "${PYTHON}" "${_repo_root}/core/scripts/ensure_reactor_insightface_bridge.py" \
+        --comfyui-runtime "${COMFYUI_DIR}" \
+        --canonical-insightface-dir "${SHARED_MODELS}/insightface" \
+        --execute \
+        || log "WARN: ReActor InsightFace bridge not verified (canonical may be missing; checker stays fail-closed)"
+    else
+      "${PYTHON}" "${_repo_root}/core/scripts/ensure_reactor_insightface_bridge.py" \
+        --comfyui-runtime "${COMFYUI_DIR}" \
+        --canonical-insightface-dir "${SHARED_MODELS}/insightface" \
+        --dry-run \
+        || log "WARN: ReActor InsightFace bridge dry-run reported issues"
     fi
   fi
 

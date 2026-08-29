@@ -78,8 +78,20 @@ def _print_human(report: dict) -> None:
     print(f"  registration/import: {rd.get('registration_status')}")
     if rd.get("registration_notes"):
         print(f"    notes: {rd.get('registration_notes')}")
-    print(f"  w600k_r50.onnx present: {_yn(rd.get('w600k_r50_onnx'))}")
-    print(f"  inswapper_128.onnx present: {_yn(rd.get('inswapper_128_onnx'))}")
+    print(f"  Canonical Drive w600k_r50.onnx: {rd.get('canonical_buffalo_status') or 'unknown'}")
+    print(
+        f"  ReActor runtime w600k_r50.onnx: "
+        f"{rd.get('reactor_runtime_buffalo_status') or 'unknown'} "
+        f"(verified={_yn(rd.get('reactor_runtime_buffalo_verified'))})"
+    )
+    print(f"  Canonical Drive inswapper_128.onnx: {rd.get('canonical_inswapper_status') or 'unknown'}")
+    print(
+        f"  ReActor runtime inswapper_128.onnx: "
+        f"{rd.get('reactor_runtime_inswapper_status') or 'unknown'} "
+        f"(verified={_yn(rd.get('reactor_runtime_inswapper_verified'))})"
+    )
+    print(f"  w600k_r50.onnx ready: {_yn(rd.get('w600k_r50_onnx'))}")
+    print(f"  inswapper_128.onnx ready: {_yn(rd.get('inswapper_128_onnx'))}")
     print(f"  candidate ready: {_yn(reactor.get('ready'))}")
     print()
 
@@ -109,8 +121,10 @@ def _print_human(report: dict) -> None:
     print(f"  ready_for_case_c={report.get('ready_for_case_c')}")
     print()
     print(
-        "Restricted FaceID weights are never auto-downloaded. "
-        "When registry integrity metadata is configured, assets must be VERIFIED "
+        "Restricted FaceID/InsightFace weights are never auto-downloaded. "
+        "Drive models/shared/insightface is canonical; ReActor also requires the "
+        "runtime bridge under ComfyUI/models/insightface (recreated by Full Launch). "
+        "When registry integrity metadata is configured for FaceID, assets must be VERIFIED "
         "(existence + size + SHA256)."
     )
     failures = report.get("integrity_failures") or []
