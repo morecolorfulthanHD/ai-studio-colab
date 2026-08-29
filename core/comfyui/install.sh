@@ -823,10 +823,11 @@ main() {
     fi
   fi
 
-  # Package 4.12: ReActor hardcodes models/insightface/inswapper_128.onnx under
-  # folder_paths.models_dir (ignores extra_model_paths). Bridge Drive canonical.
+  # Package 4.12: ReActor enumerates swap models via glob(models/insightface/*)
+  # at INPUT_TYPES time (not extra_model_paths). Bridge Drive-canonical files into
+  # a *real* ComfyUI/models/insightface/ directory (file-level links; no dir symlink).
   if [[ -f "${_repo_root}/core/scripts/ensure_reactor_insightface_bridge.py" ]]; then
-    log "Ensuring ReActor InsightFace runtime bridge (Drive canonical -> ComfyUI/models/insightface)"
+    log "Ensuring ReActor InsightFace file-level runtime bridge (Drive -> ComfyUI/models/insightface/*.onnx)"
     if [[ "${EXECUTE}" -eq 1 ]]; then
       "${PYTHON}" "${_repo_root}/core/scripts/ensure_reactor_insightface_bridge.py" \
         --comfyui-runtime "${COMFYUI_DIR}" \

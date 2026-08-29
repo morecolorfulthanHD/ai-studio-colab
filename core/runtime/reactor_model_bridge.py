@@ -1,18 +1,24 @@
 #!/usr/bin/env python3
 """Bridge Drive-canonical InsightFace assets into ReActor's runtime search path.
 
-Pinned ReActor (6ad6b35a…) resolves swap models as:
+Pinned ReActor (6ad6b35a…) discovers swap models via::
 
-  os.path.join(folder_paths.models_dir, "insightface", "<model>")
+    glob.glob(os.path.join(folder_paths.models_dir, "insightface/*"))
 
-It does NOT consult ComfyUI extra_model_paths.yaml. AI Studio keeps durable
-weights under Drive ``models/shared/insightface/``. Full Launch must therefore
-expose those files under ``<comfyui>/models/insightface/`` via symlink (no
-download, no Drive mutation, no large duplicate copies).
+(see ``scripts/reactor_faceswap.get_models``), then exposes basenames on
+``INPUT_TYPES`` → ``swap_model``. It does NOT use ``extra_model_paths.yaml``.
+
+Directory-level symlinks of ``models/insightface`` onto Google Drive FUSE can
+pass ``Path.exists`` while ``glob`` returns empty — live ``/object_info`` then
+omits ``inswapper_128.onnx`` and the frontend reports the model missing.
+
+AI Studio therefore uses a *real* ``ComfyUI/models/insightface/`` directory with
+*file-level* bridges only (no whole-tree directory symlink).
 """
 
 from __future__ import annotations
 
+import glob
 import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -22,6 +28,8 @@ from .generation_evidence_ledger import file_sha256
 
 INSWAPPER_FILENAME = "inswapper_128.onnx"
 BUFFALO_REL = Path("models") / "buffalo_l" / "w600k_r50.onnx"
+REACTOR_SWAP_MODEL_NODE_TYPES = ("ReActorFaceSwap", "ReActorFaceSwapOpt")
+REACTOR_SWAP_FOLDERS = ("insightface", "reswapper", "hyperswap")
 
 
 @dataclass
@@ -43,6 +51,7 @@ class ReactorInsightfaceBridgeResult:
     runtime_buffalo: str = ""
     inswapper_verified: bool = False
     buffalo_verified: bool = False
+    reactor_glob_discoverable: bool = False
     dry_run: bool = False
     actions: list[BridgeAction] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
@@ -70,6 +79,99 @@ def reactor_runtime_buffalo_path(comfyui_runtime: Path) -> Path:
     return default_runtime_insightface_dir(comfyui_runtime) / BUFFALO_REL
 
 
+def reactor_style_list_swap_models(comfyui_runtime: Path) -> list[str]:
+    """Mirror pinned ReActor get_models() basename discovery (no ComfyUI import)."""
+    models_dir = Path(comfyui_runtime) / "models"
+    found: list[str] = []
+    for folder in REACTOR_SWAP_FOLDERS:
+        pattern = str(models_dir / folder / "*")
+        for path in glob.glob(pattern):
+            if path.endswith(".onnx") or path.endswith(".pth"):
+                found.append(os.path.basename(path))
+    return found
+
+
+def reactor_glob_discovers_inswapper(comfyui_runtime: Path) -> bool:
+    return INSWAPPER_FILENAME in reactor_style_list_swap_models(comfyui_runtime)
+
+
+def extract_comfy_combo_options(input_spec: Any) -> list[str]:
+    """Parse ComfyUI object_info input spec into combo option strings."""
+    if input_spec is None:
+        return []
+    if isinstance(input_spec, (list, tuple)) and input_spec:
+        first = input_spec[0]
+        if isinstance(first, (list, tuple)) and all(isinstance(x, str) for x in first):
+            return [str(x) for x in first]
+        if all(isinstance(x, str) for x in input_spec):
+            return [str(x) for x in input_spec]
+    if isinstance(input_spec, dict):
+        options = input_spec.get("options") or input_spec.get("choices")
+        if isinstance(options, (list, tuple)):
+            return [str(x) for x in options]
+    return []
+
+
+def assess_reactor_live_swap_model_option(
+    object_info: dict[str, Any] | None,
+    *,
+    object_info_status: str,
+    required_filename: str = INSWAPPER_FILENAME,
+    node_types: tuple[str, ...] = REACTOR_SWAP_MODEL_NODE_TYPES,
+) -> dict[str, Any]:
+    """Require live object_info to advertise required_filename on swap_model."""
+    row: dict[str, Any] = {
+        "status": "UNCHECKED",
+        "verified": False,
+        "required_filename": required_filename,
+        "node_type": None,
+        "swap_model_options": [],
+        "notes": "",
+    }
+    if object_info_status != "ok" or object_info is None:
+        row["status"] = "UNCHECKED"
+        row["notes"] = (
+            f"ComfyUI object_info status={object_info_status}; "
+            "live swap_model option not verified."
+        )
+        return row
+
+    for node_type in node_types:
+        node = object_info.get(node_type)
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("input") or {}
+        required = inputs.get("required") or {}
+        optional = inputs.get("optional") or {}
+        spec = required.get("swap_model")
+        if spec is None:
+            spec = optional.get("swap_model")
+        options = extract_comfy_combo_options(spec)
+        row["node_type"] = node_type
+        row["swap_model_options"] = options
+        if required_filename in options:
+            row["status"] = "VERIFIED"
+            row["verified"] = True
+            row["notes"] = (
+                f"{node_type}.swap_model advertises {required_filename} "
+                f"({len(options)} option(s))."
+            )
+            return row
+        row["status"] = "MISSING"
+        row["notes"] = (
+            f"{node_type} is registered but swap_model options do not include "
+            f"{required_filename}. Observed: {options[:20]}"
+        )
+        return row
+
+    row["status"] = "NODE_MISSING"
+    row["notes"] = (
+        "object_info lacks ReActorFaceSwap / ReActorFaceSwapOpt; "
+        "cannot verify swap_model."
+    )
+    return row
+
+
 def _same_resolved_file(left: Path, right: Path) -> bool:
     try:
         if not left.exists() or not right.exists():
@@ -91,18 +193,6 @@ def _paths_content_match(left: Path, right: Path) -> bool:
         return file_sha256(left) == file_sha256(right)
     except OSError:
         return False
-
-
-def _remove_path(path: Path) -> None:
-    if path.is_symlink() or path.is_file():
-        path.unlink()
-        return
-    if path.is_dir():
-        # Only remove empty dirs; non-empty real dirs are handled by callers.
-        try:
-            path.rmdir()
-        except OSError as exc:
-            raise OSError(f"Refusing to remove non-empty directory: {path}") from exc
 
 
 def _create_bridge_link(link_path: Path, target: Path) -> str:
@@ -232,6 +322,39 @@ def _ensure_bridge_link(
     return True
 
 
+def _ensure_real_insightface_dir(
+    runtime_dir: Path,
+    *,
+    dry_run: bool,
+    result: ReactorInsightfaceBridgeResult,
+) -> bool:
+    """Ensure insightface is a real directory (not a Drive dir symlink)."""
+    if runtime_dir.is_symlink():
+        result.actions.append(
+            BridgeAction(
+                action="replace_dir_symlink",
+                path=str(runtime_dir),
+                notes=(
+                    "Replacing directory symlink with real dir + file bridges "
+                    "(ReActor glob.glob(insightface/*) must see entries)."
+                ),
+            )
+        )
+        if dry_run:
+            return True
+        runtime_dir.unlink()
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        return True
+    if runtime_dir.exists() and not runtime_dir.is_dir():
+        result.errors.append(f"ERROR: Runtime insightface path is not a directory: {runtime_dir}")
+        return False
+    if not runtime_dir.exists():
+        result.actions.append(BridgeAction(action="mkdir", path=str(runtime_dir)))
+        if not dry_run:
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+    return True
+
+
 def ensure_reactor_insightface_bridge(
     *,
     comfyui_runtime: Path,
@@ -240,7 +363,7 @@ def ensure_reactor_insightface_bridge(
     require_inswapper: bool = True,
     require_buffalo: bool = False,
 ) -> ReactorInsightfaceBridgeResult:
-    """Ensure ReActor-visible insightface paths resolve to Drive-canonical assets."""
+    """Ensure ReActor-visible insightface *files* resolve to Drive-canonical assets."""
     comfyui_runtime = Path(comfyui_runtime)
     canonical_dir = Path(canonical_insightface_dir)
     runtime_dir = default_runtime_insightface_dir(comfyui_runtime)
@@ -277,57 +400,36 @@ def ensure_reactor_insightface_bridge(
         else:
             models_dir.mkdir(parents=True, exist_ok=True)
 
-    # Prefer bridging the whole insightface directory when runtime slot is free/symlink.
-    if runtime_dir.is_symlink() or not runtime_dir.exists():
-        if not _ensure_bridge_link(runtime_dir, canonical_dir, dry_run=dry_run, result=result):
-            # Directory symlink unavailable (common on some Windows hosts): fall through
-            # to per-file bridges under a real runtime insightface directory.
-            if any("Unable to create directory symlink" in e for e in result.errors):
-                result.errors = [
-                    e for e in result.errors if "Unable to create directory symlink" not in e
-                ]
-                result.messages.append(
-                    "Directory symlink unavailable; bridging individual InsightFace assets."
+    if not _ensure_real_insightface_dir(runtime_dir, dry_run=dry_run, result=result):
+        return result
+
+    if require_inswapper or canonical_inswapper.is_file():
+        if not canonical_inswapper.is_file():
+            result.errors.append(
+                f"ERROR: Canonical inswapper missing (manual placement only): {canonical_inswapper}"
+            )
+            if require_inswapper:
+                return result
+        elif not _ensure_bridge_link(
+            runtime_inswapper, canonical_inswapper, dry_run=dry_run, result=result
+        ):
+            return result
+
+    if require_buffalo or canonical_buffalo.is_file():
+        if not canonical_buffalo.is_file():
+            if require_buffalo:
+                result.errors.append(
+                    f"ERROR: Canonical buffalo_l detector missing: {canonical_buffalo}"
                 )
-                if not dry_run:
-                    runtime_dir.mkdir(parents=True, exist_ok=True)
-                _bridge_individual = True
-            else:
                 return result
         else:
-            _bridge_individual = False
-    else:
-        _bridge_individual = True
-
-    if _bridge_individual:
-        # Real directory present — bridge individual required assets inside it.
-        if require_inswapper or canonical_inswapper.is_file():
-            if not canonical_inswapper.is_file():
-                result.errors.append(
-                    f"ERROR: Canonical inswapper missing (manual placement only): {canonical_inswapper}"
-                )
-                if require_inswapper:
-                    return result
-            elif not _ensure_bridge_link(
-                runtime_inswapper, canonical_inswapper, dry_run=dry_run, result=result
+            if not dry_run:
+                runtime_buffalo.parent.mkdir(parents=True, exist_ok=True)
+            if not _ensure_bridge_link(
+                runtime_buffalo, canonical_buffalo, dry_run=dry_run, result=result
             ):
                 return result
-        if require_buffalo or canonical_buffalo.is_file():
-            if not canonical_buffalo.is_file():
-                if require_buffalo:
-                    result.errors.append(
-                        f"ERROR: Canonical buffalo_l detector missing: {canonical_buffalo}"
-                    )
-                    return result
-            else:
-                if not dry_run:
-                    runtime_buffalo.parent.mkdir(parents=True, exist_ok=True)
-                if not _ensure_bridge_link(
-                    runtime_buffalo, canonical_buffalo, dry_run=dry_run, result=result
-                ):
-                    return result
 
-    # Verification (skip deep resolve in dry-run when we only planned actions)
     if not dry_run:
         if require_inswapper:
             if not canonical_inswapper.is_file():
@@ -336,7 +438,9 @@ def ensure_reactor_insightface_bridge(
                 )
                 return result
             if not runtime_inswapper.exists():
-                result.errors.append(f"ERROR: ReActor runtime inswapper missing after bridge: {runtime_inswapper}")
+                result.errors.append(
+                    f"ERROR: ReActor runtime inswapper missing after bridge: {runtime_inswapper}"
+                )
                 return result
             if not _paths_content_match(runtime_inswapper, canonical_inswapper):
                 result.errors.append(
@@ -344,16 +448,28 @@ def ensure_reactor_insightface_bridge(
                     f"(runtime={runtime_inswapper}, canonical={canonical_inswapper})"
                 )
                 return result
+            if not reactor_glob_discovers_inswapper(comfyui_runtime):
+                discovered = reactor_style_list_swap_models(comfyui_runtime)
+                result.errors.append(
+                    "ERROR: ReActor-style glob discovery does not see "
+                    f"{INSWAPPER_FILENAME} under models/insightface/* "
+                    f"(discovered={discovered}). Frontend object_info would omit the model."
+                )
+                return result
+            result.reactor_glob_discoverable = True
             result.inswapper_verified = True
         elif runtime_inswapper.exists() and canonical_inswapper.is_file():
             result.inswapper_verified = _paths_content_match(runtime_inswapper, canonical_inswapper)
+            result.reactor_glob_discoverable = reactor_glob_discovers_inswapper(comfyui_runtime)
 
         if require_buffalo:
             if not canonical_buffalo.is_file():
                 result.errors.append(f"ERROR: Canonical buffalo_l missing: {canonical_buffalo}")
                 return result
             if not runtime_buffalo.exists():
-                result.errors.append(f"ERROR: ReActor runtime buffalo missing after bridge: {runtime_buffalo}")
+                result.errors.append(
+                    f"ERROR: ReActor runtime buffalo missing after bridge: {runtime_buffalo}"
+                )
                 return result
             if not _paths_content_match(runtime_buffalo, canonical_buffalo):
                 result.errors.append(
@@ -372,7 +488,8 @@ def ensure_reactor_insightface_bridge(
     result.ok = not result.errors
     if result.ok:
         result.messages.append(
-            f"ReActor InsightFace bridge ready: {runtime_dir} -> {canonical_dir}"
+            "ReActor InsightFace file-level bridge ready "
+            f"(real dir {runtime_dir}; glob-discoverable={result.reactor_glob_discoverable})"
         )
     return result
 
@@ -390,9 +507,12 @@ def assess_reactor_runtime_asset(
         "runtime_path": str(runtime_path),
         "canonical_present": canonical_path.is_file(),
         "runtime_present": False,
-        "runtime_is_symlink": runtime_path.is_symlink() if runtime_path.exists() or runtime_path.is_symlink() else False,
+        "runtime_is_symlink": runtime_path.is_symlink()
+        if runtime_path.exists() or runtime_path.is_symlink()
+        else False,
         "runtime_resolves": False,
         "matches_canonical": False,
+        "reactor_glob_discoverable": False,
         "status": "MISSING",
         "verified": False,
         "actual_size_bytes": None,
@@ -434,6 +554,15 @@ def assess_reactor_runtime_asset(
             row["status"] = "RUNTIME_BROKEN_LINK"
             return row
 
+    parent = runtime_path.parent
+    if parent.is_symlink():
+        row["status"] = "RUNTIME_DIR_SYMLINK"
+        row["notes"] = (
+            "Parent insightface path is a directory symlink; ReActor glob discovery "
+            "may not list Drive-backed entries. Re-run Full Launch bridge."
+        )
+        return row
+
     try:
         row["runtime_resolves"] = True
         row["actual_size_bytes"] = runtime_path.stat().st_size
@@ -448,6 +577,14 @@ def assess_reactor_runtime_asset(
     if row["actual_sha256"] != row["canonical_sha256"]:
         row["status"] = "RUNTIME_SHA256_MISMATCH"
         return row
+
+    comfy_models = parent.parent
+    comfy_runtime = comfy_models.parent
+    if parent.name == "insightface" and comfy_models.name == "models":
+        row["reactor_glob_discoverable"] = reactor_glob_discovers_inswapper(comfy_runtime)
+        if not row["reactor_glob_discoverable"]:
+            row["status"] = "RUNTIME_NOT_GLOB_DISCOVERABLE"
+            return row
 
     row["matches_canonical"] = True
     row["status"] = "VERIFIED"

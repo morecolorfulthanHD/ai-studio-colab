@@ -56,9 +56,32 @@ from core.runtime.prepared_workflow_index import find_by_preparation_id, prepara
 from core.runtime.reactor_model_bridge import (
     default_canonical_insightface_dir,
     ensure_reactor_insightface_bridge,
+    reactor_glob_discovers_inswapper,
     reactor_runtime_inswapper_path,
+    reactor_style_list_swap_models,
 )
 from core.runtime.registry_loader import RegistryLoader
+
+
+def _reactor_object_info(*, swap_models: list[str] | None = None, include_node: bool = True) -> dict:
+    """Minimal ComfyUI object_info shaped like pinned ReActorFaceSwap INPUT_TYPES."""
+    payload: dict = {
+        "CheckpointLoaderSimple": {"input": {"required": {}}},
+        "IPAdapterUnifiedLoaderFaceID": {"input": {"required": {}}},
+        "IPAdapterFaceID": {"input": {"required": {}}},
+    }
+    if include_node:
+        models = list(swap_models) if swap_models is not None else ["inswapper_128.onnx"]
+        payload["ReActorFaceSwap"] = {
+            "input": {
+                "required": {
+                    "enabled": ["BOOLEAN", {}],
+                    "input_image": ["IMAGE"],
+                    "swap_model": [models],
+                }
+            }
+        }
+    return payload
 
 
 def _assert_true(label: str, cond: bool) -> None:
@@ -356,6 +379,7 @@ def main() -> int:
             bundle_nodes=list(bundle.nodes),
             comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
             candidate=CANDIDATE_REACTOR,
+            object_info_payload=_reactor_object_info(),
         )
         _assert_true(
             "canonical present without bridge",
@@ -489,6 +513,7 @@ def main() -> int:
             bundle_nodes=list(bundle.nodes),
             comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
             candidate=CANDIDATE_REACTOR,
+            object_info_payload=_reactor_object_info(),
         )
         _assert_false(
             "wrong runtime file not ready",
@@ -513,11 +538,16 @@ def main() -> int:
             require_inswapper=True,
         )
         _assert_true(f"restore bridge ({bridge_ok.errors})", bridge_ok.ok)
+        _assert_true(
+            "glob discovers after file-level bridge",
+            reactor_glob_discovers_inswapper(paths["comfy"]),
+        )
         dep_bridged = assess_identity_benchmark_dependencies(
             bundle_models=models,
             bundle_nodes=list(bundle.nodes),
             comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
             candidate=CANDIDATE_REACTOR,
+            object_info_payload=_reactor_object_info(),
         )
         _assert_true(
             "reactor ready with valid bridge",
@@ -527,7 +557,136 @@ def main() -> int:
             "runtime verified label",
             dep_bridged["candidates"][CANDIDATE_REACTOR]["detail"]["reactor_runtime_inswapper_verified"],
         )
+        _assert_true(
+            "live swap option verified",
+            dep_bridged["candidates"][CANDIDATE_REACTOR]["detail"]["live_swap_model_option_verified"],
+        )
         _pass(results, "Valid canonical + valid runtime bridge -> ReActor readiness passes")
+
+        # Live object_info must advertise inswapper — filesystem alone is insufficient
+        dep_omit = assess_identity_benchmark_dependencies(
+            bundle_models=models,
+            bundle_nodes=list(bundle.nodes),
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            candidate=CANDIDATE_REACTOR,
+            object_info_payload=_reactor_object_info(swap_models=["reswapper_128.onnx"]),
+        )
+        _assert_false(
+            "omitted swap option not ready",
+            dep_omit["candidates"][CANDIDATE_REACTOR]["ready"],
+        )
+        _assert_equal(
+            "live option missing status",
+            dep_omit["candidates"][CANDIDATE_REACTOR]["detail"]["live_swap_model_option_status"],
+            "MISSING",
+        )
+        _pass(
+            results,
+            "Canonical + runtime valid but object_info omits inswapper_128.onnx -> not ready",
+        )
+
+        dep_wrong_name = assess_identity_benchmark_dependencies(
+            bundle_models=models,
+            bundle_nodes=list(bundle.nodes),
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            candidate=CANDIDATE_REACTOR,
+            object_info_payload=_reactor_object_info(swap_models=["inswapper_128_fp16.onnx"]),
+        )
+        _assert_false(
+            "wrong option name not ready",
+            dep_wrong_name["candidates"][CANDIDATE_REACTOR]["ready"],
+        )
+        _pass(results, "Wrong live swap_model option/name -> candidate not ready")
+
+        dep_no_node = assess_identity_benchmark_dependencies(
+            bundle_models=models,
+            bundle_nodes=list(bundle.nodes),
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            candidate=CANDIDATE_REACTOR,
+            object_info_payload=_reactor_object_info(include_node=False),
+        )
+        _assert_false(
+            "absent reactor node not ready",
+            dep_no_node["candidates"][CANDIDATE_REACTOR]["ready"],
+        )
+        _pass(results, "ReActor node absent from object_info -> candidate not ready")
+
+        dep_live_ok = assess_identity_benchmark_dependencies(
+            bundle_models=models,
+            bundle_nodes=list(bundle.nodes),
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            candidate=CANDIDATE_REACTOR,
+            object_info_payload=_reactor_object_info(swap_models=["inswapper_128.onnx"]),
+        )
+        _assert_equal(
+            "live option verified status",
+            dep_live_ok["candidates"][CANDIDATE_REACTOR]["detail"]["live_swap_model_option_status"],
+            "VERIFIED",
+        )
+        _assert_true(
+            "live option verified ready",
+            dep_live_ok["candidates"][CANDIDATE_REACTOR]["ready"],
+        )
+        _pass(results, "object_info advertises inswapper_128.onnx -> live option VERIFIED")
+
+        # Directory symlink (prior bridge shape) must be converted to file-level for glob
+        import os as _os
+
+        insight_rt = paths["comfy"] / "models" / "insightface"
+        if insight_rt.exists() or insight_rt.is_symlink():
+            if insight_rt.is_symlink():
+                insight_rt.unlink()
+            elif insight_rt.is_dir():
+                shutil.rmtree(insight_rt)
+        dir_symlink_ok = False
+        try:
+            _os.symlink(str(canonical_insight), str(insight_rt), target_is_directory=True)
+            dir_symlink_ok = insight_rt.is_symlink()
+        except OSError:
+            dir_symlink_ok = False
+
+        if dir_symlink_ok:
+            bridge_migrate = ensure_reactor_insightface_bridge(
+                comfyui_runtime=paths["comfy"],
+                canonical_insightface_dir=canonical_insight,
+                dry_run=False,
+                require_inswapper=True,
+            )
+            _assert_true(f"dir symlink migrated ({bridge_migrate.errors})", bridge_migrate.ok)
+            _assert_false("insightface is real dir after migrate", insight_rt.is_symlink())
+            _assert_true("glob after migrate", reactor_glob_discovers_inswapper(paths["comfy"]))
+            from core.runtime.reactor_model_bridge import INSWAPPER_FILENAME as _INS
+
+            _assert_true("basename listed", _INS in reactor_style_list_swap_models(paths["comfy"]))
+            _pass(results, "Full Reset/Launch-style bridge recreates glob-discoverable runtime state")
+        else:
+            # Windows hosts without symlink privilege: recreate via file-level bridge path.
+            bridge_recreate = ensure_reactor_insightface_bridge(
+                comfyui_runtime=paths["comfy"],
+                canonical_insightface_dir=canonical_insight,
+                dry_run=False,
+                require_inswapper=True,
+            )
+            _assert_true(f"recreate after wipe ({bridge_recreate.errors})", bridge_recreate.ok)
+            _assert_false("insightface not a dir symlink", insight_rt.is_symlink())
+            _assert_true("glob after recreate", reactor_glob_discovers_inswapper(paths["comfy"]))
+            _pass(results, "Full Reset/Launch-style bridge recreates glob-discoverable runtime state")
+
+        bridge_again = ensure_reactor_insightface_bridge(
+            comfyui_runtime=paths["comfy"],
+            canonical_insightface_dir=canonical_insight,
+            dry_run=False,
+            require_inswapper=True,
+        )
+        _assert_true("repeated launch idempotent", bridge_again.ok)
+        _pass(results, "Repeated launch/bridge remains idempotent")
+
+        # Bridge before enumeration: setup then glob (ordering contract)
+        _assert_true(
+            "bridge precedes enumeration contract",
+            bridge_again.reactor_glob_discoverable and reactor_glob_discovers_inswapper(paths["comfy"]),
+        )
+        _pass(results, "Bridge/setup occurs before model enumeration (glob sees inswapper)")
 
         # ReActor prepare with present node + insightface + inswapper + runtime bridge
         prep = prepare_identity_benchmark(
@@ -791,6 +950,7 @@ def main() -> int:
             bundle_models=models,
             bundle_nodes=list(bundle.nodes),
             comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            object_info_payload=_reactor_object_info(),
         )
         _assert_true("dep quality disclaimer", "not a visual" in str(dep.get("quality_claim") or "").lower())
         _pass(results, "Dependency assessor is structural/readiness only (no quality PASS)")
@@ -821,6 +981,7 @@ def main() -> int:
             bundle_models=missing_models,
             bundle_nodes=list(bundle.nodes),
             comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            object_info_payload=_reactor_object_info(),
         )
         _assert_false("missing assets not ready", dep_missing["candidates"][CANDIDATE_FACEID]["ready"])
         _pass(results, "FaceID missing asset -> not ready (MISSING)")
@@ -875,6 +1036,7 @@ def main() -> int:
             bundle_models=verified_models,
             bundle_nodes=list(bundle.nodes),
             comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            object_info_payload=_reactor_object_info(),
         )
         _assert_true(
             "faceid ready when verified",
@@ -888,6 +1050,7 @@ def main() -> int:
             bundle_models=one_bad_models,
             bundle_nodes=list(bundle.nodes),
             comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            object_info_payload=_reactor_object_info(),
         )
         _assert_false(
             "one invalid blocks faceid",
@@ -911,6 +1074,7 @@ def main() -> int:
             bundle_models=one_bad_models,
             bundle_nodes=list(bundle.nodes),
             comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            object_info_payload=_reactor_object_info(),
         )
         _assert_true(
             "reactor unchanged when faceid invalid",

@@ -28,6 +28,8 @@ from .prepared_workflow_index import (
     preparations_log_path,
 )
 from .reactor_model_bridge import (
+    INSWAPPER_FILENAME,
+    assess_reactor_live_swap_model_option,
     assess_reactor_runtime_asset,
     reactor_runtime_buffalo_path,
     reactor_runtime_inswapper_path,
@@ -959,8 +961,10 @@ def _scan_node_class_mappings(node_dir: Path) -> set[str]:
     return found
 
 
-def _fetch_comfy_object_info_keys(base_url: str | None = None) -> tuple[str, set[str] | None, str]:
-    """Return (status, keys|None, notes). status: ok|unreachable|error."""
+def _fetch_comfy_object_info(
+    base_url: str | None = None,
+) -> tuple[str, dict[str, Any] | None, str]:
+    """Return (status, payload|None, notes). status: ok|unreachable|error."""
     try:
         from .comfyui_userdata import DEFAULT_COMFY_BASE_URL, comfyui_reachable, normalize_comfy_base_url
     except Exception:  # noqa: BLE001
@@ -975,9 +979,17 @@ def _fetch_comfy_object_info_keys(base_url: str | None = None) -> tuple[str, set
             payload = json.loads(resp.read().decode("utf-8"))
         if not isinstance(payload, dict):
             return "error", None, "object_info returned non-object"
-        return "ok", set(payload.keys()), "object_info loaded"
+        return "ok", payload, "object_info loaded"
     except Exception as exc:  # noqa: BLE001
         return "error", None, f"object_info fetch failed: {exc}"
+
+
+def _fetch_comfy_object_info_keys(base_url: str | None = None) -> tuple[str, set[str] | None, str]:
+    """Return (status, keys|None, notes). status: ok|unreachable|error."""
+    status, payload, notes = _fetch_comfy_object_info(base_url)
+    if status != "ok" or payload is None:
+        return status, None, notes
+    return status, set(payload.keys()), notes
 
 
 def node_pin_status(
@@ -1101,9 +1113,20 @@ def assess_identity_benchmark_dependencies(
     comfyui_base_url: str | None = None,
     comfyui_runtime: Path | None = None,
     hash_status_callback: Any | None = None,
+    object_info_payload: dict[str, Any] | None = None,
+    object_info_status_override: str | None = None,
 ) -> dict[str, Any]:
     candidates = [candidate] if candidate else list(LIVE_CANDIDATES)
-    object_info_status, object_info_keys, object_info_notes = _fetch_comfy_object_info_keys(comfyui_base_url)
+    if object_info_payload is not None:
+        object_info_status = object_info_status_override or "ok"
+        object_info = object_info_payload
+        object_info_keys = set(object_info.keys())
+        object_info_notes = "object_info injected for assessment"
+    else:
+        object_info_status, object_info, object_info_notes = _fetch_comfy_object_info(comfyui_base_url)
+        object_info_keys = set(object_info.keys()) if object_info else None
+        if object_info_status_override:
+            object_info_status = object_info_status_override
     resolved_runtime = _resolve_comfyui_runtime(comfyui_runtime, comfyui_custom_nodes)
 
     reactor_node = node_pin_status(
@@ -1123,6 +1146,12 @@ def assess_identity_benchmark_dependencies(
         object_info_status=object_info_status,
     )
 
+    live_swap = assess_reactor_live_swap_model_option(
+        object_info,
+        object_info_status=object_info_status,
+        required_filename=INSWAPPER_FILENAME,
+    )
+
     report: dict[str, Any] = {
         "package_version": PACKAGE_VERSION,
         "quality_claim": "none — dependency readiness only; not a visual identity PASS",
@@ -1131,10 +1160,12 @@ def assess_identity_benchmark_dependencies(
             "Package 4.12 benchmark use does NOT approve production/commercial FaceID deployment."
         ),
         "reactor_model_discovery": (
-            "Pinned ReActor resolves inswapper_128.onnx under "
-            "{ComfyUI}/models/insightface/ (folder_paths.models_dir). "
-            "Drive models/shared/insightface is canonical durable storage and is NOT "
-            "automatically visible to ReActor via extra_model_paths; Full Launch bridges it."
+            "Pinned ReActor enumerates swap_model via glob(models_dir/insightface/*) at "
+            "INPUT_TYPES time (reactor_faceswap.get_models → nodes.model_names). "
+            "Drive models/shared/insightface is canonical; Full Launch creates a real "
+            "ComfyUI/models/insightface/ directory with file-level bridges so glob + "
+            "live object_info advertise inswapper_128.onnx. Directory symlinks to Drive "
+            "are rejected because they can pass exists() while glob returns empty."
         ),
         "comfyui_object_info": {
             "status": object_info_status,
@@ -1173,6 +1204,11 @@ def assess_identity_benchmark_dependencies(
                         f"{name}: Canonical Drive asset PRESENT; ReActor runtime asset "
                         f"{status} ({row.get('reactor_runtime_path')})"
                     )
+            if not live_swap.get("verified"):
+                integrity_failures.append(
+                    f"Live ReActor swap_model option: {live_swap.get('status')} — "
+                    f"{live_swap.get('notes')}"
+                )
         else:
             present_m, missing_m, integrity_map = verify_required_model_assets(
                 bundle_models,
@@ -1213,9 +1249,14 @@ def assess_identity_benchmark_dependencies(
                     "PRESENT" if insight_row.get("canonical_present") else "MISSING"
                 ),
                 "reactor_runtime_buffalo_status": insight_row.get("reactor_runtime_status"),
+                "live_swap_model_option_status": live_swap.get("status"),
+                "live_swap_model_option_verified": bool(live_swap.get("verified")),
+                "live_swap_model_option_notes": live_swap.get("notes") or "",
+                "live_swap_model_options": list(live_swap.get("swap_model_options") or []),
                 "assets": {
                     "insightface_w600k_r50": insight_row,
                     "reactor_inswapper_128": swap_row,
+                    "live_swap_model_option": live_swap,
                 },
             }
         else:
@@ -1261,6 +1302,9 @@ def assess_identity_benchmark_dependencies(
             and not missing_m
             and node_row.get("registration_status") != "failed"
         )
+        if cand == CANDIDATE_REACTOR:
+            # Operational readiness must match ComfyUI's own model enumeration.
+            ready = ready and bool(live_swap.get("verified"))
         report["candidates"][cand] = {
             "models_present": present_m,
             "models_missing": missing_m,

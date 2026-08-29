@@ -90,6 +90,18 @@ def _print_human(report: dict) -> None:
         f"{rd.get('reactor_runtime_inswapper_status') or 'unknown'} "
         f"(verified={_yn(rd.get('reactor_runtime_inswapper_verified'))})"
     )
+    print(
+        f"  Live ReActor swap_model option: "
+        f"{rd.get('live_swap_model_option_status') or 'unknown'} "
+        f"(verified={_yn(rd.get('live_swap_model_option_verified'))})"
+    )
+    if rd.get("live_swap_model_option_notes"):
+        print(f"    notes: {rd.get('live_swap_model_option_notes')}")
+    options = rd.get("live_swap_model_options") or []
+    if options:
+        preview = ", ".join(str(x) for x in options[:8])
+        more = "" if len(options) <= 8 else f" (+{len(options) - 8} more)"
+        print(f"    options: {preview}{more}")
     print(f"  w600k_r50.onnx ready: {_yn(rd.get('w600k_r50_onnx'))}")
     print(f"  inswapper_128.onnx ready: {_yn(rd.get('inswapper_128_onnx'))}")
     print(f"  candidate ready: {_yn(reactor.get('ready'))}")
@@ -122,8 +134,10 @@ def _print_human(report: dict) -> None:
     print()
     print(
         "Restricted FaceID/InsightFace weights are never auto-downloaded. "
-        "Drive models/shared/insightface is canonical; ReActor also requires the "
-        "runtime bridge under ComfyUI/models/insightface (recreated by Full Launch). "
+        "Drive models/shared/insightface is canonical; Full Launch creates a real "
+        "ComfyUI/models/insightface directory with file-level bridges so ReActor "
+        "glob discovery and live object_info advertise inswapper_128.onnx. "
+        "Filesystem presence alone is not sufficient — live swap_model option must be VERIFIED. "
         "When registry integrity metadata is configured for FaceID, assets must be VERIFIED "
         "(existence + size + SHA256)."
     )
