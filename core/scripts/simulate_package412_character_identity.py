@@ -40,10 +40,12 @@ from core.runtime.identity_benchmark import (
     PREPARATION_KIND_IDENTITY_BENCHMARK,
     SCENARIO_IDS,
     append_identity_benchmark_record,
+    append_identity_benchmark_record_if_absent,
     assert_identity_benchmark_graph,
     assess_identity_benchmark_dependencies,
     assess_reactor_model_readiness,
     backfill_identity_benchmark_preparation,
+    format_identity_benchmark_report,
     is_benchmark_generation_metadata,
     load_identity_benchmark_records,
     normalize_scenario_id,
@@ -52,7 +54,11 @@ from core.runtime.identity_benchmark import (
     verify_model_asset_integrity,
     verify_required_model_assets,
 )
-from core.runtime.prepared_workflow_index import find_by_preparation_id, preparations_log_path
+from core.runtime.prepared_workflow_index import (
+    append_preparation_record,
+    find_by_preparation_id,
+    preparations_log_path,
+)
 from core.runtime.reactor_model_bridge import (
     default_canonical_insightface_dir,
     ensure_reactor_insightface_bridge,
@@ -102,6 +108,93 @@ def _assert_equal(label: str, actual, expected) -> None:
 def _pass(results: list[tuple[str, str]], label: str) -> None:
     results.append((label, "PASS"))
     print(f"PASS: {label}")
+
+
+def _concurrent_append_worker(payload: dict) -> tuple[bool, bool]:
+    """Picklable worker for ProcessPoolExecutor concurrent ledger appends."""
+    from core.runtime.identity_benchmark import (
+        IdentityBenchmarkRecord,
+        append_identity_benchmark_record_if_absent,
+    )
+
+    record = IdentityBenchmarkRecord(
+        candidate=str(payload["candidate"]),
+        scenario=str(payload["scenario"]),
+        character_id=str(payload["character_id"]),
+        seed=int(payload["seed"]),
+        preparation_id=str(payload["preparation_id"]),
+        prompt_id=str(payload["prompt_id"]),
+        output_node_id=str(payload["output_node_id"]),
+        output_path=str(payload["output_path"]),
+        output_sha256=str(payload["output_sha256"]),
+        capture_idempotence_key=str(payload["idempotence_key"]),
+        success=True,
+    )
+    return append_identity_benchmark_record_if_absent(
+        Path(payload["ledger_path"]),
+        record,
+        idempotence_key=str(payload["idempotence_key"]),
+    )
+
+
+def _concurrent_evidence_worker(payload: dict) -> str:
+    from core.runtime.generation_evidence_ledger import EvidenceLedger, EvidenceRecord
+
+    prompt_id = str(payload["prompt_id"])
+    EvidenceLedger(Path(payload["path"])).append(
+        EvidenceRecord(
+            prompt_id=prompt_id,
+            output_node_id="9",
+            local_sha256=str(payload["sha"]),
+            drive_sha256=str(payload["sha"]),
+            sync_status="verified",
+            capability=str(payload.get("capability") or "txt2img"),
+            snapshot_status=str(payload.get("snapshot_status") or ""),
+            generation_id=str(payload.get("generation_id") or ""),
+        )
+    )
+    return prompt_id
+
+
+def _concurrent_index_worker(payload: dict) -> str:
+    from core.runtime.generation_index import GenerationIndex, GenerationIndexRecord
+
+    gid = str(payload["generation_id"])
+    GenerationIndex(Path(payload["path"])).append(
+        GenerationIndexRecord(
+            generation_id=gid,
+            dedupe_key=str(payload["dedupe_key"]),
+            prompt_id=str(payload["prompt_id"]),
+            output_node_id="9",
+            capability=str(payload.get("capability") or "txt2img"),
+            snapshot_status=str(payload.get("snapshot_status") or "snapshot_complete"),
+            image_sha256=str(payload.get("image_sha256") or ""),
+        )
+    )
+    return gid
+
+
+def _concurrent_audit_worker(payload: dict) -> str:
+    import json
+
+    from core.runtime.jsonl_file_lock import append_jsonl_line
+
+    action = str(payload["action"])
+    append_jsonl_line(
+        Path(payload["path"]),
+        json.dumps({"action": action, "seq": int(payload["seq"])}, ensure_ascii=False),
+    )
+    return action
+
+
+def _valid_jsonl_lines(path: Path) -> list[dict]:
+    if not path.is_file():
+        return []
+    rows = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            rows.append(json.loads(line))
+    return rows
 
 
 def _write_png(path: Path, payload: bytes = b"PK412-FACE") -> None:
@@ -1121,6 +1214,900 @@ def main() -> int:
         _assert_equal("ledger rows", len(rows), 1)
         _assert_equal("promotion pending", rows[0].get("promotion_status"), "pending")
         _pass(results, "Identity benchmark ledger append/report")
+
+        # --- Identity benchmark execution capture / recovery ---
+        from core.runtime.identity_benchmark_capture import (
+            benchmark_idempotence_key,
+            capture_identity_benchmark_execution,
+            ensure_durable_benchmark_artifact,
+            is_identity_benchmark_provenance,
+            recover_identity_benchmarks_from_history,
+        )
+        from core.runtime.workflow_provenance import ExecutionProvenance, hash_ui_workflow
+
+        # Use prep_s1 (Drive/index intact). Earlier backfill-mismatch tests deliberately
+        # strip Drive/index for `prep` and leave a tampered runtime workflow.
+        capture_prep = prep_s1
+        prep_wf_path = Path(capture_prep.runtime_prepared_dir) / f"{capture_prep.preparation_id}.workflow.json"
+        prep_wf = json.loads(prep_wf_path.read_text(encoding="utf-8"))
+        ai_extra = ((prep_wf.get("extra") or {}).get("ai_studio") or {})
+        _assert_equal("embedded prep id", ai_extra.get("preparation_id"), capture_prep.preparation_id)
+        _assert_true("embedded benchmark_run", ai_extra.get("benchmark_run") is True)
+        _assert_equal(
+            "embedded kind",
+            ai_extra.get("preparation_kind"),
+            PREPARATION_KIND_IDENTITY_BENCHMARK,
+        )
+        _assert_equal(
+            "embedded character_reference_path",
+            ai_extra.get("character_reference_path"),
+            "benchmark_source/primary_face.png",
+        )
+        _assert_true("embedded character_face_sha256", bool(ai_extra.get("character_face_sha256")))
+        _pass(results, "Prepared identity workflow embeds durable ai_studio provenance")
+
+        out_file = paths["comfy"] / "output" / "idbench_s1.png"
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        out_file.write_bytes(b"\x89PNG\r\n\x1a\n" + b"IDBENCH-S1-OUTPUT")
+        out_sha = file_sha256(out_file)
+        (paths["drive"] / "outputs").mkdir(parents=True, exist_ok=True)
+        evidence_path = paths["drive"] / "logs" / "autosync" / "evidence.jsonl"
+        evidence_path.parent.mkdir(parents=True, exist_ok=True)
+        prov = ExecutionProvenance(
+            preparation_id=capture_prep.preparation_id,
+            preparation_kind=PREPARATION_KIND_IDENTITY_BENCHMARK,
+            capability="identity_benchmark",
+            workflow_identifier="reference/identity_reactor_benchmark",
+            prepared_workflow_hash=str(ai_extra.get("prepared_workflow_hash") or ""),
+            seed=int(capture_prep.seed),
+            save_prefix="ai_studio_idbench_reactor",
+        )
+        _assert_true("prov is benchmark", is_identity_benchmark_provenance(prov, prep_wf))
+        cap1 = capture_identity_benchmark_execution(
+            drive_root=paths["drive"],
+            ledger_path=ledger,
+            prompt_id="prompt-idbench-1",
+            output_node_id="9",
+            output_path=out_file,
+            output_sha256=out_sha,
+            provenance=prov,
+            ui_workflow=prep_wf,
+            local_path=str(out_file),
+            evidence_path=evidence_path,
+            drive_output_dir=paths["drive"] / "outputs",
+        )
+        _assert_true(f"capture ok ({cap1.errors})", cap1.ok and not cap1.skipped_duplicate)
+        rows2 = load_identity_benchmark_records(ledger)
+        _assert_true("ledger has capture", len(rows2) >= 2)
+        captured = [r for r in rows2 if r.get("prompt_id") == "prompt-idbench-1"]
+        _assert_equal("one capture row", len(captured), 1)
+        _assert_equal("candidate preserved", captured[0].get("candidate"), CANDIDATE_REACTOR)
+        _assert_equal("scenario preserved", captured[0].get("scenario"), "S1_near_front_portrait")
+        _assert_equal("character preserved", captured[0].get("character_id"), reg.character.character_id)
+        _assert_equal("prep preserved", captured[0].get("preparation_id"), capture_prep.preparation_id)
+        _assert_equal("executed seed", int(captured[0].get("seed")), int(capture_prep.seed))
+        _assert_equal("output sha", captured[0].get("output_sha256"), out_sha)
+        _assert_equal("human review pending", captured[0].get("human_review_status"), "pending")
+        _assert_true("benchmark_run flag", captured[0].get("benchmark_run") is True)
+        durable1 = Path(str(captured[0].get("output_path") or ""))
+        _assert_true("durable path under Drive outputs", str(paths["drive"] / "outputs") in str(durable1))
+        _assert_true("durable file exists", durable1.is_file())
+        _assert_false("ledger path is not runtime output", str(paths["comfy"] / "output") in str(durable1))
+        _pass(results, "Successful prepared benchmark execution -> one ledger record with provenance")
+
+        cap_dup = capture_identity_benchmark_execution(
+            drive_root=paths["drive"],
+            ledger_path=ledger,
+            prompt_id="prompt-idbench-1",
+            output_node_id="9",
+            output_path=out_file,
+            output_sha256=out_sha,
+            provenance=prov,
+            ui_workflow=prep_wf,
+            evidence_path=evidence_path,
+            drive_output_dir=paths["drive"] / "outputs",
+        )
+        _assert_true("dup ok", cap_dup.ok and cap_dup.skipped_duplicate)
+        _assert_equal(
+            "no duplicate after re-capture",
+            len([r for r in load_identity_benchmark_records(ledger) if r.get("prompt_id") == "prompt-idbench-1"]),
+            1,
+        )
+        _pass(results, "Capture/recovery idempotent (same prompt+node+sha)")
+
+        # Second distinct execution of same prep
+        out2 = paths["comfy"] / "output" / "idbench_s1_b.png"
+        out2.write_bytes(b"\x89PNG\r\n\x1a\n" + b"IDBENCH-S1-OUTPUT-B")
+        sha2 = file_sha256(out2)
+        cap2 = capture_identity_benchmark_execution(
+            drive_root=paths["drive"],
+            ledger_path=ledger,
+            prompt_id="prompt-idbench-2",
+            output_node_id="9",
+            output_path=out2,
+            output_sha256=sha2,
+            provenance=prov,
+            ui_workflow=prep_wf,
+            evidence_path=evidence_path,
+            drive_output_dir=paths["drive"] / "outputs",
+        )
+        _assert_true(f"second exec ({cap2.errors})", cap2.ok and not cap2.skipped_duplicate)
+        _assert_equal(
+            "two distinct executions",
+            len(
+                [
+                    r
+                    for r in load_identity_benchmark_records(ledger)
+                    if r.get("prompt_id") in {"prompt-idbench-1", "prompt-idbench-2"}
+                ]
+            ),
+            2,
+        )
+        _pass(results, "Two real executions of same prep remain distinct")
+
+        # History recovery (missed watcher) + durable Drive artifact
+        ledger_recover = paths["drive"] / "logs" / "identity_benchmark_recover.jsonl"
+        hist_entry = {
+            "prompt": [
+                0,
+                "client",
+                {
+                    "9": {"class_type": "SaveImage", "inputs": {"filename_prefix": "ai_studio_idbench_reactor", "images": ["8", 0]}},
+                    "3": {"class_type": "KSampler", "inputs": {"seed": int(capture_prep.seed), "steps": 20, "cfg": 7, "sampler_name": "euler", "scheduler": "normal", "denoise": 1}},
+                },
+                {"extra_pnginfo": {"workflow": prep_wf}},
+                ["9"],
+            ],
+            "outputs": {
+                "9": {"images": [{"filename": "idbench_missed.png", "subfolder": "", "type": "output"}]}
+            },
+            "status": {"completed": True, "status_str": "success"},
+        }
+        missed = paths["comfy"] / "output" / "idbench_missed.png"
+        missed.write_bytes(b"\x89PNG\r\n\x1a\n" + b"MISSED-HISTORY")
+        history = {"prompt-missed-1": hist_entry}
+        rec1 = recover_identity_benchmarks_from_history(
+            drive_root=paths["drive"],
+            ledger_path=ledger_recover,
+            comfy_output_dir=paths["comfy"] / "output",
+            base_url="http://127.0.0.1:8188",
+            history=history,
+            drive_output_dir=paths["drive"] / "outputs",
+            evidence_path=evidence_path,
+        )
+        _assert_true(f"recovery ok ({rec1.get('errors')})", rec1.get("ok") and rec1.get("captured") == 1)
+        recovered_rows = load_identity_benchmark_records(ledger_recover)
+        _assert_equal("one recovered row", len(recovered_rows), 1)
+        recovered_out = Path(str(recovered_rows[0].get("output_path") or ""))
+        _assert_true("recovery durable under Drive", str(paths["drive"] / "outputs") in str(recovered_out))
+        _assert_true("recovery durable exists", recovered_out.is_file())
+        _assert_equal("recovery sha", recovered_rows[0].get("output_sha256"), file_sha256(recovered_out))
+        _pass(results, "Missed-history recovery creates/verifies durable Drive output")
+
+        # Reuse existing verified Drive copy without duplication
+        before_files = {p.name for p in (paths["drive"] / "outputs").glob("identity_benchmark_*")}
+        rec_reuse = recover_identity_benchmarks_from_history(
+            drive_root=paths["drive"],
+            ledger_path=ledger_recover,
+            comfy_output_dir=paths["comfy"] / "output",
+            base_url="http://127.0.0.1:8188",
+            history=history,
+            drive_output_dir=paths["drive"] / "outputs",
+            evidence_path=evidence_path,
+        )
+        _assert_equal("reuse captured", rec_reuse.get("captured"), 0)
+        _assert_equal("reuse duplicates", rec_reuse.get("duplicates"), 1)
+        after_files = {p.name for p in (paths["drive"] / "outputs").glob("identity_benchmark_*")}
+        _assert_equal("no extra Drive copies on reuse", before_files, after_files)
+        _pass(results, "Verified Drive copy reused without duplication; recovery idempotent")
+
+        # Source disappears after durable copy — benchmark row remains valid
+        missed.unlink(missing_ok=True)
+        _assert_false("runtime source gone", missed.is_file())
+        _assert_true("durable still present", recovered_out.is_file())
+        _assert_equal(
+            "ledger still points at durable",
+            load_identity_benchmark_records(ledger_recover)[0].get("output_path"),
+            str(recovered_out),
+        )
+        _pass(results, "Source disappears after durable copy -> benchmark row remains valid")
+
+        # Drive SHA mismatch fails closed
+        from core.runtime.identity_benchmark_capture import ensure_durable_benchmark_artifact
+        from core.runtime.generation_evidence_ledger import EvidenceLedger, EvidenceRecord
+
+        bad_drive = paths["drive"] / "outputs" / "identity_benchmark_bogus.png"
+        bad_drive.write_bytes(b"\x89PNG\r\n\x1a\nWRONG")
+        EvidenceLedger(evidence_path).append(
+            EvidenceRecord(
+                prompt_id="prompt-sha-mismatch",
+                output_node_id="9",
+                local_path=str(out_file),
+                drive_path=str(bad_drive),
+                local_sha256=out_sha,
+                drive_sha256=out_sha,  # lying evidence
+                sync_status="verified",
+                capability="txt2img",
+            )
+        )
+        mismatch = ensure_durable_benchmark_artifact(
+            drive_root=paths["drive"],
+            source_path=out_file,
+            prompt_id="prompt-sha-mismatch",
+            output_node_id="9",
+            source_sha256=out_sha,
+            drive_output_dir=paths["drive"] / "outputs",
+            evidence_path=evidence_path,
+        )
+        _assert_false("drive sha mismatch fails", mismatch.ok)
+        _pass(results, "Drive verification / SHA mismatch fails closed")
+
+        # Ambiguous: two identity preps could match same fingerprint without prep_id
+        # Fail closed when preparation_id missing and hash/face ambiguous — force by stripping ai_studio
+        bare_wf = json.loads(json.dumps(prep_wf))
+        if isinstance(bare_wf.get("extra"), dict):
+            bare_wf["extra"].pop("ai_studio", None)
+        face_widget = ""
+        for node in prep_wf.get("nodes") or []:
+            if isinstance(node, dict) and node.get("type") == "LoadImage":
+                widgets = node.get("widgets_values") or []
+                if widgets:
+                    face_widget = str(widgets[0] or "")
+                break
+        # Also plant a second conflicting index row with same face/seed
+        append_preparation_record(
+            preparations_log_path(paths["drive"]),
+            {
+                "preparation_id": "prep_ambiguous_other",
+                "preparation_kind": PREPARATION_KIND_IDENTITY_BENCHMARK,
+                "benchmark_run": True,
+                "candidate": CANDIDATE_REACTOR,
+                "scenario": "S1_near_front_portrait",
+                "character_id": reg.character.character_id,
+                "prepared_workflow_hash": "deadbeef",
+                "parameter_summary": {
+                    "seed": int(capture_prep.seed),
+                    "save_prefix": "ai_studio_idbench_reactor",
+                },
+                "parameters": {
+                    "input_image": face_widget,
+                    "seed": int(capture_prep.seed),
+                    "save_prefix": "ai_studio_idbench_reactor",
+                },
+            },
+        )
+        amb_prov = ExecutionProvenance(
+            preparation_id="",
+            preparation_kind=PREPARATION_KIND_IDENTITY_BENCHMARK,
+            capability="identity_benchmark",
+            seed=int(capture_prep.seed),
+            save_prefix="ai_studio_idbench_reactor",
+        )
+        amb = capture_identity_benchmark_execution(
+            drive_root=paths["drive"],
+            ledger_path=ledger,
+            prompt_id="prompt-amb",
+            output_node_id="9",
+            output_path=out_file,
+            output_sha256=out_sha,
+            provenance=amb_prov,
+            ui_workflow=bare_wf,
+            evidence_path=evidence_path,
+            drive_output_dir=paths["drive"] / "outputs",
+        )
+        _assert_false("ambiguous fails closed", amb.ok)
+        _assert_true(
+            "ambiguous message",
+            any("Ambiguous" in e or "multiple" in e.lower() for e in amb.errors),
+        )
+        _pass(results, "Ambiguous history fails closed")
+
+        missing_out = capture_identity_benchmark_execution(
+            drive_root=paths["drive"],
+            ledger_path=ledger,
+            prompt_id="prompt-missing-out",
+            output_node_id="9",
+            output_path=paths["comfy"] / "output" / "does_not_exist.png",
+            output_sha256="abc",
+            provenance=prov,
+            ui_workflow=prep_wf,
+            evidence_path=evidence_path,
+            drive_output_dir=paths["drive"] / "outputs",
+        )
+        _assert_false("missing output fails", missing_out.ok)
+        _pass(results, "Missing output fails closed")
+
+        bad_sha = capture_identity_benchmark_execution(
+            drive_root=paths["drive"],
+            ledger_path=ledger,
+            prompt_id="prompt-bad-sha",
+            output_node_id="9",
+            output_path=out_file,
+            output_sha256="0" * 64,
+            provenance=prov,
+            ui_workflow=prep_wf,
+            evidence_path=evidence_path,
+            drive_output_dir=paths["drive"] / "outputs",
+        )
+        _assert_false("sha mismatch fails", bad_sha.ok)
+        _pass(results, "Output SHA/read failure fails closed")
+
+        non_bench = capture_identity_benchmark_execution(
+            drive_root=paths["drive"],
+            ledger_path=ledger,
+            prompt_id="prompt-txt2img",
+            output_node_id="9",
+            output_path=out_file,
+            output_sha256=out_sha,
+            provenance=ExecutionProvenance(capability="txt2img", workflow_identifier="base/txt2img", seed=1),
+            ui_workflow={"nodes": [], "extra": {"ai_studio": {"preparation_kind": "standard"}}},
+        )
+        _assert_true("non-benchmark skipped", non_bench.ok and non_bench.skipped_not_benchmark)
+        _assert_false(
+            "non-benchmark not in ledger",
+            any(r.get("prompt_id") == "prompt-txt2img" for r in load_identity_benchmark_records(ledger)),
+        )
+        _pass(results, "Non-benchmark execution does not enter benchmark ledger")
+
+        # Watcher path: identity benchmark skips ordinary generation snapshot
+        from core.runtime.output_autosync import OutputAutoSyncService
+        from core.runtime.generation_evidence_ledger import EvidenceLedger
+
+        evidence = paths["drive"] / "logs" / "autosync" / "evidence.jsonl"
+        idx = paths["drive"] / "logs" / "autosync" / "processed.json"
+        status = paths["drive"] / "logs" / "autosync" / "status.json"
+        gen_index = paths["drive"] / "generations" / "index.jsonl"
+        svc = OutputAutoSyncService(
+            drive_root=paths["drive"],
+            drive_output_dir=paths["drive"] / "outputs",
+            comfy_output_dir=paths["comfy"] / "output",
+            evidence_path=evidence,
+            index_path=idx,
+            status_path=status,
+            generation_index_path=gen_index,
+            registered_hashes={},
+        )
+        (paths["drive"] / "outputs").mkdir(parents=True, exist_ok=True)
+        watch_out = paths["comfy"] / "output" / "watcher_idbench.png"
+        watch_out.write_bytes(b"\x89PNG\r\n\x1a\n" + b"WATCHER-IDBENCH")
+        before_gen = gen_index.read_text(encoding="utf-8") if gen_index.is_file() else ""
+        rec_watch = svc.sync_local_output(
+            prompt_id="prompt-watch-1",
+            output_node_id="9",
+            local_path=watch_out,
+            provenance=prov,
+            ui_workflow=prep_wf,
+            capability="identity_benchmark",
+        )
+        _assert_true("watcher sync verified", rec_watch is not None and rec_watch.sync_status == "verified")
+        _assert_equal("no generation snapshot", rec_watch.snapshot_status, "skipped_identity_benchmark")
+        after_gen = gen_index.read_text(encoding="utf-8") if gen_index.is_file() else ""
+        _assert_equal("generation index unchanged", after_gen, before_gen)
+        _assert_true(
+            "watcher ledger captured",
+            any(r.get("prompt_id") == "prompt-watch-1" for r in load_identity_benchmark_records(ledger)),
+        )
+        # watcher + recovery no duplicate
+        hist_w = {
+            "prompt-watch-1": {
+                "prompt": [0, "c", {}, {"extra_pnginfo": {"workflow": prep_wf}}, ["9"]],
+                "outputs": {
+                    "9": {
+                        "images": [
+                            {"filename": "watcher_idbench.png", "subfolder": "", "type": "output"}
+                        ]
+                    }
+                },
+                "status": {"completed": True},
+            }
+        }
+        # Re-capture via direct capture with same key after watcher
+        key = benchmark_idempotence_key("prompt-watch-1", "9", file_sha256(Path(rec_watch.drive_path)))
+        from core.runtime.identity_benchmark_capture import ledger_has_idempotence_key
+
+        _assert_true("idempotence key present", ledger_has_idempotence_key(ledger, key))
+        _pass(results, "Watcher captures benchmark once; does not enter ordinary generation ledger")
+
+        # Concurrent idempotence: same key from two processes → exactly one row
+        import concurrent.futures
+
+        conc_ledger = paths["drive"] / "logs" / "identity_benchmark_conc.jsonl"
+        conc_key = benchmark_idempotence_key("prompt-conc-same", "9", out_sha)
+        same_payload = {
+            "ledger_path": str(conc_ledger),
+            "idempotence_key": conc_key,
+            "candidate": CANDIDATE_REACTOR,
+            "scenario": "S1_near_front_portrait",
+            "character_id": reg.character.character_id,
+            "seed": int(capture_prep.seed),
+            "preparation_id": capture_prep.preparation_id,
+            "prompt_id": "prompt-conc-same",
+            "output_node_id": "9",
+            "output_path": str(durable1),
+            "output_sha256": out_sha,
+        }
+        with concurrent.futures.ProcessPoolExecutor(max_workers=4) as pool:
+            same_results = list(pool.map(_concurrent_append_worker, [same_payload] * 8))
+        _assert_true("all same-key workers ok", all(ok for ok, _ in same_results))
+        _assert_equal(
+            "exactly one same-key row",
+            len(load_identity_benchmark_records(conc_ledger)),
+            1,
+        )
+        _assert_true("at least one duplicate skip", any(dup for _, dup in same_results))
+        _pass(results, "Concurrent same-key workers -> exactly one ledger row")
+
+        # Different keys from concurrent workers → both preserved
+        diff_payloads = []
+        for n, (pid, sha_n, path_n) in enumerate(
+            [
+                ("prompt-conc-diff-0", out_sha, durable1),
+                ("prompt-conc-diff-1", sha2, out2),
+            ]
+        ):
+            diff_payloads.append(
+                {
+                    **same_payload,
+                    "idempotence_key": benchmark_idempotence_key(pid, "9", sha_n),
+                    "prompt_id": pid,
+                    "output_path": str(path_n),
+                    "output_sha256": sha_n,
+                }
+            )
+        with concurrent.futures.ProcessPoolExecutor(max_workers=2) as pool:
+            diff_results = list(pool.map(_concurrent_append_worker, diff_payloads))
+        _assert_true("diff workers ok", all(ok and not dup for ok, dup in diff_results))
+        _assert_equal(
+            "same+two distinct rows",
+            len(load_identity_benchmark_records(conc_ledger)),
+            3,
+        )
+        _pass(results, "Concurrent different keys -> both rows preserved")
+
+        # Watcher-style + recovery-style race on same execution (threads + file lock)
+        race_ledger = paths["drive"] / "logs" / "identity_benchmark_race.jsonl"
+        race_src = paths["comfy"] / "output" / "race_idbench.png"
+        race_src.write_bytes(b"\x89PNG\r\n\x1a\n" + b"RACE-IDBENCH")
+        race_sha = file_sha256(race_src)
+        # Durable artifact once (copy races are covered by autosync); race the ledger append.
+        durable_race = ensure_durable_benchmark_artifact(
+            drive_root=paths["drive"],
+            source_path=race_src,
+            prompt_id="prompt-race-1",
+            output_node_id="9",
+            source_sha256=race_sha,
+            drive_output_dir=paths["drive"] / "outputs",
+            evidence_path=evidence_path,
+        )
+        _assert_true(f"race durable ({durable_race.errors})", durable_race.ok and durable_race.drive_path)
+
+        def _race_capture(_n: int):
+            return capture_identity_benchmark_execution(
+                drive_root=paths["drive"],
+                ledger_path=race_ledger,
+                prompt_id="prompt-race-1",
+                output_node_id="9",
+                output_path=durable_race.drive_path,
+                output_sha256=race_sha,
+                provenance=prov,
+                ui_workflow=prep_wf,
+                local_path=str(race_src),
+                evidence_path=evidence_path,
+                drive_output_dir=paths["drive"] / "outputs",
+                ensure_durable=True,
+                reclassify_ordinary=False,
+            )
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            race_caps = list(pool.map(_race_capture, range(4)))
+        _assert_true(
+            f"race captures ok ({[c.errors for c in race_caps if not c.ok]})",
+            all(c.ok for c in race_caps),
+        )
+        _assert_equal(
+            "race one row",
+            len([r for r in load_identity_benchmark_records(race_ledger) if r.get("prompt_id") == "prompt-race-1"]),
+            1,
+        )
+        _assert_true("race had duplicates", any(c.skipped_duplicate for c in race_caps))
+        _pass(results, "Watcher/recovery-style concurrent race -> one benchmark row")
+
+        # Legacy ordinary misclassification cleanup
+        from core.runtime.generation_index import GenerationIndex, GenerationIndexRecord
+        from core.runtime.generation_snapshot import (
+            METADATA_FILENAME,
+            _atomic_write_json,
+            new_generation_id,
+            resolve_snapshot_root,
+        )
+        from core.runtime.generation_history import collapse_generations
+        from core.runtime.identity_benchmark_capture import reclassify_legacy_ordinary_generation
+
+        legacy_gid = new_generation_id()
+        legacy_src = paths["comfy"] / "output" / "legacy_misclass.png"
+        legacy_src.write_bytes(b"\x89PNG\r\n\x1a\n" + b"LEGACY-MISCLASS")
+        legacy_sha = file_sha256(legacy_src)
+        # Simulate pre-fix ordinary autosync: Drive copy + snapshot + index
+        from core.runtime.permanent_output_naming import resolve_permanent_destination
+        from core.runtime.output_autosync import copy_with_verification
+
+        legacy_dest = resolve_permanent_destination(
+            paths["drive"] / "outputs", capability="txt2img", source_path=legacy_src
+        )
+        dest_ok, status_ok, _, err = copy_with_verification(legacy_src, legacy_dest)
+        _assert_true(f"legacy drive copy ({err})", status_ok == "verified" and dest_ok is not None)
+        snap_root = resolve_snapshot_root(paths["drive"], legacy_gid, project_slug="")
+        snap_root.mkdir(parents=True, exist_ok=True)
+        _atomic_write_json(
+            snap_root / METADATA_FILENAME,
+            {
+                "generation_id": legacy_gid,
+                "prompt_id": "prompt-legacy-bench",
+                "output_node_id": "9",
+                "image_sha256": legacy_sha,
+                "capability": "txt2img",
+                "positive_prompt": "portrait",
+                "steps": 20,
+                "cfg": 7.0,
+                "sampler_name": "euler",
+                "scheduler": "normal",
+                "model_files": ["sd15.safetensors"],
+            },
+        )
+        _atomic_write_json(snap_root / "workflow.json", {"nodes": []})
+        _atomic_write_json(
+            snap_root / "manifest.json",
+            {"snapshot_status": "complete", "image_sha256": legacy_sha, "generation_id": legacy_gid},
+        )
+        gen_idx_path = paths["drive"] / "logs" / "autosync" / "generation_index.jsonl"
+        GenerationIndex(gen_idx_path).append(
+            GenerationIndexRecord(
+                generation_id=legacy_gid,
+                dedupe_key=f"prompt-legacy-bench|9|{legacy_src}|{legacy_sha}",
+                prompt_id="prompt-legacy-bench",
+                output_node_id="9",
+                capability="txt2img",
+                canonical_output_path=str(legacy_dest),
+                snapshot_root=str(snap_root),
+                snapshot_status="snapshot_complete",
+                image_sha256=legacy_sha,
+                drive_filename=legacy_dest.name,
+            )
+        )
+        EvidenceLedger(evidence_path).append(
+            EvidenceRecord(
+                prompt_id="prompt-legacy-bench",
+                schema_version=2,
+                output_node_id="9",
+                local_path=str(legacy_src),
+                drive_path=str(legacy_dest),
+                local_sha256=legacy_sha,
+                drive_sha256=legacy_sha,
+                sync_status="verified",
+                capability="txt2img",
+                generation_id=legacy_gid,
+                snapshot_status="snapshot_complete",
+                snapshot_root=str(snap_root),
+            )
+        )
+        # Unrelated ordinary generation with similar filename must stay untouched
+        other_gid = new_generation_id()
+        other_src = paths["comfy"] / "output" / "legacy_misclass_other.png"
+        other_src.write_bytes(b"\x89PNG\r\n\x1a\n" + b"OTHER-ORDINARY")
+        other_sha = file_sha256(other_src)
+        other_dest = resolve_permanent_destination(
+            paths["drive"] / "outputs", capability="txt2img", source_path=other_src
+        )
+        copy_with_verification(other_src, other_dest)
+        EvidenceLedger(evidence_path).append(
+            EvidenceRecord(
+                prompt_id="prompt-unrelated-ordinary",
+                schema_version=2,
+                output_node_id="9",
+                local_path=str(other_src),
+                drive_path=str(other_dest),
+                local_sha256=other_sha,
+                drive_sha256=other_sha,
+                sync_status="verified",
+                capability="txt2img",
+                generation_id=other_gid,
+                snapshot_status="snapshot_complete",
+            )
+        )
+
+        legacy_ledger = paths["drive"] / "logs" / "identity_benchmark_legacy.jsonl"
+        legacy_cap = capture_identity_benchmark_execution(
+            drive_root=paths["drive"],
+            ledger_path=legacy_ledger,
+            prompt_id="prompt-legacy-bench",
+            output_node_id="9",
+            output_path=legacy_src,
+            output_sha256=legacy_sha,
+            provenance=prov,
+            ui_workflow=prep_wf,
+            evidence_path=evidence_path,
+            drive_output_dir=paths["drive"] / "outputs",
+            reclassify_ordinary=True,
+        )
+        _assert_true(f"legacy capture ({legacy_cap.errors})", legacy_cap.ok)
+        _assert_true(
+            "legacy reclass message",
+            any("Reclassified" in m for m in legacy_cap.messages),
+        )
+        _assert_true("legacy image preserved", Path(legacy_dest).is_file())
+        meta_after = json.loads((snap_root / METADATA_FILENAME).read_text(encoding="utf-8"))
+        _assert_true("metadata benchmark_run", meta_after.get("benchmark_run") is True)
+        elig_legacy = assess_derivation_eligibility(
+            metadata=meta_after, manifest={"image_sha256": legacy_sha}
+        )
+        _assert_false("legacy no longer ordinary parent", elig_legacy.eligible)
+        listed = collapse_generations(evidence_path, verified_only=True, sync_status="verified")
+        _assert_false(
+            "ordinary list hides reclassified",
+            any(str(r.get("generation_id") or "") == legacy_gid for r in listed),
+        )
+        _assert_true(
+            "unrelated ordinary still listed",
+            any(str(r.get("generation_id") or "") == other_gid for r in listed),
+        )
+        _pass(results, "Legacy ordinary misclassification reclassified; image preserved; unrelated untouched")
+
+        # Already-clean benchmark recovery is a no-op for ordinary ledger
+        clean = reclassify_legacy_ordinary_generation(
+            drive_root=paths["drive"],
+            prompt_id="prompt-watch-1",
+            output_node_id="9",
+            output_sha256=file_sha256(Path(rec_watch.drive_path)),
+            preparation_id=capture_prep.preparation_id,
+            evidence_path=evidence_path,
+            generation_index_path=gen_idx_path,
+        )
+        _assert_true("clean reclass ok", clean.ok)
+        _assert_false("clean reclass no-op", clean.changed)
+        _pass(results, "Already-clean benchmark recovery is a no-op for ordinary ledger")
+
+        # Ambiguous SHA/prompt reclass fails closed
+        EvidenceLedger(evidence_path).append(
+            EvidenceRecord(
+                prompt_id="prompt-legacy-bench",
+                schema_version=2,
+                output_node_id="9",
+                local_path=str(legacy_src),
+                drive_path=str(legacy_dest),
+                local_sha256=legacy_sha,
+                drive_sha256=legacy_sha,
+                sync_status="verified",
+                capability="txt2img",
+                generation_id=new_generation_id(),
+                snapshot_status="snapshot_complete",
+            )
+        )
+        # Note: reclass skips capability=identity_benchmark and reclassified status;
+        # the original was reclassified. Ambiguity test: two txt2img rows same proof.
+        # Reset by planting two fresh ordinary rows for a new prompt.
+        amb_gid_a = new_generation_id()
+        amb_gid_b = new_generation_id()
+        amb_src = paths["comfy"] / "output" / "amb_reclass.png"
+        amb_src.write_bytes(b"\x89PNG\r\n\x1a\n" + b"AMB-RECLASS")
+        amb_sha = file_sha256(amb_src)
+        for gid in (amb_gid_a, amb_gid_b):
+            EvidenceLedger(evidence_path).append(
+                EvidenceRecord(
+                    prompt_id="prompt-amb-reclass",
+                    schema_version=2,
+                    output_node_id="9",
+                    local_path=str(amb_src),
+                    drive_path=str(legacy_dest),
+                    local_sha256=amb_sha,
+                    drive_sha256=amb_sha,
+                    sync_status="verified",
+                    capability="txt2img",
+                    generation_id=gid,
+                    snapshot_status="snapshot_complete",
+                )
+            )
+        amb_reclass = reclassify_legacy_ordinary_generation(
+            drive_root=paths["drive"],
+            prompt_id="prompt-amb-reclass",
+            output_node_id="9",
+            output_sha256=amb_sha,
+            preparation_id=capture_prep.preparation_id,
+            evidence_path=evidence_path,
+            generation_index_path=gen_idx_path,
+        )
+        _assert_false("ambiguous reclass fails", amb_reclass.ok)
+        _pass(results, "SHA/prompt ambiguity on reclassification fails closed")
+
+        # Report recovery failure visibly surfaced
+        from core.scripts.report_identity_benchmark import _format_recovery_section
+
+        fail_section, fail_status = _format_recovery_section(
+            {"ok": False, "examined": 1, "captured": 0, "duplicates": 0, "failed": 1, "errors": ["ERROR: boom"]}
+        )
+        _assert_equal("recovery fail status", fail_status, "FAIL")
+        _assert_true("recovery STOP wording", "STOP:" in fail_section)
+        ok_section, ok_status = _format_recovery_section(
+            {"ok": True, "examined": 1, "captured": 1, "duplicates": 0, "failed": 0, "errors": []}
+        )
+        _assert_equal("recovery ok status", ok_status, "OK")
+        _pass(results, "Report clearly surfaces recovery failure vs success")
+
+        report_txt = format_identity_benchmark_report(load_identity_benchmark_records(ledger))
+        _assert_true("report shows records", "Records:" in report_txt and "Records: 0" not in report_txt)
+        _assert_true("report human pending", "human_review=pending" in report_txt)
+        _pass(results, "Report shows captured execution with human review pending")
+
+        # --- Shared JSONL lock coverage (EvidenceLedger / GenerationIndex / audit) ---
+        import concurrent.futures
+        import time
+
+        conc_evidence = paths["drive"] / "logs" / "autosync" / "evidence_conc.jsonl"
+        conc_evidence.parent.mkdir(parents=True, exist_ok=True)
+        evidence_workers = [
+            {
+                "path": str(conc_evidence),
+                "prompt_id": f"prompt-evidence-{i}",
+                "sha": f"sha-evidence-{i:02d}",
+            }
+            for i in range(12)
+        ]
+        with concurrent.futures.ProcessPoolExecutor(max_workers=6) as pool:
+            evidence_ids = list(pool.map(_concurrent_evidence_worker, evidence_workers))
+        evidence_rows = _valid_jsonl_lines(conc_evidence)
+        _assert_equal("evidence concurrent count", len(evidence_rows), 12)
+        _assert_equal(
+            "evidence all prompt ids present",
+            sorted(evidence_ids),
+            sorted(f"prompt-evidence-{i}" for i in range(12)),
+        )
+        _pass(results, "EvidenceLedger concurrent distinct rows -> all survive, valid JSON")
+
+        conc_index = paths["drive"] / "logs" / "autosync" / "generation_index_conc.jsonl"
+        index_workers = [
+            {
+                "path": str(conc_index),
+                "generation_id": f"gen_conc_{i:02d}",
+                "dedupe_key": f"key-{i}",
+                "prompt_id": f"prompt-index-{i}",
+                "image_sha256": f"sha-index-{i:02d}",
+            }
+            for i in range(12)
+        ]
+        with concurrent.futures.ProcessPoolExecutor(max_workers=6) as pool:
+            index_ids = list(pool.map(_concurrent_index_worker, index_workers))
+        index_rows = _valid_jsonl_lines(conc_index)
+        _assert_equal("index concurrent count", len(index_rows), 12)
+        _assert_equal("index all generation ids present", sorted(index_ids), sorted(w["generation_id"] for w in index_workers))
+        _pass(results, "GenerationIndex concurrent distinct rows -> all survive, valid JSON")
+
+        race_evidence = paths["drive"] / "logs" / "autosync" / "evidence_race.jsonl"
+        watcher_payload = {
+            "path": str(race_evidence),
+            "prompt_id": "prompt-watcher-ordinary",
+            "sha": "sha-watcher-ordinary",
+            "capability": "txt2img",
+            "snapshot_status": "snapshot_complete",
+            "generation_id": "gen_watcher_ordinary",
+        }
+        recovery_payload = {
+            "path": str(race_evidence),
+            "prompt_id": "prompt-recovery-benchmark",
+            "sha": "sha-recovery-benchmark",
+            "capability": "identity_benchmark",
+            "snapshot_status": "skipped_identity_benchmark",
+            "generation_id": "",
+        }
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            race_ev = list(pool.map(_concurrent_evidence_worker, [watcher_payload, recovery_payload]))
+        race_ev_rows = _valid_jsonl_lines(race_evidence)
+        _assert_equal("evidence race row count", len(race_ev_rows), 2)
+        _assert_true(
+            "watcher evidence survived",
+            any(r.get("prompt_id") == "prompt-watcher-ordinary" for r in race_ev_rows),
+        )
+        _assert_true(
+            "recovery evidence survived",
+            any(r.get("prompt_id") == "prompt-recovery-benchmark" for r in race_ev_rows),
+        )
+        _pass(results, "Watcher/recovery concurrent evidence appends -> both survive")
+
+        race_index = paths["drive"] / "logs" / "autosync" / "generation_index_race.jsonl"
+        normal_idx = {
+            "path": str(race_index),
+            "generation_id": "gen_normal_listed",
+            "dedupe_key": "normal-key",
+            "prompt_id": "prompt-normal",
+            "capability": "txt2img",
+            "snapshot_status": "snapshot_complete",
+            "image_sha256": "sha-normal",
+        }
+        quarantine_idx = {
+            "path": str(race_index),
+            "generation_id": "gen_reclassified_bench",
+            "dedupe_key": "bench-key",
+            "prompt_id": "prompt-bench-reclass",
+            "capability": "identity_benchmark",
+            "snapshot_status": "reclassified_identity_benchmark",
+            "image_sha256": "sha-bench",
+        }
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            race_idx = list(pool.map(_concurrent_index_worker, [normal_idx, quarantine_idx]))
+        race_idx_rows = _valid_jsonl_lines(race_index)
+        _assert_equal("index race row count", len(race_idx_rows), 2)
+        _assert_equal("index race ids", sorted(race_idx), sorted(["gen_normal_listed", "gen_reclassified_bench"]))
+        _pass(results, "Watcher/reclassification concurrent index appends -> both survive")
+
+        # Concurrent different benchmark executions + supporting evidence
+        bench_ledger_race = paths["drive"] / "logs" / "identity_benchmark_ev_race.jsonl"
+        bench_evidence = paths["drive"] / "logs" / "autosync" / "evidence_bench_race.jsonl"
+        bench_payloads = []
+        for i, pid in enumerate(("prompt-bench-ev-a", "prompt-bench-ev-b")):
+            sha_b = file_sha256(out_file) if i == 0 else sha2
+            bench_payloads.append(
+                {
+                    **same_payload,
+                    "ledger_path": str(bench_ledger_race),
+                    "idempotence_key": benchmark_idempotence_key(pid, "9", sha_b),
+                    "prompt_id": pid,
+                    "output_sha256": sha_b,
+                    "output_path": str(durable1 if i == 0 else out2),
+                }
+            )
+        with concurrent.futures.ProcessPoolExecutor(max_workers=2) as pool:
+            pool.map(_concurrent_append_worker, bench_payloads)
+        for i, pid in enumerate(("prompt-bench-ev-a", "prompt-bench-ev-b")):
+            sha_b = file_sha256(out_file) if i == 0 else sha2
+            _concurrent_evidence_worker(
+                {
+                    "path": str(bench_evidence),
+                    "prompt_id": pid,
+                    "sha": sha_b,
+                    "capability": "identity_benchmark",
+                    "snapshot_status": "skipped_identity_benchmark",
+                }
+            )
+        bench_rows = [r for r in load_identity_benchmark_records(bench_ledger_race) if r.get("prompt_id", "").startswith("prompt-bench-ev-")]
+        bench_ev_rows = _valid_jsonl_lines(bench_evidence)
+        _assert_equal("two benchmark ledger rows", len(bench_rows), 2)
+        _assert_equal("two benchmark evidence rows", len(bench_ev_rows), 2)
+        _pass(results, "Concurrent benchmark executions -> ledger + evidence both retained")
+
+        audit_path = paths["drive"] / "logs" / "identity_benchmark_reclassifications_conc.jsonl"
+        audit_workers = [
+            {"path": str(audit_path), "action": f"audit-{i}", "seq": i} for i in range(10)
+        ]
+        with concurrent.futures.ProcessPoolExecutor(max_workers=5) as pool:
+            audit_actions = list(pool.map(_concurrent_audit_worker, audit_workers))
+        audit_rows = _valid_jsonl_lines(audit_path)
+        _assert_equal("audit concurrent count", len(audit_rows), 10)
+        _assert_equal("audit actions", sorted(audit_actions), sorted(f"audit-{i}" for i in range(10)))
+        _pass(results, "Reclassification audit JSONL locked append -> all rows survive")
+
+        # Lock wait: concurrent append waits rather than corrupting
+        lock_wait_path = paths["drive"] / "logs" / "jsonl_lock_wait.jsonl"
+        import threading
+        from core.runtime.jsonl_file_lock import append_jsonl_line, exclusive_jsonl_lock
+
+        started = threading.Event()
+        released = threading.Event()
+
+        def _hold_lock() -> None:
+            with exclusive_jsonl_lock(lock_wait_path):
+                started.set()
+                released.wait(timeout=2.0)
+
+        holder = threading.Thread(target=_hold_lock)
+        holder.start()
+        started.wait(timeout=2.0)
+        t0 = time.monotonic()
+        append_jsonl_line(lock_wait_path, json.dumps({"waiter": True}))
+        elapsed = time.monotonic() - t0
+        released.set()
+        holder.join(timeout=2.0)
+        wait_rows = _valid_jsonl_lines(lock_wait_path)
+        _assert_equal("lock wait one row", len(wait_rows), 1)
+        _assert_true("lock wait blocked", elapsed >= 0.05)
+        _pass(results, "JSONL lock serializes concurrent append (no silent overwrite)")
 
         # Benchmark gens refused as variation/reproduction parents
         bench_meta = {

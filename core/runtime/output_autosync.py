@@ -762,34 +762,76 @@ class OutputAutoSyncService:
                     record.project_output_path = project_path
                 else:
                     record.messages.append("project_mirror_unavailable_or_collision")
-            snapshot = create_generation_snapshot(
-                drive_root=self.drive_root,
-                record=record,
-                dedupe_key=key,
-                provenance=provenance,
-                active_project=self.active_project,
-                index_path=self.generation_index_path,
-                ui_workflow=ui_workflow,
-                api_prompt=api_prompt,
-                runtime_id=self.status.runtime_id,
-                repo_root=self.repo_root,
+
+            from .identity_benchmark_capture import (
+                capture_identity_benchmark_execution,
+                is_identity_benchmark_provenance,
             )
-            record.generation_id = snapshot.generation_id
-            record.snapshot_status = snapshot.snapshot_status
-            record.snapshot_root = str(snapshot.snapshot_root)
-            record.snapshot_manifest_path = str(snapshot.manifest_path)
-            record.snapshot_metadata_path = str(snapshot.metadata_path)
-            record.snapshot_workflow_path = str(snapshot.workflow_path)
-            record.workflow_snapshot_status = snapshot.workflow_snapshot_status
-            if snapshot.error:
-                record.messages.append(f"snapshot_error:{snapshot.error}")
+
+            is_id_bench = is_identity_benchmark_provenance(provenance, ui_workflow)
+            if is_id_bench:
+                # Isolation: do NOT create ordinary generation snapshots/index rows.
+                ledger_path = Path(self.drive_root) / "logs" / "identity_benchmark.jsonl"
+                bench = capture_identity_benchmark_execution(
+                    drive_root=Path(self.drive_root),
+                    ledger_path=ledger_path,
+                    prompt_id=prompt_id,
+                    output_node_id=output_node_id,
+                    output_path=destination_result,
+                    output_sha256=str(record.drive_sha256 or local_hash),
+                    provenance=provenance or ExecutionProvenance(),
+                    ui_workflow=ui_workflow,
+                    local_path=str(local_path),
+                    project_id=record.project_id,
+                )
+                if bench.ok and not bench.skipped_not_benchmark:
+                    record.messages.append("identity_benchmark_ledger_captured")
+                    if bench.skipped_duplicate:
+                        record.messages.append("identity_benchmark_ledger_duplicate")
+                    self.log(
+                        "Identity benchmark ledger: "
+                        + ("; ".join(bench.messages) if bench.messages else "captured")
+                    )
+                else:
+                    for err in bench.errors:
+                        record.messages.append(f"identity_benchmark_capture_error:{err}")
+                        self.log(err)
+                    # Fail closed for benchmark isolation: still mark sync verified for
+                    # the Drive asset, but surface capture failure in status.
+                    if bench.errors:
+                        self.status.last_error = bench.errors[0]
+                record.generation_id = ""
+                record.snapshot_status = "skipped_identity_benchmark"
+            else:
+                snapshot = create_generation_snapshot(
+                    drive_root=self.drive_root,
+                    record=record,
+                    dedupe_key=key,
+                    provenance=provenance,
+                    active_project=self.active_project,
+                    index_path=self.generation_index_path,
+                    ui_workflow=ui_workflow,
+                    api_prompt=api_prompt,
+                    runtime_id=self.status.runtime_id,
+                    repo_root=self.repo_root,
+                )
+                record.generation_id = snapshot.generation_id
+                record.snapshot_status = snapshot.snapshot_status
+                record.snapshot_root = str(snapshot.snapshot_root)
+                record.snapshot_manifest_path = str(snapshot.manifest_path)
+                record.snapshot_metadata_path = str(snapshot.metadata_path)
+                record.snapshot_workflow_path = str(snapshot.workflow_path)
+                record.workflow_snapshot_status = snapshot.workflow_snapshot_status
+                if snapshot.error:
+                    record.messages.append(f"snapshot_error:{snapshot.error}")
             self.ledger.append(record)
             self.processed.add(key)
             self.index.save(self.processed)
             self.status.last_drive_copy = str(destination_result)
             self.status.last_verification = "verified"
             self.status.evidence_status = "verified"
-            self.status.last_error = ""
+            if not (is_id_bench and any("identity_benchmark_capture_error" in m for m in (record.messages or []))):
+                self.status.last_error = ""
             if recovery:
                 self.status.last_recovered_prompt = prompt_id
             self.log(f"Drive copy verified:\n{destination_result}")

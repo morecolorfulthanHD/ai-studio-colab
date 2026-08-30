@@ -41,18 +41,12 @@ class GenerationIndex:
         self.path = path
 
     def append(self, record: GenerationIndexRecord) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        line = json.dumps(record.to_dict(), sort_keys=True, ensure_ascii=False) + "\n"
-        fd, tmp_name = tempfile.mkstemp(prefix=".genidx_", suffix=".tmp", dir=str(self.path.parent))
-        os.close(fd)
-        tmp_path = Path(tmp_name)
-        try:
-            existing = self.path.read_bytes() if self.path.is_file() else b""
-            tmp_path.write_bytes(existing + line.encode("utf-8"))
-            tmp_path.replace(self.path)
-        finally:
-            if tmp_path.exists():
-                tmp_path.unlink(missing_ok=True)
+        from .jsonl_file_lock import append_jsonl_line
+
+        append_jsonl_line(
+            self.path,
+            json.dumps(record.to_dict(), sort_keys=True, ensure_ascii=False),
+        )
 
     def read_all(self) -> list[dict[str, Any]]:
         if not self.path.is_file():

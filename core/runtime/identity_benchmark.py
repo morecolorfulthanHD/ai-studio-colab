@@ -179,15 +179,28 @@ class IdentityBenchmarkRecord:
     character_id: str
     seed: Any = None
     preparation_id: str = ""
+    preparation_kind: str = PREPARATION_KIND_IDENTITY_BENCHMARK
+    workflow_identifier: str = ""
+    prepared_workflow_hash: str = ""
+    character_face_sha256: str = ""
+    character_reference_path: str = ""
+    prompt_id: str = ""
+    output_node_id: str = ""
     output_path: str = ""
     output_sha256: str = ""
+    local_path: str = ""
     success: bool | None = None
     execution_time_seconds: float | None = None
     peak_vram_mb: float | None = None
     human_review: dict[str, str] = field(default_factory=dict)
+    human_review_status: str = "pending"
     notes: list[str] = field(default_factory=list)
     promotion_status: str = "pending"
+    benchmark_run: bool = True
+    capture_idempotence_key: str = ""
+    project_id: str = ""
     package_version: str = PACKAGE_VERSION
+    capture_schema_version: int = 1
     created_at: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -196,15 +209,61 @@ class IdentityBenchmarkRecord:
         return payload
 
 
-def append_identity_benchmark_record(ledger_path: Path, record: IdentityBenchmarkRecord) -> None:
-    ledger_path.parent.mkdir(parents=True, exist_ok=True)
+def _append_identity_benchmark_record_unlocked(
+    ledger_path: Path, record: IdentityBenchmarkRecord
+) -> None:
+    """Append one row. Caller must hold ``exclusive_jsonl_lock(ledger_path)``."""
+    from .jsonl_file_lock import append_jsonl_line_unlocked
+
     if not record.created_at:
         record.created_at = utc_now()
-    line = json.dumps(record.to_dict(), ensure_ascii=False)
-    tmp = ledger_path.with_suffix(ledger_path.suffix + ".tmp")
-    existing = ledger_path.read_text(encoding="utf-8") if ledger_path.is_file() else ""
-    tmp.write_text(existing + line + "\n", encoding="utf-8")
-    tmp.replace(ledger_path)
+    append_jsonl_line_unlocked(ledger_path, json.dumps(record.to_dict(), ensure_ascii=False))
+
+
+def append_identity_benchmark_record(ledger_path: Path, record: IdentityBenchmarkRecord) -> None:
+    """Append one identity benchmark row under the ledger lock."""
+    from .jsonl_file_lock import exclusive_jsonl_lock
+
+    with exclusive_jsonl_lock(ledger_path):
+        _append_identity_benchmark_record_unlocked(ledger_path, record)
+
+
+def append_identity_benchmark_record_if_absent(
+    ledger_path: Path,
+    record: IdentityBenchmarkRecord,
+    *,
+    idempotence_key: str,
+) -> tuple[bool, bool]:
+    """Atomically check idempotence key then append.
+
+    Returns ``(ok, skipped_duplicate)``.
+    """
+    from .jsonl_file_lock import exclusive_jsonl_lock
+
+    key = str(idempotence_key or record.capture_idempotence_key or "").strip()
+    if not key:
+        return False, False
+    if not record.capture_idempotence_key:
+        record.capture_idempotence_key = key
+
+    def _has_key(path: Path, needle: str) -> bool:
+        for row in load_identity_benchmark_records(path):
+            if str(row.get("capture_idempotence_key") or "") == needle:
+                return True
+            legacy = (
+                f"{row.get('prompt_id') or ''}|"
+                f"{row.get('output_node_id') or ''}|"
+                f"{row.get('output_sha256') or ''}"
+            )
+            if legacy == needle:
+                return True
+        return False
+
+    with exclusive_jsonl_lock(ledger_path):
+        if _has_key(ledger_path, key):
+            return True, True
+        _append_identity_benchmark_record_unlocked(ledger_path, record)
+        return True, False
 
 
 def load_identity_benchmark_records(ledger_path: Path) -> list[dict[str, Any]]:
@@ -232,11 +291,20 @@ def format_identity_benchmark_report(records: list[dict[str, Any]]) -> str:
         lines.append("No identity benchmark records found.")
         return "\n".join(lines)
     for row in records:
+        review_status = str(row.get("human_review_status") or "pending")
         lines.append(
             f"- {row.get('candidate')} / {row.get('scenario')} / "
-            f"char={row.get('character_id')} / promotion={row.get('promotion_status')} / "
-            f"success={row.get('success')}"
+            f"char={row.get('character_id')} / prep={row.get('preparation_id') or '—'} / "
+            f"prompt={row.get('prompt_id') or '—'} / "
+            f"success={row.get('success')} / human_review={review_status} / "
+            f"promotion={row.get('promotion_status')}"
         )
+        if row.get("output_path"):
+            lines.append(f"    output: {row.get('output_path')}")
+        if row.get("output_sha256"):
+            lines.append(f"    output_sha256: {str(row.get('output_sha256'))[:16]}…")
+        if row.get("seed") is not None:
+            lines.append(f"    executed_seed: {row.get('seed')}")
     return "\n".join(lines)
 
 
@@ -1531,10 +1599,38 @@ def prepare_identity_benchmark(
         result.errors.extend(bind_errors)
         return result
 
+    # Embed durable ai_studio provenance into the UI workflow so ComfyUI history
+    # carries preparation_id / benchmark_run into autosync capture (extra is ignored
+    # by hash_ui_workflow).
+    bound.setdefault("extra", {})
+    if not isinstance(bound.get("extra"), dict):
+        bound["extra"] = {}
+    # Placeholder hash filled after hashing graph body.
+    bound["extra"]["ai_studio"] = {
+        "preparation_id": preparation_id,
+        "preparation_kind": PREPARATION_KIND_IDENTITY_BENCHMARK,
+        "benchmark_run": True,
+        "benchmark_acknowledged": True,
+        "capability": BENCHMARK_CAPABILITY,
+        "candidate": candidate,
+        "scenario": scenario,
+        "character_id": record.character_id,
+        "workflow_identifier": result.workflow_identifier,
+        "package_version": PACKAGE_VERSION,
+        "prepared_workflow_hash": "",
+        "canonical_workflow_hash": "",
+        "seed": int(seed),
+        "seed_mode": "fixed",
+        "character_face_sha256": file_sha256(archived_face),
+        "character_reference_path": "benchmark_source/primary_face.png",
+    }
+
     workflow_dest = prepared_dir / f"{preparation_id}.workflow.json"
-    workflow_dest.write_text(json.dumps(bound, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     prepared_hash = hash_ui_workflow(bound)
     canonical_hash = hash_ui_workflow(workflow_data)
+    bound["extra"]["ai_studio"]["prepared_workflow_hash"] = prepared_hash
+    bound["extra"]["ai_studio"]["canonical_workflow_hash"] = canonical_hash
+    workflow_dest.write_text(json.dumps(bound, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     created_ts = utc_now()
     drive_root_prepared = drive_prepared_root or _drive_prepared_root(drive_root)
     drive_dir = drive_root_prepared / preparation_id

@@ -177,6 +177,19 @@ def collapse_generations(
                 continue
         if capability and str(row.get("capability") or "") != capability:
             continue
+        # Default ordinary listings hide identity-benchmark / reclassified rows.
+        if not capability:
+            row_cap = str(row.get("capability") or "")
+            row_snap = str(row.get("snapshot_status") or "")
+            if row_cap == "identity_benchmark":
+                continue
+            if row_snap in {
+                "skipped_identity_benchmark",
+                "reclassified_identity_benchmark",
+            }:
+                continue
+            if row.get("benchmark_run") is True:
+                continue
         if workflow and str(row.get("workflow_identifier") or "") != workflow:
             continue
         if model_family and str(row.get("model_family") or "") != model_family:

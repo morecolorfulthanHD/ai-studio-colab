@@ -118,6 +118,7 @@ def collect_files() -> list[Path]:
         "list_characters.py",
         "show_character.py",
         "ensure_reactor_insightface_bridge.py",
+        "recover_identity_benchmark_history.py",
         "prepare_identity_benchmark.py",
         "backfill_identity_benchmark_preparation.py",
         "check_identity_benchmark_deps.py",
