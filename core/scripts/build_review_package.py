@@ -20,6 +20,7 @@ REQUIRED_HANDOFF_FILES = (
     "CHANGED_FILES.md",
     "VALIDATION.md",
     "NEXT_ACTION.md",
+    "LIVE_EVIDENCE.md",
 )
 
 
@@ -118,6 +119,7 @@ def collect_files() -> list[Path]:
         "list_characters.py",
         "show_character.py",
         "ensure_reactor_insightface_bridge.py",
+        "ensure_faceid_runtime_bridge.py",
         "recover_identity_benchmark_history.py",
         "prepare_identity_benchmark.py",
         "backfill_identity_benchmark_preparation.py",

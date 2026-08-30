@@ -772,6 +772,38 @@ def main() -> int:
             file=sys.stderr,
         )
 
+    from core.runtime.faceid_model_bridge import (
+        default_canonical_clip_vision_dir,
+        default_canonical_ipadapter_dir,
+        default_canonical_lora_dir,
+        ensure_faceid_runtime_bridge,
+    )
+
+    print("\nFaceID IPAdapter runtime bridge")
+    print("=" * 40)
+    drive_models = bundle.path("drive_models")
+    faceid_bridge = ensure_faceid_runtime_bridge(
+        comfyui_runtime=bundle.path("comfyui_runtime"),
+        canonical_clip_vision_dir=default_canonical_clip_vision_dir(drive_models),
+        canonical_ipadapter_dir=default_canonical_ipadapter_dir(drive_models),
+        canonical_lora_dir=default_canonical_lora_dir(drive_models),
+        dry_run=dry_run,
+    )
+    for action in faceid_bridge.actions:
+        print(f"  [{action.action}] {action.path}")
+        if action.target:
+            print(f"    -> {action.target}")
+    for msg in faceid_bridge.messages:
+        print(f"  {msg}")
+    for err in faceid_bridge.errors:
+        print(f"  {err}", file=sys.stderr)
+    if not faceid_bridge.ok:
+        print(
+            "  WARN: FaceID runtime bridge not fully verified "
+            "(canonical missing or link failed). Dependency checker will report not ready.",
+            file=sys.stderr,
+        )
+
     if failed > 0:
         print("\nRESULT: WARN — one or more optional node steps failed.", file=sys.stderr)
         return 0

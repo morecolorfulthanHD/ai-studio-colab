@@ -34,6 +34,13 @@ from .reactor_model_bridge import (
     reactor_runtime_buffalo_path,
     reactor_runtime_inswapper_path,
 )
+from .faceid_model_bridge import (
+    assess_faceid_pinned_resolver,
+    assess_faceid_runtime_asset,
+    runtime_clip_vision_path,
+    runtime_ipadapter_discovery_path,
+    runtime_lora_discovery_path,
+)
 from .seed_mode import generate_js_safe_seed, is_js_safe_seed
 from .workflow_library_preparation import _copy_preparation_tree
 
@@ -817,6 +824,176 @@ def assess_reactor_model_readiness(
     return present, missing, integrity_map
 
 
+def assess_faceid_model_readiness(
+    *,
+    bundle_models: list[dict[str, Any]],
+    comfyui_runtime: Path | None,
+    hash_status_callback: Any | None = None,
+) -> tuple[list[str], list[str], dict[str, dict[str, Any]]]:
+    """Canonical Drive integrity + pinned IPAdapter runtime discovery for FaceID assets."""
+    present: list[str] = []
+    missing: list[str] = []
+    integrity_map: dict[str, dict[str, Any]] = {}
+    by_name = {str(entry.get("name") or ""): entry for entry in bundle_models}
+    runtime_root = Path(comfyui_runtime) if comfyui_runtime is not None else None
+
+    runtime_targets: dict[str, tuple[str, Any]] = {
+        "clip_vision_sd15": (
+            "clip_vision",
+            runtime_clip_vision_path(runtime_root) if runtime_root is not None else None,
+        ),
+        "ipadapter_faceid_plusv2_sd15": (
+            "ipadapter",
+            runtime_ipadapter_discovery_path(runtime_root) if runtime_root is not None else None,
+        ),
+        "ipadapter_faceid_plusv2_sd15_lora": (
+            "lora",
+            runtime_lora_discovery_path(runtime_root) if runtime_root is not None else None,
+        ),
+    }
+
+    for name in FACEID_REQUIRED_MODEL_NAMES:
+        entry = by_name.get(name) or {}
+        canonical_raw = str(entry.get("runtime_path") or "").strip()
+        canonical_path = Path(canonical_raw) if canonical_raw else None
+
+        if name == "insightface":
+            reactor_path = (
+                reactor_runtime_buffalo_path(runtime_root) if runtime_root is not None else None
+            )
+            row: dict[str, Any] = {
+                "name": name,
+                "filename": entry.get("filename") or name,
+                "runtime_path": canonical_raw or None,
+                "canonical_path": canonical_raw or None,
+                "faceid_runtime_path": str(reactor_path) if reactor_path is not None else None,
+                "status": INTEGRITY_MISSING,
+                "verified": False,
+                "present": False,
+                "canonical_present": False,
+                "faceid_runtime_status": "RUNTIME_UNCHECKED",
+                "faceid_runtime_verified": False,
+            }
+            if canonical_path is None or not canonical_path.is_file():
+                row["status"] = "CANONICAL_MISSING"
+                integrity_map[name] = row
+                missing.append(name)
+                continue
+            row["canonical_present"] = True
+            row["present"] = True
+            canonical_row = verify_model_asset_integrity(
+                entry, hash_status_callback=hash_status_callback
+            )
+            if not canonical_row.get("verified"):
+                row.update(
+                    {
+                        "status": canonical_row.get("status"),
+                        "expected_sha256": canonical_row.get("expected_sha256"),
+                        "expected_size_bytes": canonical_row.get("expected_size_bytes"),
+                        "actual_sha256": canonical_row.get("actual_sha256"),
+                        "actual_size_bytes": canonical_row.get("actual_size_bytes"),
+                    }
+                )
+                integrity_map[name] = row
+                missing.append(name)
+                continue
+            if reactor_path is None:
+                row["faceid_runtime_status"] = "RUNTIME_PATH_UNKNOWN"
+                row["status"] = "RUNTIME_MISSING"
+                integrity_map[name] = row
+                missing.append(name)
+                continue
+            runtime_assessment = assess_reactor_runtime_asset(
+                canonical_path=canonical_path,
+                runtime_path=reactor_path,
+            )
+            row["faceid_runtime"] = runtime_assessment
+            row["faceid_runtime_status"] = runtime_assessment.get("status")
+            row["faceid_runtime_verified"] = bool(runtime_assessment.get("verified"))
+            row["actual_size_bytes"] = runtime_assessment.get("actual_size_bytes")
+            row["actual_sha256"] = runtime_assessment.get("actual_sha256")
+            row["canonical_size_bytes"] = runtime_assessment.get("canonical_size_bytes")
+            row["canonical_sha256"] = runtime_assessment.get("canonical_sha256")
+            if runtime_assessment.get("verified"):
+                row["status"] = INTEGRITY_VERIFIED
+                row["verified"] = True
+                present.append(name)
+            else:
+                row["status"] = str(runtime_assessment.get("status") or "RUNTIME_MISSING")
+                missing.append(name)
+            integrity_map[name] = row
+            continue
+
+        role, runtime_path = runtime_targets.get(name, ("", None))
+        row = {
+            "name": name,
+            "filename": entry.get("filename") or name,
+            "runtime_path": canonical_raw or None,
+            "canonical_path": canonical_raw or None,
+            "faceid_runtime_path": str(runtime_path) if runtime_path is not None else None,
+            "resolver_role": role,
+            "status": INTEGRITY_MISSING,
+            "verified": False,
+            "present": False,
+            "canonical_present": False,
+            "faceid_runtime_status": "RUNTIME_UNCHECKED",
+            "faceid_runtime_verified": False,
+        }
+        if canonical_path is None or not canonical_path.is_file():
+            row["status"] = "CANONICAL_MISSING"
+            integrity_map[name] = row
+            missing.append(name)
+            continue
+        row["canonical_present"] = True
+        row["present"] = True
+        canonical_row = verify_model_asset_integrity(entry, hash_status_callback=hash_status_callback)
+        if not canonical_row.get("verified"):
+            row.update(
+                {
+                    "status": canonical_row.get("status"),
+                    "expected_sha256": canonical_row.get("expected_sha256"),
+                    "expected_size_bytes": canonical_row.get("expected_size_bytes"),
+                    "actual_sha256": canonical_row.get("actual_sha256"),
+                    "actual_size_bytes": canonical_row.get("actual_size_bytes"),
+                }
+            )
+            integrity_map[name] = row
+            missing.append(name)
+            continue
+        if runtime_path is None:
+            row["faceid_runtime_status"] = "RUNTIME_PATH_UNKNOWN"
+            row["status"] = "RUNTIME_MISSING"
+            integrity_map[name] = row
+            missing.append(name)
+            continue
+        runtime_assessment = assess_faceid_runtime_asset(
+            canonical_path=canonical_path,
+            runtime_path=runtime_path,
+            resolver_role=role,
+            comfyui_runtime=runtime_root,
+        )
+        row["faceid_runtime"] = runtime_assessment
+        row["faceid_runtime_status"] = runtime_assessment.get("status")
+        row["faceid_runtime_verified"] = bool(runtime_assessment.get("verified"))
+        row["actual_size_bytes"] = runtime_assessment.get("actual_size_bytes")
+        row["actual_sha256"] = runtime_assessment.get("actual_sha256")
+        row["canonical_size_bytes"] = runtime_assessment.get("canonical_size_bytes")
+        row["canonical_sha256"] = runtime_assessment.get("canonical_sha256")
+        if runtime_assessment.get("verified"):
+            row["status"] = INTEGRITY_VERIFIED
+            row["verified"] = True
+            present.append(name)
+        else:
+            row["status"] = str(runtime_assessment.get("status") or "RUNTIME_MISSING")
+            missing.append(name)
+        integrity_map[name] = row
+
+    if runtime_root is not None:
+        resolver = assess_faceid_pinned_resolver(runtime_root)
+        integrity_map["_faceid_pinned_resolver"] = resolver
+    return present, missing, integrity_map
+
+
 def _entry_expects_integrity(entry: dict[str, Any]) -> bool:
     if str(entry.get("expected_sha256") or "").strip():
         return True
@@ -1219,6 +1396,16 @@ def assess_identity_benchmark_dependencies(
         object_info_status=object_info_status,
         required_filename=INSWAPPER_FILENAME,
     )
+    faceid_resolver = (
+        assess_faceid_pinned_resolver(resolved_runtime)
+        if resolved_runtime is not None
+        else {
+            "status": "UNCHECKED",
+            "verified": False,
+            "notes": "ComfyUI runtime path unknown; FaceID resolver not checked.",
+            "benchmark_execution_tested": False,
+        }
+    )
 
     report: dict[str, Any] = {
         "package_version": PACKAGE_VERSION,
@@ -1234,6 +1421,15 @@ def assess_identity_benchmark_dependencies(
             "ComfyUI/models/insightface/ directory with file-level bridges so glob + "
             "live object_info advertise inswapper_128.onnx. Directory symlinks to Drive "
             "are rejected because they can pass exists() while glob returns empty."
+        ),
+        "faceid_model_discovery": (
+            "Pinned IPAdapter (a0f451a…) resolves CLIP Vision via "
+            "folder_paths.get_filename_list('clip_vision') + regex in utils.get_clipvision_file; "
+            "FaceID Plus v2 ipadapter/lora via get_ipadapter_file/get_lora_file with "
+            "faceid.plusv2.sd15.* discovery names. extra_model_paths maps ipadapter/loras "
+            "but not clip_vision; canonical Drive filenames do not match pinned regexes. "
+            "Full Launch bridges Drive-canonical assets into ComfyUI/models/{clip_vision,"
+            "ipadapter,loras} with discovery-compatible names before ComfyUI enumerates models."
         ),
         "comfyui_object_info": {
             "status": object_info_status,
@@ -1278,17 +1474,31 @@ def assess_identity_benchmark_dependencies(
                     f"{live_swap.get('notes')}"
                 )
         else:
-            present_m, missing_m, integrity_map = verify_required_model_assets(
-                bundle_models,
-                models,
+            present_m, missing_m, integrity_map = assess_faceid_model_readiness(
+                bundle_models=bundle_models,
+                comfyui_runtime=resolved_runtime,
                 hash_status_callback=hash_status_callback,
             )
             for name in missing_m:
                 row = integrity_map.get(name) or {}
-                if row.get("status") not in {INTEGRITY_MISSING, INTEGRITY_PRESENT, INTEGRITY_VERIFIED}:
+                status = str(row.get("status") or "")
+                if status == "CANONICAL_MISSING":
+                    integrity_failures.append(
+                        f"{name}: Canonical Drive asset MISSING "
+                        f"({row.get('canonical_path') or row.get('runtime_path')})"
+                    )
+                elif status in {INTEGRITY_SIZE_MISMATCH, INTEGRITY_SHA256_MISMATCH}:
                     integrity_failures.append(format_integrity_failure_message(name, row))
-                elif row.get("status") == INTEGRITY_MISSING:
-                    integrity_failures.append(format_integrity_failure_message(name, row))
+                else:
+                    integrity_failures.append(
+                        f"{name}: Canonical Drive asset PRESENT; FaceID runtime discovery "
+                        f"{status} ({row.get('faceid_runtime_path')})"
+                    )
+            if not faceid_resolver.get("verified"):
+                integrity_failures.append(
+                    f"Pinned IPAdapter FaceID resolver: {faceid_resolver.get('status')} — "
+                    f"{faceid_resolver.get('notes')}"
+                )
 
         if cand == CANDIDATE_REACTOR:
             node_row = reactor_node
@@ -1333,6 +1543,7 @@ def assess_identity_benchmark_dependencies(
             lora_row = integrity_map.get("ipadapter_faceid_plusv2_sd15_lora") or {}
             clip_row = integrity_map.get("clip_vision_sd15") or {}
             insight_row = integrity_map.get("insightface") or {}
+            resolver_row = integrity_map.get("_faceid_pinned_resolver") or faceid_resolver
             detail = {
                 "custom_node": FACEID_REQUIRED_NODE,
                 "custom_node_present": bool(node_row.get("present")),
@@ -1349,11 +1560,26 @@ def assess_identity_benchmark_dependencies(
                 "faceid_plusv2_lora": lora_row.get("status") == INTEGRITY_VERIFIED,
                 "clip_vit_h": clip_row.get("status") == INTEGRITY_VERIFIED,
                 "w600k_r50_onnx": insight_row.get("verified", False),
+                "runtime_clip_vision_discovery_status": clip_row.get("faceid_runtime_status"),
+                "runtime_clip_vision_discovery_verified": bool(
+                    clip_row.get("faceid_runtime_verified")
+                ),
+                "runtime_ipadapter_discovery_status": bin_row.get("faceid_runtime_status"),
+                "runtime_ipadapter_discovery_verified": bool(
+                    bin_row.get("faceid_runtime_verified")
+                ),
+                "runtime_lora_discovery_status": lora_row.get("faceid_runtime_status"),
+                "runtime_lora_discovery_verified": bool(lora_row.get("faceid_runtime_verified")),
+                "pinned_resolver_status": resolver_row.get("status"),
+                "pinned_resolver_verified": bool(resolver_row.get("verified")),
+                "pinned_resolver_notes": resolver_row.get("notes") or "",
+                "benchmark_execution_tested": False,
                 "assets": {
                     "ipadapter_faceid_plusv2_sd15": bin_row,
                     "ipadapter_faceid_plusv2_sd15_lora": lora_row,
                     "clip_vision_sd15": clip_row,
                     "insightface_w600k_r50": insight_row,
+                    "pinned_resolver": resolver_row,
                 },
             }
 
@@ -1373,6 +1599,14 @@ def assess_identity_benchmark_dependencies(
         if cand == CANDIDATE_REACTOR:
             # Operational readiness must match ComfyUI's own model enumeration.
             ready = ready and bool(live_swap.get("verified"))
+        elif cand == CANDIDATE_FACEID:
+            ready = ready and bool(faceid_resolver.get("verified"))
+            if resolved_runtime is not None:
+                ready = ready and all(
+                    bool((integrity_map.get(name) or {}).get("faceid_runtime_verified"))
+                    for name in FACEID_REQUIRED_MODEL_NAMES
+                    if name in integrity_map
+                )
         report["candidates"][cand] = {
             "models_present": present_m,
             "models_missing": missing_m,
@@ -1467,6 +1701,12 @@ def prepare_identity_benchmark(
             bundle_models=bundle_models,
             comfyui_runtime=resolved_runtime,
         )
+    elif candidate == CANDIDATE_FACEID:
+        resolved_runtime = _resolve_comfyui_runtime(None, comfyui_custom_nodes)
+        _, missing_models, model_integrity = assess_faceid_model_readiness(
+            bundle_models=bundle_models,
+            comfyui_runtime=resolved_runtime,
+        )
     else:
         _, missing_models, model_integrity = verify_required_model_assets(
             bundle_models, required_models
@@ -1495,6 +1735,22 @@ def prepare_identity_benchmark(
                         f"{status} ({row.get('reactor_runtime_path')}). "
                         "Re-run Full Launch so ensure_reactor_insightface_bridge recreates "
                         "ComfyUI/models/insightface from Drive."
+                    )
+            elif row and candidate == CANDIDATE_FACEID:
+                status = str(row.get("status") or "")
+                if status == "CANONICAL_MISSING":
+                    result.errors.append(
+                        f"{name}: Canonical Drive asset MISSING "
+                        f"({row.get('canonical_path') or row.get('runtime_path')})"
+                    )
+                elif status in {INTEGRITY_SIZE_MISMATCH, INTEGRITY_SHA256_MISMATCH}:
+                    result.errors.append(format_integrity_failure_message(name, row))
+                else:
+                    result.errors.append(
+                        f"{name}: Canonical Drive asset PRESENT; FaceID runtime discovery "
+                        f"{status} ({row.get('faceid_runtime_path')}). "
+                        "Re-run Full Launch so ensure_faceid_runtime_bridge recreates "
+                        "ComfyUI/models/{clip_vision,ipadapter,loras} from Drive."
                     )
             elif row:
                 result.errors.append(format_integrity_failure_message(name, row))

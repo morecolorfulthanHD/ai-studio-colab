@@ -843,6 +843,29 @@ main() {
     fi
   fi
 
+  # Package 4.12: IPAdapter FaceID resolves CLIP Vision via folder_paths clip_vision
+  # (not extra_model_paths) and requires discovery-compatible ipadapter/lora basenames.
+  if [[ -f "${_repo_root}/core/scripts/ensure_faceid_runtime_bridge.py" ]]; then
+    log "Ensuring FaceID file-level runtime bridge (Drive -> ComfyUI/models/{clip_vision,ipadapter,loras})"
+    if [[ "${EXECUTE}" -eq 1 ]]; then
+      "${PYTHON}" "${_repo_root}/core/scripts/ensure_faceid_runtime_bridge.py" \
+        --comfyui-runtime "${COMFYUI_DIR}" \
+        --canonical-clip-vision-dir "${SHARED_MODELS}/clip_vision" \
+        --canonical-ipadapter-dir "${SHARED_MODELS}/ipadapter" \
+        --canonical-lora-dir "${SHARED_MODELS}/loras" \
+        --execute \
+        || log "WARN: FaceID runtime bridge not verified (canonical may be missing; checker stays fail-closed)"
+    else
+      "${PYTHON}" "${_repo_root}/core/scripts/ensure_faceid_runtime_bridge.py" \
+        --comfyui-runtime "${COMFYUI_DIR}" \
+        --canonical-clip-vision-dir "${SHARED_MODELS}/clip_vision" \
+        --canonical-ipadapter-dir "${SHARED_MODELS}/ipadapter" \
+        --canonical-lora-dir "${SHARED_MODELS}/loras" \
+        --dry-run \
+        || log "WARN: FaceID runtime bridge dry-run reported issues"
+    fi
+  fi
+
   phase "Complete"
   log "ComfyUI install/validation complete"
   log "Runtime: ${COMFYUI_DIR}"

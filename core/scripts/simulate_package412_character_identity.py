@@ -66,6 +66,19 @@ from core.runtime.reactor_model_bridge import (
     reactor_runtime_inswapper_path,
     reactor_style_list_swap_models,
 )
+from core.runtime.faceid_model_bridge import (
+    CLIP_VISION_CANONICAL_FILENAME,
+    IPADAPTER_DISCOVERY_FILENAME,
+    LORA_DISCOVERY_FILENAME,
+    assess_faceid_pinned_resolver,
+    default_canonical_clip_vision_dir,
+    default_canonical_ipadapter_dir,
+    default_canonical_lora_dir,
+    ensure_faceid_runtime_bridge,
+    runtime_clip_vision_path,
+    runtime_ipadapter_discovery_path,
+    runtime_lora_discovery_path,
+)
 from core.runtime.registry_loader import RegistryLoader
 
 
@@ -305,6 +318,34 @@ def _faceid_integrity_models(
                 row["expected_size_bytes"] = size_override
         models.append(row)
     return models
+
+
+def _faceid_canonical_dirs(drive: Path) -> tuple[Path, Path, Path]:
+    shared = drive / "models" / "shared"
+    return (
+        default_canonical_clip_vision_dir(shared),
+        default_canonical_ipadapter_dir(shared),
+        default_canonical_lora_dir(shared),
+    )
+
+
+def _ensure_faceid_test_bridges(comfy: Path, drive: Path) -> None:
+    clip_dir, ipa_dir, lora_dir = _faceid_canonical_dirs(drive)
+    ensure_reactor_insightface_bridge(
+        comfyui_runtime=comfy,
+        canonical_insightface_dir=default_canonical_insightface_dir(drive / "models" / "shared"),
+        dry_run=False,
+        require_inswapper=True,
+    )
+    bridge = ensure_faceid_runtime_bridge(
+        comfyui_runtime=comfy,
+        canonical_clip_vision_dir=clip_dir,
+        canonical_ipadapter_dir=ipa_dir,
+        canonical_lora_dir=lora_dir,
+        dry_run=False,
+    )
+    if not bridge.ok:
+        raise AssertionError(f"FaceID test bridge failed: {bridge.errors}")
 
 
 def main() -> int:
@@ -1123,26 +1164,123 @@ def main() -> int:
         )
         _assert_equal("verified count", len(ready_names), 3)
         _assert_equal("verified bin", integrity_ok["ipadapter_faceid_plusv2_sd15"]["status"], INTEGRITY_VERIFIED)
-        _pass(results, "FaceID correct hash/size -> VERIFIED")
+        _pass(results, "FaceID correct hash/size -> VERIFIED (canonical only)")
+
+        # A/G: canonical VERIFIED but runtime discovery missing -> NOT ready (false-positive guard)
+        dep_canonical_only = assess_identity_benchmark_dependencies(
+            bundle_models=verified_models,
+            bundle_nodes=list(bundle.nodes),
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            comfyui_runtime=paths["comfy"],
+            object_info_payload=_reactor_object_info(),
+        )
+        _assert_false(
+            "faceid not ready without runtime bridge",
+            dep_canonical_only["candidates"][CANDIDATE_FACEID]["ready"],
+        )
+        _assert_false(
+            "resolver not verified without bridge",
+            dep_canonical_only["candidates"][CANDIDATE_FACEID]["detail"]["pinned_resolver_verified"],
+        )
+        _pass(results, "Canonical CLIP valid but runtime discovery missing -> FaceID NOT ready")
+
+        # B: runtime file at wrong discovery name -> NOT ready
+        wrong_name = paths["comfy"] / "models" / "clip_vision" / "wrong-clip-name.safetensors"
+        wrong_name.parent.mkdir(parents=True, exist_ok=True)
+        wrong_name.write_bytes((paths["drive"] / "models/shared/clip_vision" / CLIP_VISION_CANONICAL_FILENAME).read_bytes())
+        dep_wrong_name = assess_identity_benchmark_dependencies(
+            bundle_models=verified_models,
+            bundle_nodes=list(bundle.nodes),
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            comfyui_runtime=paths["comfy"],
+            object_info_payload=_reactor_object_info(),
+        )
+        _assert_false("wrong clip discovery name not ready", dep_wrong_name["candidates"][CANDIDATE_FACEID]["ready"])
+        wrong_name.unlink(missing_ok=True)
+        _pass(results, "Runtime CLIP at wrong location/name -> NOT ready")
+
+        # C/E/F: deterministic bridge + reset/recreate + resolver VERIFIED
+        _ensure_faceid_test_bridges(paths["comfy"], paths["drive"])
+        resolver_ok = assess_faceid_pinned_resolver(paths["comfy"])
+        _assert_true("resolver verified with bridge", bool(resolver_ok.get("verified")))
+        _pass(results, "Correct deterministic runtime bridge -> pinned resolver VERIFIED")
+
+        clip_bridge = runtime_clip_vision_path(paths["comfy"])
+        ipa_bridge = runtime_ipadapter_discovery_path(paths["comfy"])
+        lora_bridge = runtime_lora_discovery_path(paths["comfy"])
+        for bridge_path in (clip_bridge, ipa_bridge, lora_bridge):
+            if bridge_path.is_symlink() or bridge_path.is_file():
+                bridge_path.unlink(missing_ok=True)
+        _assert_false("bridges removed after reset sim", clip_bridge.exists())
+        bridge_recreate = ensure_faceid_runtime_bridge(
+            comfyui_runtime=paths["comfy"],
+            canonical_clip_vision_dir=_faceid_canonical_dirs(paths["drive"])[0],
+            canonical_ipadapter_dir=_faceid_canonical_dirs(paths["drive"])[1],
+            canonical_lora_dir=_faceid_canonical_dirs(paths["drive"])[2],
+            dry_run=False,
+        )
+        _assert_true(f"bridge recreate ok ({bridge_recreate.errors})", bridge_recreate.ok)
+        _pass(results, "Full Reset removes ephemeral bridge; recreate restores discovery")
+
+        install_sh = (repo_root / "core/comfyui/install.sh").read_text(encoding="utf-8")
+        faceid_pos = install_sh.find("ensure_faceid_runtime_bridge.py")
+        complete_pos = install_sh.find('phase "Complete"')
+        _assert_true("install.sh wires FaceID bridge", faceid_pos >= 0)
+        _assert_true("FaceID bridge before Complete phase", faceid_pos < complete_pos)
+        _pass(results, "Full Launch ordering: FaceID bridge before ComfyUI Complete phase")
+
+        # D: canonical/runtime SHA mismatch after bridge -> NOT ready
+        canonical_ipa = (
+            paths["drive"] / "models/shared/ipadapter/ip-adapter-faceid-plusv2_sd15.bin"
+        )
+        canonical_ipa_good = canonical_ipa.read_bytes()
+        tampered = runtime_ipadapter_discovery_path(paths["comfy"])
+        if tampered.is_symlink() or tampered.is_file():
+            tampered.unlink()
+        tampered.write_bytes(b"tampered-ipadapter-runtime")
+        dep_tampered = assess_identity_benchmark_dependencies(
+            bundle_models=verified_models,
+            bundle_nodes=list(bundle.nodes),
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            comfyui_runtime=paths["comfy"],
+            object_info_payload=_reactor_object_info(),
+        )
+        _assert_false("tampered runtime not ready", dep_tampered["candidates"][CANDIDATE_FACEID]["ready"])
+        canonical_ipa.write_bytes(canonical_ipa_good)
+        bridge_repair_d = ensure_faceid_runtime_bridge(
+            comfyui_runtime=paths["comfy"],
+            canonical_clip_vision_dir=_faceid_canonical_dirs(paths["drive"])[0],
+            canonical_ipadapter_dir=_faceid_canonical_dirs(paths["drive"])[1],
+            canonical_lora_dir=_faceid_canonical_dirs(paths["drive"])[2],
+            dry_run=False,
+        )
+        _assert_true(f"bridge repair after tamper ({bridge_repair_d.errors})", bridge_repair_d.ok)
+        _pass(results, "Canonical/runtime size or SHA mismatch -> NOT ready")
 
         dep_all_verified = assess_identity_benchmark_dependencies(
             bundle_models=verified_models,
             bundle_nodes=list(bundle.nodes),
             comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            comfyui_runtime=paths["comfy"],
             object_info_payload=_reactor_object_info(),
         )
         _assert_true(
-            "faceid ready when verified",
+            "faceid ready when verified + bridge",
             dep_all_verified["candidates"][CANDIDATE_FACEID]["ready"],
         )
+        _assert_true(
+            "benchmark execution explicitly not tested",
+            dep_all_verified["candidates"][CANDIDATE_FACEID]["detail"]["benchmark_execution_tested"] is False,
+        )
         _assert_true("case c ready when all verified", dep_all_verified["ready_for_case_c"])
-        _pass(results, "All three FaceID assets VERIFIED -> FaceID candidate ready")
+        _pass(results, "FaceID assets VERIFIED + runtime discovery -> candidate ready")
 
         one_bad_models = _faceid_integrity_models(bundle.models, paths["drive"], clip_content=None)
         dep_one_bad = assess_identity_benchmark_dependencies(
             bundle_models=one_bad_models,
             bundle_nodes=list(bundle.nodes),
             comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            comfyui_runtime=paths["comfy"],
             object_info_payload=_reactor_object_info(),
         )
         _assert_false(
@@ -1167,6 +1305,7 @@ def main() -> int:
             bundle_models=one_bad_models,
             bundle_nodes=list(bundle.nodes),
             comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            comfyui_runtime=paths["comfy"],
             object_info_payload=_reactor_object_info(),
         )
         _assert_true(
@@ -1400,6 +1539,46 @@ def main() -> int:
         after_files = {p.name for p in (paths["drive"] / "outputs").glob("identity_benchmark_*")}
         _assert_equal("no extra Drive copies on reuse", before_files, after_files)
         _pass(results, "Verified Drive copy reused without duplication; recovery idempotent")
+
+        # H: failed benchmark execution (no outputs) must not create a success ledger row
+        failed_faceid_hist = {
+            "prompt-faceid-s1-failed": {
+                "prompt": hist_entry["prompt"],
+                "outputs": {},
+                "status": {"completed": False, "status_str": "error"},
+            }
+        }
+        ledger_failed = paths["drive"] / "logs" / "identity_benchmark_failed_faceid.jsonl"
+        rec_failed = recover_identity_benchmarks_from_history(
+            drive_root=paths["drive"],
+            ledger_path=ledger_failed,
+            comfy_output_dir=paths["comfy"] / "output",
+            base_url="http://127.0.0.1:8188",
+            history=failed_faceid_hist,
+            drive_output_dir=paths["drive"] / "outputs",
+            evidence_path=evidence_path,
+        )
+        _assert_equal("failed recovery captured", rec_failed.get("captured"), 0)
+        _assert_equal("failed ledger empty", len(load_identity_benchmark_records(ledger_failed)), 0)
+        _pass(results, "Failed benchmark execution does not become successful benchmark record")
+
+        # I: later successful execution of SAME preparation remains capturable exactly once
+        cap_after_fail = capture_identity_benchmark_execution(
+            drive_root=paths["drive"],
+            ledger_path=ledger,
+            prompt_id="prompt-faceid-s1-success-after-fail",
+            output_node_id="9",
+            output_path=out_file,
+            output_sha256=out_sha,
+            provenance=prov,
+            ui_workflow=prep_wf,
+            local_path=str(out_file),
+            evidence_path=evidence_path,
+            drive_output_dir=paths["drive"] / "outputs",
+        )
+        _assert_true(f"capture after fail ok ({cap_after_fail.errors})", cap_after_fail.ok)
+        _assert_false("not duplicate of prior success", cap_after_fail.skipped_duplicate)
+        _pass(results, "Later successful execution of SAME prep capturable without ambiguity")
 
         # Source disappears after durable copy — benchmark row remains valid
         missed.unlink(missing_ok=True)
