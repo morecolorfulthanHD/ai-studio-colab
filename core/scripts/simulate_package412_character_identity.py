@@ -45,6 +45,7 @@ from core.runtime.identity_benchmark import (
     assess_identity_benchmark_dependencies,
     assess_reactor_model_readiness,
     backfill_identity_benchmark_preparation,
+    fetch_comfy_object_info_with_retry,
     format_identity_benchmark_report,
     is_benchmark_generation_metadata,
     load_identity_benchmark_records,
@@ -82,13 +83,19 @@ from core.runtime.faceid_model_bridge import (
 from core.runtime.registry_loader import RegistryLoader
 
 
-def _reactor_object_info(*, swap_models: list[str] | None = None, include_node: bool = True) -> dict:
+def _reactor_object_info(
+    *,
+    swap_models: list[str] | None = None,
+    include_node: bool = True,
+    include_faceid: bool = True,
+) -> dict:
     """Minimal ComfyUI object_info shaped like pinned ReActorFaceSwap INPUT_TYPES."""
     payload: dict = {
         "CheckpointLoaderSimple": {"input": {"required": {}}},
-        "IPAdapterUnifiedLoaderFaceID": {"input": {"required": {}}},
-        "IPAdapterFaceID": {"input": {"required": {}}},
     }
+    if include_faceid:
+        payload["IPAdapterUnifiedLoaderFaceID"] = {"input": {"required": {}}}
+        payload["IPAdapterFaceID"] = {"input": {"required": {}}}
     if include_node:
         models = list(swap_models) if swap_models is not None else ["inswapper_128.onnx"]
         payload["ReActorFaceSwap"] = {
@@ -214,6 +221,60 @@ def _write_png(path: Path, payload: bytes = b"PK412-FACE") -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     # Minimal non-empty file treated as image bytes for SHA tests (not a decode check).
     path.write_bytes(b"\x89PNG\r\n\x1a\n" + payload)
+
+
+def _git_init_commit(repo: Path) -> str:
+    import os
+    import subprocess
+
+    env = dict(os.environ)
+    env["GIT_AUTHOR_NAME"] = "pk412"
+    env["GIT_AUTHOR_EMAIL"] = "pk412@test"
+    env["GIT_COMMITTER_NAME"] = "pk412"
+    env["GIT_COMMITTER_EMAIL"] = "pk412@test"
+    subprocess.run(["git", "init"], cwd=str(repo), check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "-c", "commit.gpgsign=false", "commit", "-m", "test-pin"],
+        check=True,
+        capture_output=True,
+        env=env,
+    )
+    head = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return head.stdout.strip()
+
+
+def _nodes_pinned_to_live_checkouts(bundle_nodes: list[dict], paths: dict[str, Path]) -> list[dict]:
+    """Init git on the FaceID checkout and align that registry pin to HEAD.
+
+    ReActor is left without a git checkout so existing ReActor pin_ok (present
+    when not determinable) regressions stay intact on the shared temp runtime.
+    """
+    import subprocess
+
+    node_dir = Path(paths["comfy"]) / "custom_nodes" / "ComfyUI_IPAdapter_plus"
+    if not (node_dir / ".git").exists():
+        head = _git_init_commit(node_dir)
+    else:
+        head = subprocess.run(
+            ["git", "-C", str(node_dir), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    out: list[dict] = []
+    for entry in bundle_nodes:
+        row = dict(entry)
+        folder = str(row.get("folder_name") or row.get("name") or "")
+        if folder == "ComfyUI_IPAdapter_plus":
+            row["pinned_commit"] = head
+        out.append(row)
+    return out
 
 
 def _setup_temp_repo(repo_root: Path) -> dict[str, Path]:
@@ -1257,9 +1318,10 @@ def main() -> int:
         _assert_true(f"bridge repair after tamper ({bridge_repair_d.errors})", bridge_repair_d.ok)
         _pass(results, "Canonical/runtime size or SHA mismatch -> NOT ready")
 
+        pinned_nodes = _nodes_pinned_to_live_checkouts(list(bundle.nodes), paths)
         dep_all_verified = assess_identity_benchmark_dependencies(
             bundle_models=verified_models,
-            bundle_nodes=list(bundle.nodes),
+            bundle_nodes=pinned_nodes,
             comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
             comfyui_runtime=paths["comfy"],
             object_info_payload=_reactor_object_info(),
@@ -1272,8 +1334,213 @@ def main() -> int:
             "benchmark execution explicitly not tested",
             dep_all_verified["candidates"][CANDIDATE_FACEID]["detail"]["benchmark_execution_tested"] is False,
         )
+        _assert_true(
+            "live clip discovery verified",
+            dep_all_verified["candidates"][CANDIDATE_FACEID]["detail"]["live_clip_discovery_verified"],
+        )
+        _assert_true(
+            "live node registration verified",
+            dep_all_verified["candidates"][CANDIDATE_FACEID]["detail"]["live_node_registration_verified"],
+        )
         _assert_true("case c ready when all verified", dep_all_verified["ready_for_case_c"])
         _pass(results, "FaceID assets VERIFIED + runtime discovery -> candidate ready")
+
+        # --- FaceID fail-closed live registration / object_info (A–H) ---
+        calls = {"n": 0}
+        slept: list[float] = []
+
+        def _once_timeout_then_ok():
+            calls["n"] += 1
+            if calls["n"] < 3:
+                return "timeout", None, "object_info fetch failed: timed out"
+            return "ok", {"IPAdapterUnifiedLoaderFaceID": {}, "IPAdapterFaceID": {}}, "object_info loaded"
+
+        status, _payload, notes, attempts = fetch_comfy_object_info_with_retry(
+            _once_timeout_then_ok,
+            backoff_seconds=(0.0, 2.0, 4.0),
+            sleeper=lambda s: slept.append(s),
+        )
+        _assert_equal("retry eventually ok", status, "ok")
+        _assert_equal("retry attempts", len(attempts), 3)
+        _assert_equal("retry sleeps", slept, [2.0, 4.0])
+        _assert_true("retry notes mention attempts", "3 attempts" in notes)
+        _pass(results, "object_info bounded retry succeeds without treating mid-flight timeout as VERIFIED")
+
+        def _once_always_timeout():
+            return "timeout", None, "object_info fetch failed: timed out"
+
+        status_to, payload_to, notes_to, attempts_to = fetch_comfy_object_info_with_retry(
+            _once_always_timeout,
+            backoff_seconds=(0.0, 1.0, 1.0),
+            sleeper=lambda _s: None,
+        )
+        _assert_equal("retry exhausted status", status_to, "timeout")
+        _assert_true("retry exhausted payload none", payload_to is None)
+        _assert_equal("retry exhausted attempts", len(attempts_to), 3)
+        _assert_true("fail closed after retries", "fail closed" in notes_to)
+        _pass(results, "object_info timeout after bounded retry remains timeout (not VERIFIED)")
+
+        # A: object_info timeout → registration unchecked → FaceID not ready
+        dep_timeout = assess_identity_benchmark_dependencies(
+            bundle_models=verified_models,
+            bundle_nodes=pinned_nodes,
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            comfyui_runtime=paths["comfy"],
+            object_info_payload={"CheckpointLoaderSimple": {}},
+            object_info_status_override="timeout",
+        )
+        fd_timeout = dep_timeout["candidates"][CANDIDATE_FACEID]
+        _assert_equal("A object_info timeout", dep_timeout["comfyui_object_info"]["status"], "timeout")
+        _assert_equal("A registration unchecked", fd_timeout["detail"]["registration_status"], "unchecked")
+        _assert_false("A live registration not verified", fd_timeout["detail"]["live_node_registration_verified"])
+        _assert_false("A live discovery not verified", fd_timeout["detail"]["live_clip_discovery_verified"])
+        _assert_equal("A live discovery unchecked", fd_timeout["detail"]["live_clip_discovery_status"], "UNCHECKED")
+        _assert_false("A faceid not ready on timeout", fd_timeout["ready"])
+        _pass(results, "A: object_info timeout -> FaceID registration unchecked -> candidate ready NO")
+
+        # B: object_info unavailable + all asset hashes VERIFIED → not ready
+        dep_unavailable = assess_identity_benchmark_dependencies(
+            bundle_models=verified_models,
+            bundle_nodes=pinned_nodes,
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            comfyui_runtime=paths["comfy"],
+            object_info_payload={"CheckpointLoaderSimple": {}},
+            object_info_status_override="error",
+        )
+        fd_unavail = dep_unavailable["candidates"][CANDIDATE_FACEID]
+        _assert_true("B clip hash still verified", fd_unavail["detail"]["clip_vit_h"])
+        _assert_true(
+            "B runtime clip bridge verified",
+            fd_unavail["detail"]["runtime_clip_vision_discovery_verified"],
+        )
+        _assert_false("B faceid not ready when object_info error", fd_unavail["ready"])
+        _pass(results, "B: object_info unavailable but asset hashes VERIFIED -> FaceID candidate ready NO")
+
+        # C: required FaceID node missing from object_info → not ready
+        dep_missing_node = assess_identity_benchmark_dependencies(
+            bundle_models=verified_models,
+            bundle_nodes=pinned_nodes,
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            comfyui_runtime=paths["comfy"],
+            object_info_payload=_reactor_object_info(include_faceid=False),
+        )
+        fd_missing_node = dep_missing_node["candidates"][CANDIDATE_FACEID]
+        _assert_equal(
+            "C registration failed",
+            fd_missing_node["detail"]["registration_status"],
+            "failed",
+        )
+        _assert_false("C faceid not ready missing node", fd_missing_node["ready"])
+        _pass(results, "C: required FaceID node missing from object_info -> candidate ready NO")
+
+        # D: runtime CLIP bridge VERIFIED but live resolver/discovery unchecked → not ready
+        _assert_true(
+            "D bridge verified under timeout",
+            fd_timeout["detail"]["runtime_clip_vision_discovery_verified"],
+        )
+        _assert_false(
+            "D live discovery unchecked despite bridge",
+            fd_timeout["detail"]["live_clip_discovery_verified"],
+        )
+        _assert_false("D not ready", fd_timeout["ready"])
+        _pass(results, "D: runtime CLIP bridge VERIFIED but live resolver UNCHECKED -> candidate ready NO")
+
+        # E: live node registration VERIFIED but runtime resolver fails → not ready
+        clip_bridge = runtime_clip_vision_path(paths["comfy"])
+        if clip_bridge.is_symlink() or clip_bridge.is_file():
+            clip_bridge.unlink()
+        dep_resolver_fail = assess_identity_benchmark_dependencies(
+            bundle_models=verified_models,
+            bundle_nodes=pinned_nodes,
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            comfyui_runtime=paths["comfy"],
+            object_info_payload=_reactor_object_info(),
+        )
+        fd_resolver_fail = dep_resolver_fail["candidates"][CANDIDATE_FACEID]
+        _assert_true(
+            "E live registration verified",
+            fd_resolver_fail["detail"]["live_node_registration_verified"],
+        )
+        _assert_false(
+            "E live discovery not verified",
+            fd_resolver_fail["detail"]["live_clip_discovery_verified"],
+        )
+        _assert_false("E faceid not ready", fd_resolver_fail["ready"])
+        # restore bridge for F
+        dirs = _faceid_canonical_dirs(paths["drive"])
+        restore = ensure_faceid_runtime_bridge(
+            comfyui_runtime=paths["comfy"],
+            canonical_clip_vision_dir=dirs[0],
+            canonical_ipadapter_dir=dirs[1],
+            canonical_lora_dir=dirs[2],
+            dry_run=False,
+        )
+        _assert_true(f"E restore bridge ({restore.errors})", restore.ok)
+        _pass(results, "E: live node registration VERIFIED but runtime resolver fails -> candidate ready NO")
+
+        # F: all integrity + bridge + live registration + resolver VERIFIED → ready YES
+        dep_f = assess_identity_benchmark_dependencies(
+            bundle_models=verified_models,
+            bundle_nodes=pinned_nodes,
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            comfyui_runtime=paths["comfy"],
+            object_info_payload=_reactor_object_info(),
+        )
+        fd_f = dep_f["candidates"][CANDIDATE_FACEID]
+        _assert_true("F live registration", fd_f["detail"]["live_node_registration_verified"])
+        _assert_true("F runtime clip bridge", fd_f["detail"]["runtime_clip_vision_discovery_verified"])
+        _assert_true("F live clip discovery", fd_f["detail"]["live_clip_discovery_verified"])
+        _assert_true("F faceid ready", fd_f["ready"])
+        _assert_false("F execution not tested", fd_f["detail"]["benchmark_execution_tested"])
+        _pass(results, "F: all asset + bridge + live registration + resolver VERIFIED -> candidate ready YES")
+
+        # G: no false-positive ready with any required status unchecked/error/timeout
+        false_positive_cases = []
+        for label, override in (
+            ("timeout", "timeout"),
+            ("error", "error"),
+            ("unreachable", "unreachable"),
+            ("unchecked", "unchecked"),
+        ):
+            dep_g = assess_identity_benchmark_dependencies(
+                bundle_models=verified_models,
+                bundle_nodes=pinned_nodes,
+                comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+                comfyui_runtime=paths["comfy"],
+                object_info_payload={"CheckpointLoaderSimple": {}},
+                object_info_status_override=override,
+            )
+            if dep_g["candidates"][CANDIDATE_FACEID]["ready"]:
+                false_positive_cases.append(label)
+        _assert_equal("G no false-positive FaceID ready", false_positive_cases, [])
+        _pass(results, "G: no FaceID candidate ready=yes with object_info unchecked/error/timeout")
+
+        from io import StringIO
+        from core.scripts.check_identity_benchmark_deps import _print_human
+
+        buf = StringIO()
+        old_stdout = sys.stdout
+        sys.stdout = buf
+        try:
+            _print_human(dep_timeout)
+        finally:
+            sys.stdout = old_stdout
+        printed = buf.getvalue()
+        _assert_true("CLI shows live registration UNCHECKED", "Live FaceID node registration: UNCHECKED" in printed)
+        _assert_true(
+            "CLI shows live CLIP discovery UNCHECKED",
+            "FaceID CLIP resolver/discovery: UNCHECKED" in printed,
+        )
+        faceid_block = printed.split("IPADAPTER FACEID", 1)[-1].split("OVERALL", 1)[0]
+        _assert_true("CLI FaceID candidate ready no", "candidate ready: no" in faceid_block)
+        _assert_true("CLI runtime CLIP bridge visible", "Runtime CLIP Vision bridge:" in printed)
+        _pass(results, "CLI surfaces FaceID runtime/live discovery statuses")
+
+        # H: ready_for_case_c requires BOTH candidates
+        _assert_true("H F case c true when both ready", dep_f["ready_for_case_c"])
+        _assert_false("H timeout case c false", dep_timeout["ready_for_case_c"])
+        _assert_false("H missing FaceID node case c false", dep_missing_node["ready_for_case_c"])
+        _pass(results, "H: ready_for_case_c false unless BOTH ReActor and FaceID satisfy full predicates")
 
         one_bad_models = _faceid_integrity_models(bundle.models, paths["drive"], clip_content=None)
         dep_one_bad = assess_identity_benchmark_dependencies(

@@ -10,10 +10,12 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import socket
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .character_identity import (
     CharacterRecord,
@@ -35,6 +37,8 @@ from .reactor_model_bridge import (
     reactor_runtime_inswapper_path,
 )
 from .faceid_model_bridge import (
+    FACEID_LIVE_NODE_TYPES,
+    assess_faceid_live_discovery,
     assess_faceid_pinned_resolver,
     assess_faceid_runtime_asset,
     runtime_clip_vision_path,
@@ -47,6 +51,12 @@ from .workflow_library_preparation import _copy_preparation_tree
 PACKAGE_VERSION = "4.12"
 PREPARATION_KIND_IDENTITY_BENCHMARK = "identity_benchmark"
 BENCHMARK_CAPABILITY = "identity_benchmark"
+
+# Single /object_info request timeout. Do not raise this to hide a hung backend.
+OBJECT_INFO_REQUEST_TIMEOUT_SECONDS = 8.0
+# Bounded startup retry: Full Launch starts ComfyUI asynchronously; /object_info
+# can time out while custom nodes are still importing. Fail closed if never ok.
+OBJECT_INFO_RETRY_BACKOFF_SECONDS = (0.0, 2.0, 4.0, 8.0, 8.0)
 
 CANDIDATE_REACTOR = "reactor_faceswap_benchmark"
 CANDIDATE_FACEID = "ipadapter_faceid_sd15_benchmark"
@@ -1206,10 +1216,55 @@ def _scan_node_class_mappings(node_dir: Path) -> set[str]:
     return found
 
 
-def _fetch_comfy_object_info(
+def _is_object_info_timeout(exc: BaseException) -> bool:
+    if isinstance(exc, TimeoutError):
+        return True
+    if isinstance(exc, socket.timeout):
+        return True
+    text = str(exc).lower()
+    return "timed out" in text or "timeout" in text
+
+
+def fetch_comfy_object_info_with_retry(
+    fetch_once: Callable[[], tuple[str, dict[str, Any] | None, str]],
+    *,
+    backoff_seconds: tuple[float, ...] = OBJECT_INFO_RETRY_BACKOFF_SECONDS,
+    sleeper: Callable[[float], None] = time.sleep,
+) -> tuple[str, dict[str, Any] | None, str, list[dict[str, Any]]]:
+    """Bounded retry for /object_info during ComfyUI startup. Never maps timeout to ok."""
+    delays = backoff_seconds or (0.0,)
+    attempts: list[dict[str, Any]] = []
+    status, payload, notes = "unchecked", None, "object_info not fetched"
+    for index, delay in enumerate(delays):
+        if delay:
+            sleeper(delay)
+        status, payload, notes = fetch_once()
+        attempts.append(
+            {
+                "attempt": index + 1,
+                "status": status,
+                "notes": notes,
+                "backoff_seconds": delay,
+            }
+        )
+        if status == "ok":
+            if index > 0:
+                notes = f"{notes} after {index + 1} attempts (bounded startup retry)"
+            return status, payload, notes, attempts
+    last = attempts[-1] if attempts else {}
+    notes = (
+        f"{last.get('notes') or notes} after {len(attempts)} attempt(s); "
+        "object_info not verified (fail closed)"
+    )
+    return str(last.get("status") or status), None, notes, attempts
+
+
+def _fetch_comfy_object_info_once(
     base_url: str | None = None,
+    *,
+    request_timeout: float = OBJECT_INFO_REQUEST_TIMEOUT_SECONDS,
 ) -> tuple[str, dict[str, Any] | None, str]:
-    """Return (status, payload|None, notes). status: ok|unreachable|error."""
+    """Return (status, payload|None, notes). status: ok|unreachable|timeout|error."""
     try:
         from .comfyui_userdata import DEFAULT_COMFY_BASE_URL, comfyui_reachable, normalize_comfy_base_url
     except Exception:  # noqa: BLE001
@@ -1220,18 +1275,47 @@ def _fetch_comfy_object_info(
     try:
         import urllib.request
 
-        with urllib.request.urlopen(f"{base.rstrip('/')}/object_info", timeout=8) as resp:
+        with urllib.request.urlopen(
+            f"{base.rstrip('/')}/object_info",
+            timeout=request_timeout,
+        ) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
         if not isinstance(payload, dict):
             return "error", None, "object_info returned non-object"
         return "ok", payload, "object_info loaded"
     except Exception as exc:  # noqa: BLE001
+        if _is_object_info_timeout(exc):
+            return (
+                "timeout",
+                None,
+                f"object_info fetch failed: timed out ({exc})",
+            )
         return "error", None, f"object_info fetch failed: {exc}"
 
 
+def _fetch_comfy_object_info(
+    base_url: str | None = None,
+    *,
+    request_timeout: float = OBJECT_INFO_REQUEST_TIMEOUT_SECONDS,
+    backoff_seconds: tuple[float, ...] | None = None,
+    sleeper: Callable[[float], None] = time.sleep,
+) -> tuple[str, dict[str, Any] | None, str, list[dict[str, Any]]]:
+    """Fetch live /object_info with bounded startup retry. status: ok|unreachable|timeout|error."""
+    delays = backoff_seconds if backoff_seconds is not None else OBJECT_INFO_RETRY_BACKOFF_SECONDS
+
+    def _once() -> tuple[str, dict[str, Any] | None, str]:
+        return _fetch_comfy_object_info_once(base_url, request_timeout=request_timeout)
+
+    return fetch_comfy_object_info_with_retry(
+        _once,
+        backoff_seconds=delays,
+        sleeper=sleeper,
+    )
+
+
 def _fetch_comfy_object_info_keys(base_url: str | None = None) -> tuple[str, set[str] | None, str]:
-    """Return (status, keys|None, notes). status: ok|unreachable|error."""
-    status, payload, notes = _fetch_comfy_object_info(base_url)
+    """Return (status, keys|None, notes). status: ok|unreachable|timeout|error."""
+    status, payload, notes, _attempts = _fetch_comfy_object_info(base_url)
     if status != "ok" or payload is None:
         return status, None, notes
     return status, set(payload.keys()), notes
@@ -1334,7 +1418,7 @@ def node_pin_status(
         else:
             payload["registration_status"] = "ok"
             payload["registration_notes"] = "Required node types present in live ComfyUI object_info."
-    elif object_info_status in {"unreachable", "error", "unchecked"}:
+    elif object_info_status in {"unreachable", "error", "unchecked", "timeout"}:
         if required_node_types and not payload["source_declares_required_types"]:
             payload["registration_status"] = "failed"
             payload["registration_notes"] = (
@@ -1343,8 +1427,8 @@ def node_pin_status(
         else:
             payload["registration_status"] = "unchecked"
             payload["registration_notes"] = (
-                "ComfyUI object_info unavailable; filesystem/source checks only. "
-                "Re-run after ComfyUI is up to verify import/registration."
+                f"ComfyUI object_info {object_info_status}; filesystem/source checks only. "
+                "Live import/registration is not verified."
             )
     return payload
 
@@ -1362,13 +1446,16 @@ def assess_identity_benchmark_dependencies(
     object_info_status_override: str | None = None,
 ) -> dict[str, Any]:
     candidates = [candidate] if candidate else list(LIVE_CANDIDATES)
+    object_info_attempts: list[dict[str, Any]] = []
     if object_info_payload is not None:
         object_info_status = object_info_status_override or "ok"
         object_info = object_info_payload
         object_info_keys = set(object_info.keys())
         object_info_notes = "object_info injected for assessment"
     else:
-        object_info_status, object_info, object_info_notes = _fetch_comfy_object_info(comfyui_base_url)
+        object_info_status, object_info, object_info_notes, object_info_attempts = (
+            _fetch_comfy_object_info(comfyui_base_url)
+        )
         object_info_keys = set(object_info.keys()) if object_info else None
         if object_info_status_override:
             object_info_status = object_info_status_override
@@ -1386,7 +1473,7 @@ def assess_identity_benchmark_dependencies(
         bundle_nodes,
         FACEID_REQUIRED_NODE,
         comfyui_custom_nodes,
-        required_node_types=("IPAdapterUnifiedLoaderFaceID", "IPAdapterFaceID"),
+        required_node_types=FACEID_LIVE_NODE_TYPES,
         object_info_keys=object_info_keys,
         object_info_status=object_info_status,
     )
@@ -1405,6 +1492,12 @@ def assess_identity_benchmark_dependencies(
             "notes": "ComfyUI runtime path unknown; FaceID resolver not checked.",
             "benchmark_execution_tested": False,
         }
+    )
+    faceid_live_discovery = assess_faceid_live_discovery(
+        filesystem_resolver=faceid_resolver,
+        object_info=object_info,
+        object_info_status=object_info_status,
+        required_node_types=FACEID_LIVE_NODE_TYPES,
     )
 
     report: dict[str, Any] = {
@@ -1434,6 +1527,7 @@ def assess_identity_benchmark_dependencies(
         "comfyui_object_info": {
             "status": object_info_status,
             "notes": object_info_notes,
+            "attempts": object_info_attempts,
         },
         "nodes": {
             REACTOR_REQUIRED_NODE: reactor_node,
@@ -1499,6 +1593,20 @@ def assess_identity_benchmark_dependencies(
                     f"Pinned IPAdapter FaceID resolver: {faceid_resolver.get('status')} — "
                     f"{faceid_resolver.get('notes')}"
                 )
+            if not faceid_live_discovery.get("verified"):
+                integrity_failures.append(
+                    f"Live FaceID CLIP resolver/discovery: {faceid_live_discovery.get('status')} — "
+                    f"{faceid_live_discovery.get('notes')}"
+                )
+            if object_info_status != "ok":
+                integrity_failures.append(
+                    f"ComfyUI object_info: {object_info_status} — live FaceID registration not verified"
+                )
+            if faceid_node.get("registration_status") != "ok":
+                integrity_failures.append(
+                    f"Live FaceID node registration: {faceid_node.get('registration_status')} — "
+                    f"{faceid_node.get('registration_notes')}"
+                )
 
         if cand == CANDIDATE_REACTOR:
             node_row = reactor_node
@@ -1544,6 +1652,8 @@ def assess_identity_benchmark_dependencies(
             clip_row = integrity_map.get("clip_vision_sd15") or {}
             insight_row = integrity_map.get("insightface") or {}
             resolver_row = integrity_map.get("_faceid_pinned_resolver") or faceid_resolver
+            live_reg_status = node_row.get("registration_status")
+            live_reg_verified = live_reg_status == "ok"
             detail = {
                 "custom_node": FACEID_REQUIRED_NODE,
                 "custom_node_present": bool(node_row.get("present")),
@@ -1551,8 +1661,13 @@ def assess_identity_benchmark_dependencies(
                 "pinned_revision_determinable": bool(node_row.get("pin_determinable")),
                 "pinned_commit": node_row.get("pinned_commit") or "",
                 "current_commit": node_row.get("current_commit") or "",
-                "registration_status": node_row.get("registration_status"),
+                "registration_status": live_reg_status,
                 "registration_notes": node_row.get("registration_notes"),
+                "live_node_registration_status": (
+                    "VERIFIED" if live_reg_verified else str(live_reg_status or "unchecked").upper()
+                ),
+                "live_node_registration_verified": live_reg_verified,
+                "object_info_status": object_info_status,
                 "faceid_plusv2_bin_status": bin_row.get("status"),
                 "faceid_plusv2_lora_status": lora_row.get("status"),
                 "clip_vit_h_status": clip_row.get("status"),
@@ -1573,6 +1688,9 @@ def assess_identity_benchmark_dependencies(
                 "pinned_resolver_status": resolver_row.get("status"),
                 "pinned_resolver_verified": bool(resolver_row.get("verified")),
                 "pinned_resolver_notes": resolver_row.get("notes") or "",
+                "live_clip_discovery_status": faceid_live_discovery.get("status"),
+                "live_clip_discovery_verified": bool(faceid_live_discovery.get("verified")),
+                "live_clip_discovery_notes": faceid_live_discovery.get("notes") or "",
                 "benchmark_execution_tested": False,
                 "assets": {
                     "ipadapter_faceid_plusv2_sd15": bin_row,
@@ -1580,13 +1698,18 @@ def assess_identity_benchmark_dependencies(
                     "clip_vision_sd15": clip_row,
                     "insightface_w600k_r50": insight_row,
                     "pinned_resolver": resolver_row,
+                    "live_clip_discovery": faceid_live_discovery,
                 },
             }
 
-        registration_ok = node_row.get("registration_status") in {"ok", "unchecked"}
-        pin_ok = bool(node_row.get("pin_match")) if node_row.get("pin_determinable") else bool(
-            node_row.get("present")
-        )
+        if cand == CANDIDATE_FACEID:
+            registration_ok = node_row.get("registration_status") == "ok"
+            pin_ok = bool(node_row.get("pin_determinable") and node_row.get("pin_match"))
+        else:
+            registration_ok = node_row.get("registration_status") in {"ok", "unchecked"}
+            pin_ok = bool(node_row.get("pin_match")) if node_row.get("pin_determinable") else bool(
+                node_row.get("present")
+            )
         if node_row.get("pin_determinable") and not node_row.get("pin_match"):
             pin_ok = False
         ready = (
@@ -1600,13 +1723,19 @@ def assess_identity_benchmark_dependencies(
             # Operational readiness must match ComfyUI's own model enumeration.
             ready = ready and bool(live_swap.get("verified"))
         elif cand == CANDIDATE_FACEID:
-            ready = ready and bool(faceid_resolver.get("verified"))
+            runtime_bridge_ok = True
             if resolved_runtime is not None:
-                ready = ready and all(
+                runtime_bridge_ok = all(
                     bool((integrity_map.get(name) or {}).get("faceid_runtime_verified"))
                     for name in FACEID_REQUIRED_MODEL_NAMES
                     if name in integrity_map
                 )
+            ready = (
+                ready
+                and object_info_status == "ok"
+                and bool(faceid_live_discovery.get("verified"))
+                and runtime_bridge_ok
+            )
         report["candidates"][cand] = {
             "models_present": present_m,
             "models_missing": missing_m,

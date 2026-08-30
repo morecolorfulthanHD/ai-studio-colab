@@ -53,6 +53,15 @@ def _print_asset_status(label: str, row: dict | None) -> None:
             print(f"    path: {path}")
 
 
+def _verified_or_status(status: str | None, *, verified: bool | None = None) -> str:
+    if verified is True:
+        return "VERIFIED"
+    raw = str(status or "UNCHECKED").strip()
+    if raw.lower() in {"ok", "verified"}:
+        return "VERIFIED"
+    return raw.upper() if raw else "UNCHECKED"
+
+
 def _print_human(report: dict) -> None:
     print("AI Studio — Identity Benchmark Dependency Check")
     print("=" * 40)
@@ -62,6 +71,12 @@ def _print_human(report: dict) -> None:
         print(f"FaceID license: {report['faceid_license_note']}")
     oi = report.get("comfyui_object_info") or {}
     print(f"ComfyUI object_info: {oi.get('status')} — {oi.get('notes')}")
+    attempts = oi.get("attempts") or []
+    if attempts:
+        print(
+            f"  object_info attempts: {len(attempts)} "
+            f"(bounded retry; last={attempts[-1].get('status')})"
+        )
     print()
 
     reactor = (report.get("candidates") or {}).get(CANDIDATE_REACTOR) or {}
@@ -126,6 +141,33 @@ def _print_human(report: dict) -> None:
     _print_asset_status("matching LoRA", assets.get("ipadapter_faceid_plusv2_sd15_lora"))
     _print_asset_status("CLIP ViT-H", assets.get("clip_vision_sd15"))
     _print_asset_status("w600k_r50.onnx", assets.get("insightface_w600k_r50"))
+    print(
+        f"  Runtime CLIP Vision bridge: "
+        f"{_verified_or_status(fd.get('runtime_clip_vision_discovery_status'), verified=fd.get('runtime_clip_vision_discovery_verified'))}"
+    )
+    print(
+        f"  Runtime FaceID .bin bridge: "
+        f"{_verified_or_status(fd.get('runtime_ipadapter_discovery_status'), verified=fd.get('runtime_ipadapter_discovery_verified'))}"
+    )
+    print(
+        f"  Runtime FaceID LoRA bridge: "
+        f"{_verified_or_status(fd.get('runtime_lora_discovery_status'), verified=fd.get('runtime_lora_discovery_verified'))}"
+    )
+    print(
+        f"  Live FaceID node registration: "
+        f"{_verified_or_status(fd.get('live_node_registration_status') or fd.get('registration_status'), verified=fd.get('live_node_registration_verified'))}"
+    )
+    print(
+        f"  FaceID CLIP resolver/discovery: "
+        f"{_verified_or_status(fd.get('live_clip_discovery_status'), verified=fd.get('live_clip_discovery_verified'))}"
+    )
+    if fd.get("live_clip_discovery_notes"):
+        print(f"    notes: {fd.get('live_clip_discovery_notes')}")
+    print(
+        "  benchmark execution: not yet tested"
+        if not fd.get("benchmark_execution_tested")
+        else "  benchmark execution: tested"
+    )
     print(f"  candidate ready: {_yn(faceid.get('ready'))}")
     print()
 
@@ -139,7 +181,9 @@ def _print_human(report: dict) -> None:
         "glob discovery and live object_info advertise inswapper_128.onnx. "
         "Filesystem presence alone is not sufficient — live swap_model option must be VERIFIED. "
         "When registry integrity metadata is configured for FaceID, assets must be VERIFIED "
-        "(existence + size + SHA256)."
+        "(existence + size + SHA256). FaceID candidate ready also requires live ComfyUI "
+        "object_info, FaceID node registration, runtime CLIP/IPAdapter/LoRA bridges, and "
+        "pinned CLIP resolver/discovery — unchecked/timeout/error is not ready."
     )
     failures = report.get("integrity_failures") or []
     if failures:
@@ -167,7 +211,8 @@ def main() -> int:
 
     repo_root = args.repo_root.resolve() if args.repo_root else find_repo_root(script_file=Path(__file__))
     bundle = RegistryLoader(repo_root).load_all()
-    comfy = bundle.path("comfyui_runtime") / "custom_nodes"
+    comfyui_runtime = bundle.path("comfyui_runtime")
+    comfy = comfyui_runtime / "custom_nodes"
 
     def _hash_status(filename: str) -> None:
         if not args.json:
@@ -176,7 +221,8 @@ def main() -> int:
     report = assess_identity_benchmark_dependencies(
         bundle_models=list(bundle.models),
         bundle_nodes=list(bundle.nodes),
-        comfyui_custom_nodes=comfy if comfy.parent.is_dir() else None,
+        comfyui_custom_nodes=comfy if comfy.is_dir() else None,
+        comfyui_runtime=comfyui_runtime if comfyui_runtime.is_dir() else None,
         candidate=args.candidate,
         comfyui_base_url=args.comfyui_base_url,
         hash_status_callback=None if args.json else _hash_status,

@@ -37,6 +37,7 @@ LORA_CANONICAL_FILENAME = "ip-adapter-faceid-plusv2_sd15_lora.safetensors"
 IPADAPTER_DISCOVERY_FILENAME = "faceid.plusv2.sd15.bin"
 LORA_DISCOVERY_FILENAME = "faceid.plusv2.sd15.lora.safetensors"
 FACEID_LOADER_NODE_TYPES = ("IPAdapterUnifiedLoaderFaceID",)
+FACEID_LIVE_NODE_TYPES = ("IPAdapterUnifiedLoaderFaceID", "IPAdapterFaceID")
 
 
 @dataclass
@@ -238,6 +239,66 @@ def assess_faceid_pinned_resolver(
     row["notes"] = (
         "Pinned get_clipvision_file / get_ipadapter_file / get_lora_file would resolve "
         f"for preset {preset!r} (runtime discovery only; benchmark execution not tested)."
+    )
+    return row
+
+
+def assess_faceid_live_discovery(
+    *,
+    filesystem_resolver: dict[str, Any],
+    object_info: dict[str, Any] | None,
+    object_info_status: str,
+    required_node_types: tuple[str, ...] = FACEID_LIVE_NODE_TYPES,
+) -> dict[str, Any]:
+    """Live FaceID discovery: object_info node registration + pinned filesystem resolver.
+
+    Filesystem resolver VERIFIED is not sufficient. Without a successful object_info
+    fetch, ComfyUI may not have imported IPAdapter / enumerated clip_vision yet.
+    """
+    row: dict[str, Any] = {
+        "status": "UNCHECKED",
+        "verified": False,
+        "object_info_status": object_info_status,
+        "filesystem_resolver_status": filesystem_resolver.get("status"),
+        "filesystem_resolver_verified": bool(filesystem_resolver.get("verified")),
+        "missing_node_types": [],
+        "notes": "",
+        "benchmark_execution_tested": False,
+    }
+    status = str(object_info_status or "unchecked").strip().lower()
+    if status != "ok" or object_info is None:
+        row["status"] = "UNCHECKED"
+        row["notes"] = (
+            f"Live ComfyUI object_info status={object_info_status}; "
+            "FaceID CLIP resolver/discovery not live-verified."
+        )
+        return row
+
+    missing = [t for t in required_node_types if t not in object_info]
+    row["missing_node_types"] = missing
+    if missing:
+        row["status"] = "MISSING"
+        row["notes"] = (
+            "object_info is available but missing required FaceID node types: "
+            + ", ".join(missing)
+        )
+        return row
+
+    if not filesystem_resolver.get("verified"):
+        row["status"] = str(filesystem_resolver.get("status") or "MISSING")
+        row["notes"] = (
+            "Live FaceID nodes are registered, but the pinned resolver cannot discover "
+            "required CLIP Vision / FaceID Plus v2 files: "
+            f"{filesystem_resolver.get('notes') or filesystem_resolver.get('status')}"
+        )
+        return row
+
+    row["status"] = "VERIFIED"
+    row["verified"] = True
+    row["notes"] = (
+        "Live FaceID node types present in object_info and pinned resolver matches "
+        "CLIP Vision / FaceID Plus v2 files (runtime discovery only; "
+        "benchmark execution not tested)."
     )
     return row
 
