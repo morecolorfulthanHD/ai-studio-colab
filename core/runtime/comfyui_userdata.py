@@ -30,8 +30,10 @@ Does not call /prompt. Performs no browser automation.
 
 from __future__ import annotations
 
+import errno
 import json
 import re
+import socket
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -77,6 +79,37 @@ def userdata_workflows_relpath(filename: str) -> str:
     return f"workflows/{name}"
 
 
+def _normalize_request_error(exc: BaseException) -> str:
+    if isinstance(exc, urllib.error.URLError):
+        reason = exc.reason
+        if reason is not None:
+            return str(reason)
+        return str(exc)
+    return f"{type(exc).__name__}: {exc}"
+
+
+def _is_network_request_error(exc: BaseException) -> bool:
+    if isinstance(exc, (TimeoutError, socket.timeout, urllib.error.URLError)):
+        return True
+    if isinstance(exc, (ConnectionRefusedError, ConnectionResetError, ConnectionAbortedError, BrokenPipeError)):
+        return True
+    if isinstance(exc, OSError):
+        if exc.errno in {
+            errno.ECONNREFUSED,
+            errno.ECONNRESET,
+            errno.ETIMEDOUT,
+            errno.EHOSTUNREACH,
+            errno.ENETUNREACH,
+            errno.EPIPE,
+            errno.ECONNABORTED,
+        }:
+            return True
+        err_text = str(exc).lower()
+        if "timed out" in err_text or "timeout" in err_text:
+            return True
+    return False
+
+
 def _request(
     method: str,
     url: str,
@@ -94,7 +127,13 @@ def _request(
         body = exc.read() if getattr(exc, "fp", None) is not None else b""
         return int(exc.code), body, str(exc)
     except urllib.error.URLError as exc:
-        return 0, b"", str(exc.reason if hasattr(exc, "reason") else exc)
+        return 0, b"", _normalize_request_error(exc)
+    except (TimeoutError, socket.timeout) as exc:
+        return 0, b"", _normalize_request_error(exc)
+    except OSError as exc:
+        if _is_network_request_error(exc):
+            return 0, b"", _normalize_request_error(exc)
+        raise
 
 
 def _api_and_bare(base: str, route_with_query: str) -> list[str]:
@@ -106,13 +145,35 @@ def _api_and_bare(base: str, route_with_query: str) -> list[str]:
     return [f"{base}/api{route}", f"{base}{route}"]
 
 
-def comfyui_reachable(base_url: str | None = None, *, timeout: float = 3.0) -> bool:
+def comfyui_reachability_status(
+    base_url: str | None = None,
+    *,
+    timeout: float = 3.0,
+) -> tuple[str, str]:
+    """Return (status, notes): ok | timeout | unreachable | error."""
     base = normalize_comfy_base_url(base_url)
+    last_err = ""
+    saw_timeout = False
     for url in _api_and_bare(base, "/system_stats"):
-        status, _body, _err = _request("GET", url, timeout=timeout)
+        status, _body, err = _request("GET", url, timeout=timeout)
         if status == 200:
-            return True
-    return False
+            return "ok", ""
+        last_err = err or (f"HTTP {status}" if status else "no response")
+        err_l = last_err.lower()
+        if "timed out" in err_l or "timeout" in err_l:
+            saw_timeout = True
+    if saw_timeout:
+        return "timeout", f"ComfyUI reachability probe timed out ({last_err})"
+    if last_err:
+        err_l = last_err.lower()
+        if any(token in err_l for token in ("refused", "unreachable", "no route", "name or service")):
+            return "unreachable", f"ComfyUI not reachable at {base} ({last_err})"
+    return "error", f"ComfyUI reachability probe failed ({last_err or 'unknown'})"
+
+
+def comfyui_reachable(base_url: str | None = None, *, timeout: float = 3.0) -> bool:
+    status, _notes = comfyui_reachability_status(base_url, timeout=timeout)
+    return status == "ok"
 
 
 def userdata_put_workflow(

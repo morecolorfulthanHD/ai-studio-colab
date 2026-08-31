@@ -1266,31 +1266,43 @@ def _fetch_comfy_object_info_once(
 ) -> tuple[str, dict[str, Any] | None, str]:
     """Return (status, payload|None, notes). status: ok|unreachable|timeout|error."""
     try:
-        from .comfyui_userdata import DEFAULT_COMFY_BASE_URL, comfyui_reachable, normalize_comfy_base_url
+        from .comfyui_userdata import (
+            DEFAULT_COMFY_BASE_URL,
+            _request,
+            comfyui_reachability_status,
+            normalize_comfy_base_url,
+        )
     except Exception:  # noqa: BLE001
         return "error", None, "comfyui helper import failed"
     base = normalize_comfy_base_url(base_url or DEFAULT_COMFY_BASE_URL)
-    if not comfyui_reachable(base):
-        return "unreachable", None, f"ComfyUI not reachable at {base}; registration not live-verified"
-    try:
-        import urllib.request
-
-        with urllib.request.urlopen(
-            f"{base.rstrip('/')}/object_info",
-            timeout=request_timeout,
-        ) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
+    reach_status, reach_notes = comfyui_reachability_status(base)
+    if reach_status != "ok":
+        return (
+            reach_status,
+            None,
+            f"{reach_notes}; registration not live-verified",
+        )
+    status, body, err = _request(
+        "GET",
+        f"{base.rstrip('/')}/object_info",
+        timeout=request_timeout,
+    )
+    if status == 200:
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            return "error", None, f"object_info returned invalid JSON: {exc}"
         if not isinstance(payload, dict):
             return "error", None, "object_info returned non-object"
         return "ok", payload, "object_info loaded"
-    except Exception as exc:  # noqa: BLE001
-        if _is_object_info_timeout(exc):
-            return (
-                "timeout",
-                None,
-                f"object_info fetch failed: timed out ({exc})",
-            )
-        return "error", None, f"object_info fetch failed: {exc}"
+    err_l = (err or "").lower()
+    if "timed out" in err_l or "timeout" in err_l:
+        return (
+            "timeout",
+            None,
+            f"object_info fetch failed: timed out ({err or 'timeout'})",
+        )
+    return "error", None, f"object_info fetch failed: {err or f'HTTP {status}'}"
 
 
 def _fetch_comfy_object_info(

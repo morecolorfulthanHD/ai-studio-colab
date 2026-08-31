@@ -6,10 +6,13 @@ from __future__ import annotations
 import json
 import hashlib
 import shutil
+import socket
 import sys
 import tempfile
+import urllib.error
 import uuid
 from pathlib import Path
+from unittest.mock import patch
 import importlib.util
 
 _activate_path = Path(__file__).resolve().parent / "cli_activate.py"
@@ -55,6 +58,8 @@ from core.runtime.identity_benchmark import (
     verify_model_asset_integrity,
     verify_required_model_assets,
 )
+from core.runtime import identity_benchmark as identity_benchmark_module
+from core.runtime.comfyui_userdata import _request, comfyui_reachability_status
 from core.runtime.prepared_workflow_index import (
     append_preparation_record,
     find_by_preparation_id,
@@ -1344,6 +1349,143 @@ def main() -> int:
         )
         _assert_true("case c ready when all verified", dep_all_verified["ready_for_case_c"])
         _pass(results, "FaceID assets VERIFIED + runtime discovery -> candidate ready")
+
+        # --- ComfyUI network normalization + live timeout fail-closed (req A–F) ---
+        with patch("urllib.request.urlopen", side_effect=TimeoutError("timed out")):
+            status, body, err = _request("GET", "http://127.0.0.1:8188/system_stats", timeout=1.0)
+        _assert_equal("net A status", status, 0)
+        _assert_true("net A err mentions timeout", "timed out" in err.lower())
+        _pass(results, "A: TimeoutError in _request -> normalized error (no escape)")
+
+        with patch("urllib.request.urlopen", side_effect=socket.timeout("timed out")):
+            status, body, err = _request("GET", "http://127.0.0.1:8188/system_stats", timeout=1.0)
+        _assert_equal("net B status", status, 0)
+        _assert_true("net B err mentions timeout", "timeout" in err.lower())
+        _pass(results, "B: socket.timeout in _request -> normalized error")
+
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=urllib.error.URLError("connection refused"),
+        ):
+            status, body, err = _request("GET", "http://127.0.0.1:8188/system_stats", timeout=1.0)
+        _assert_equal("net C urLError status", status, 0)
+        _assert_true("net C urLError err", "refused" in err.lower())
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=ConnectionRefusedError(111, "Connection refused"),
+        ):
+            status, body, err = _request("GET", "http://127.0.0.1:8188/system_stats", timeout=1.0)
+        _assert_equal("net C refused status", status, 0)
+        _pass(results, "C: URLError / ConnectionRefusedError -> normalized error")
+
+        with patch("urllib.request.urlopen", side_effect=TimeoutError("timed out")):
+            reach_status, reach_notes = comfyui_reachability_status(
+                "http://127.0.0.1:8188",
+                timeout=1.0,
+            )
+        _assert_equal("reach timeout status", reach_status, "timeout")
+        _assert_true("reach timeout notes", "timed out" in reach_notes.lower())
+        _pass(results, "comfyui_reachability_status maps timeout without raising")
+
+        reach_calls = {"n": 0}
+
+        def _reach_timeout_then_ok(base, timeout=3.0):
+            reach_calls["n"] += 1
+            if reach_calls["n"] < 2:
+                return "timeout", "ComfyUI reachability probe timed out (timed out)"
+            return "ok", ""
+
+        object_info_json = json.dumps(
+            {"IPAdapterUnifiedLoaderFaceID": {}, "IPAdapterFaceID": {}}
+        ).encode("utf-8")
+
+        def _request_ok_object_info(method, url, **kwargs):
+            if "object_info" in url:
+                return 200, object_info_json, ""
+            return 0, b"", "timed out"
+
+        with patch(
+            "core.runtime.comfyui_userdata.comfyui_reachability_status",
+            _reach_timeout_then_ok,
+        ):
+            with patch("core.runtime.comfyui_userdata._request", _request_ok_object_info):
+                status, payload, notes, attempts = identity_benchmark_module._fetch_comfy_object_info(
+                    backoff_seconds=(0.0, 0.0),
+                    sleeper=lambda _s: None,
+                )
+        _assert_equal("net D retry status", status, "ok")
+        _assert_equal("net D retry attempts", len(attempts), 2)
+        _assert_true("net D payload loaded", isinstance(payload, dict))
+        _pass(results, "D: object_info reachability timeout then success -> bounded retry proceeds")
+
+        with patch.object(
+            identity_benchmark_module,
+            "OBJECT_INFO_RETRY_BACKOFF_SECONDS",
+            (0.0, 0.0, 0.0),
+        ):
+            with patch("urllib.request.urlopen", side_effect=TimeoutError("timed out")):
+                dep_live_timeout = assess_identity_benchmark_dependencies(
+                    bundle_models=verified_models,
+                    bundle_nodes=pinned_nodes,
+                    comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+                    comfyui_runtime=paths["comfy"],
+                )
+        _assert_equal("net E object_info timeout", dep_live_timeout["comfyui_object_info"]["status"], "timeout")
+        _assert_false(
+            "net E reactor not ready",
+            dep_live_timeout["candidates"][CANDIDATE_REACTOR]["ready"],
+        )
+        _assert_false(
+            "net E faceid not ready",
+            dep_live_timeout["candidates"][CANDIDATE_FACEID]["ready"],
+        )
+        _assert_false("net E ready_for_case_c", dep_live_timeout["ready_for_case_c"])
+        _assert_true(
+            "net E reactor registration unchecked/error",
+            dep_live_timeout["candidates"][CANDIDATE_REACTOR]["detail"]["registration_status"]
+            in {"unchecked", "failed"},
+        )
+        _assert_equal(
+            "net E faceid registration unchecked",
+            dep_live_timeout["candidates"][CANDIDATE_FACEID]["detail"]["registration_status"],
+            "unchecked",
+        )
+        _pass(results, "E: all live object_info attempts timeout -> fail-closed report, no traceback")
+
+        programming_error_raised = False
+        try:
+            with patch("urllib.request.urlopen", side_effect=ValueError("programming bug")):
+                _request("GET", "http://127.0.0.1:8188/system_stats", timeout=1.0)
+        except ValueError:
+            programming_error_raised = True
+        _assert_true("net F programming error propagates", programming_error_raised)
+        _pass(results, "F: unexpected ValueError in urlopen is not swallowed")
+
+        from io import StringIO
+        from core.scripts.check_identity_benchmark_deps import main as deps_cli_main
+
+        buf = StringIO()
+        old_stdout = sys.stdout
+        sys.stdout = buf
+        try:
+            with patch.object(
+                identity_benchmark_module,
+                "OBJECT_INFO_RETRY_BACKOFF_SECONDS",
+                (0.0, 0.0),
+            ):
+                with patch("urllib.request.urlopen", side_effect=TimeoutError("timed out")):
+                    exit_code = deps_cli_main()
+        finally:
+            sys.stdout = old_stdout
+        cli_out = buf.getvalue()
+        _assert_equal("CLI exit code on timeout", exit_code, 2)
+        _assert_true("CLI prints object_info timeout", "ComfyUI object_info: timeout" in cli_out)
+        _assert_true("CLI reactor candidate ready no", "candidate ready: no" in cli_out.split("REACTOR", 1)[-1])
+        faceid_cli = cli_out.split("IPADAPTER FACEID", 1)[-1].split("OVERALL", 1)[0]
+        _assert_true("CLI faceid candidate ready no", "candidate ready: no" in faceid_cli)
+        _assert_true("CLI ready_for_case_c false", "ready_for_case_c=False" in cli_out)
+        _assert_false("CLI no traceback", "Traceback" in cli_out)
+        _pass(results, "CLI completes fail-closed report on ComfyUI timeout (no traceback)")
 
         # --- FaceID fail-closed live registration / object_info (A–H) ---
         calls = {"n": 0}
