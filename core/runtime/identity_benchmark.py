@@ -45,6 +45,7 @@ from .faceid_model_bridge import (
     runtime_ipadapter_discovery_path,
     runtime_lora_discovery_path,
 )
+from .faceid_python_deps import INSIGHTFACE_PACKAGE_VERSION, ONNXRUNTIME_MIN_VERSION, assess_faceid_python_runtime
 from .seed_mode import generate_js_safe_seed, is_js_safe_seed
 from .workflow_library_preparation import _copy_preparation_tree
 
@@ -1453,9 +1454,11 @@ def assess_identity_benchmark_dependencies(
     candidate: str | None = None,
     comfyui_base_url: str | None = None,
     comfyui_runtime: Path | None = None,
+    python_executable: str | None = None,
     hash_status_callback: Any | None = None,
     object_info_payload: dict[str, Any] | None = None,
     object_info_status_override: str | None = None,
+    faceid_python_runtime_override: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     candidates = [candidate] if candidate else list(LIVE_CANDIDATES)
     object_info_attempts: list[dict[str, Any]] = []
@@ -1511,6 +1514,11 @@ def assess_identity_benchmark_dependencies(
         object_info_status=object_info_status,
         required_node_types=FACEID_LIVE_NODE_TYPES,
     )
+    faceid_python_runtime = (
+        faceid_python_runtime_override
+        if faceid_python_runtime_override is not None
+        else assess_faceid_python_runtime(python_executable=python_executable)
+    )
 
     report: dict[str, Any] = {
         "package_version": PACKAGE_VERSION,
@@ -1535,6 +1543,13 @@ def assess_identity_benchmark_dependencies(
             "but not clip_vision; canonical Drive filenames do not match pinned regexes. "
             "Full Launch bridges Drive-canonical assets into ComfyUI/models/{clip_vision,"
             "ipadapter,loras} with discovery-compatible names before ComfyUI enumerates models."
+        ),
+        "faceid_python_runtime": (
+            "Pinned IPAdapter FaceID executes utils.insightface_loader lazily "
+            "(from insightface.app import FaceAnalysis) when FACEID PLUS V2 loads. "
+            "object_info registration does not import insightface. Full Launch installs "
+            f"insightface=={INSIGHTFACE_PACKAGE_VERSION} and onnxruntime>={ONNXRUNTIME_MIN_VERSION} "
+            "into the ComfyUI Python interpreter before dependency checking."
         ),
         "comfyui_object_info": {
             "status": object_info_status,
@@ -1618,6 +1633,11 @@ def assess_identity_benchmark_dependencies(
                 integrity_failures.append(
                     f"Live FaceID node registration: {faceid_node.get('registration_status')} — "
                     f"{faceid_node.get('registration_notes')}"
+                )
+            if not faceid_python_runtime.get("verified"):
+                integrity_failures.append(
+                    f"InsightFace Python module: {faceid_python_runtime.get('status')} — "
+                    f"{faceid_python_runtime.get('notes')}"
                 )
 
         if cand == CANDIDATE_REACTOR:
@@ -1703,6 +1723,10 @@ def assess_identity_benchmark_dependencies(
                 "live_clip_discovery_status": faceid_live_discovery.get("status"),
                 "live_clip_discovery_verified": bool(faceid_live_discovery.get("verified")),
                 "live_clip_discovery_notes": faceid_live_discovery.get("notes") or "",
+                "insightface_python_status": faceid_python_runtime.get("status"),
+                "insightface_python_verified": bool(faceid_python_runtime.get("verified")),
+                "insightface_python_notes": faceid_python_runtime.get("notes") or "",
+                "insightface_python_executable": faceid_python_runtime.get("python_executable") or "",
                 "benchmark_execution_tested": False,
                 "assets": {
                     "ipadapter_faceid_plusv2_sd15": bin_row,
@@ -1711,6 +1735,7 @@ def assess_identity_benchmark_dependencies(
                     "insightface_w600k_r50": insight_row,
                     "pinned_resolver": resolver_row,
                     "live_clip_discovery": faceid_live_discovery,
+                    "insightface_python_runtime": faceid_python_runtime,
                 },
             }
 
@@ -1746,6 +1771,7 @@ def assess_identity_benchmark_dependencies(
                 ready
                 and object_info_status == "ok"
                 and bool(faceid_live_discovery.get("verified"))
+                and bool(faceid_python_runtime.get("verified"))
                 and runtime_bridge_ok
             )
         report["candidates"][cand] = {

@@ -804,6 +804,21 @@ def main() -> int:
             file=sys.stderr,
         )
 
+    from core.runtime.faceid_python_deps import ensure_faceid_python_runtime
+
+    print("\nFaceID Python runtime (insightface + onnxruntime)")
+    print("=" * 40)
+    py_result = ensure_faceid_python_runtime(python_executable=sys.executable, dry_run=dry_run)
+    for msg in py_result.messages:
+        print(f"  {msg}")
+    for err in py_result.errors:
+        print(f"  {err}", file=sys.stderr)
+    if not py_result.ok and not dry_run:
+        print(
+            "  WARN: FaceID Python runtime not verified. Dependency checker will report not ready.",
+            file=sys.stderr,
+        )
+
     if failed > 0:
         print("\nRESULT: WARN — one or more optional node steps failed.", file=sys.stderr)
         return 0

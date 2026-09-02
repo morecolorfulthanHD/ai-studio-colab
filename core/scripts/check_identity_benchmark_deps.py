@@ -164,6 +164,14 @@ def _print_human(report: dict) -> None:
     if fd.get("live_clip_discovery_notes"):
         print(f"    notes: {fd.get('live_clip_discovery_notes')}")
     print(
+        f"  InsightFace Python module: "
+        f"{_verified_or_status(fd.get('insightface_python_status'), verified=fd.get('insightface_python_verified'))}"
+    )
+    if fd.get("insightface_python_notes"):
+        print(f"    notes: {fd.get('insightface_python_notes')}")
+    if fd.get("insightface_python_executable"):
+        print(f"    python: {fd.get('insightface_python_executable')}")
+    print(
         "  benchmark execution: not yet tested"
         if not fd.get("benchmark_execution_tested")
         else "  benchmark execution: tested"
@@ -182,8 +190,9 @@ def _print_human(report: dict) -> None:
         "Filesystem presence alone is not sufficient — live swap_model option must be VERIFIED. "
         "When registry integrity metadata is configured for FaceID, assets must be VERIFIED "
         "(existence + size + SHA256). FaceID candidate ready also requires live ComfyUI "
-        "object_info, FaceID node registration, runtime CLIP/IPAdapter/LoRA bridges, and "
-        "pinned CLIP resolver/discovery — unchecked/timeout/error is not ready."
+        "object_info, FaceID node registration, runtime CLIP/IPAdapter/LoRA bridges, "
+        "pinned CLIP resolver/discovery, and importable insightface/onnxruntime in the "
+        "ComfyUI Python interpreter — unchecked/timeout/error is not ready."
     )
     failures = report.get("integrity_failures") or []
     if failures:

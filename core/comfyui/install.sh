@@ -866,6 +866,22 @@ main() {
     fi
   fi
 
+  # Package 4.12: pinned IPAdapter FaceID requires lazy insightface import at execution.
+  if [[ -f "${_repo_root}/core/scripts/ensure_faceid_python_deps.py" ]]; then
+    log "Ensuring FaceID Python runtime (insightface + onnxruntime in ComfyUI interpreter)"
+    if [[ "${EXECUTE}" -eq 1 ]]; then
+      "${PYTHON}" "${_repo_root}/core/scripts/ensure_faceid_python_deps.py" \
+        --python "${PYTHON}" \
+        --execute \
+        || die "FaceID Python runtime dependency install/verify failed"
+    else
+      "${PYTHON}" "${_repo_root}/core/scripts/ensure_faceid_python_deps.py" \
+        --python "${PYTHON}" \
+        --dry-run \
+        || log "WARN: FaceID Python runtime dry-run reported issues"
+    fi
+  fi
+
   phase "Complete"
   log "ComfyUI install/validation complete"
   log "Runtime: ${COMFYUI_DIR}"

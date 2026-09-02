@@ -88,6 +88,26 @@ from core.runtime.faceid_model_bridge import (
 from core.runtime.registry_loader import RegistryLoader
 
 
+def _faceid_python_runtime_row(
+    *,
+    verified: bool,
+    status: str,
+    notes: str,
+    python_executable: str | None = None,
+) -> dict:
+    return {
+        "status": status,
+        "verified": verified,
+        "notes": notes,
+        "python_executable": python_executable or sys.executable,
+        "insightface_version": "0.7.3" if verified else None,
+        "onnxruntime_version": "1.16.3" if verified else None,
+        "providers": ["CPUExecutionProvider"] if verified else [],
+        "required_provider": "CPU",
+        "benchmark_execution_tested": False,
+    }
+
+
 def _reactor_object_info(
     *,
     swap_models: list[str] | None = None,
@@ -419,6 +439,16 @@ def main() -> int:
     repo_root = Path(__file__).resolve().parents[2]
     bundle = RegistryLoader(repo_root).load_all()
     paths = _setup_temp_repo(repo_root)
+
+    faceid_python_default = patch(
+        "core.runtime.identity_benchmark.assess_faceid_python_runtime",
+        return_value=_faceid_python_runtime_row(
+            verified=True,
+            status="VERIFIED",
+            notes="simulation default: insightface importable in ComfyUI interpreter",
+        ),
+    )
+    faceid_python_default.start()
 
     try:
         # Character register / list / verify
@@ -1487,6 +1517,161 @@ def main() -> int:
         _assert_false("CLI no traceback", "Traceback" in cli_out)
         _pass(results, "CLI completes fail-closed report on ComfyUI timeout (no traceback)")
 
+        # --- FaceID Python runtime dependency (insightface module) A-J ---
+        from subprocess import CompletedProcess
+
+        from core.runtime.faceid_python_deps import assess_faceid_python_runtime, ensure_faceid_python_runtime
+
+        _python_missing = _faceid_python_runtime_row(
+            verified=False,
+            status="MISSING",
+            notes="No module named 'insightface'",
+        )
+        dep_py_a = assess_identity_benchmark_dependencies(
+            bundle_models=verified_models,
+            bundle_nodes=pinned_nodes,
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            comfyui_runtime=paths["comfy"],
+            object_info_payload=_reactor_object_info(),
+            faceid_python_runtime_override=_python_missing,
+        )
+        _assert_false("A faceid not ready without python", dep_py_a["candidates"][CANDIDATE_FACEID]["ready"])
+        _assert_false("A case c false", dep_py_a["ready_for_case_c"])
+        _pass(results, "A: InsightFace Python module absent -> FaceID candidate ready NO")
+
+        dep_py_b = assess_identity_benchmark_dependencies(
+            bundle_models=verified_models,
+            bundle_nodes=pinned_nodes,
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            comfyui_runtime=paths["comfy"],
+            object_info_payload=_reactor_object_info(),
+            faceid_python_runtime_override=_python_missing,
+        )
+        fd_b = dep_py_b["candidates"][CANDIDATE_FACEID]
+        _assert_true("B w600k asset verified", fd_b["detail"]["w600k_r50_onnx"])
+        _assert_false("B faceid not ready", fd_b["ready"])
+        _pass(results, "B: w600k VERIFIED but Python module absent -> FaceID candidate ready NO")
+
+        probe_calls: list[str] = []
+
+        def _probe_by_exe(exe, **kwargs):
+            probe_calls.append(exe)
+            if exe == sys.executable:
+                return True, {
+                    "ok": True,
+                    "insightface_version": "0.7.3",
+                    "onnxruntime_version": "1.16.3",
+                    "providers": ["CPUExecutionProvider"],
+                }, ""
+            return False, {"error": "No module named 'insightface'"}, "No module named 'insightface'"
+
+        with patch("core.runtime.faceid_python_deps._run_python_probe", side_effect=_probe_by_exe):
+            wrong = assess_faceid_python_runtime(python_executable=r"C:\wrong\python.exe")
+            ok = assess_faceid_python_runtime(python_executable=sys.executable)
+        _assert_false("C wrong interpreter verified", wrong["verified"])
+        _assert_true("C correct interpreter verified", ok["verified"])
+        _pass(results, "C: module tested under wrong interpreter does not count as verified")
+
+        pip_calls: list[list[str]] = []
+        probe_state = {"n": 0}
+
+        def _install_probe_run(cmd, **kwargs):
+            if len(cmd) >= 3 and cmd[1] == "-c":
+                probe_state["n"] += 1
+                if probe_state["n"] == 1:
+                    return CompletedProcess(
+                        args=cmd,
+                        returncode=1,
+                        stdout='{"ok": false, "error": "No module named \'insightface\'"}',
+                        stderr="",
+                    )
+                return CompletedProcess(
+                    args=cmd,
+                    returncode=0,
+                    stdout=(
+                        '{"ok": true, "insightface_version": "0.7.3", '
+                        '"onnxruntime_version": "1.16.3", "providers": ["CPUExecutionProvider"]}'
+                    ),
+                    stderr="",
+                )
+            if len(cmd) >= 3 and cmd[1] == "-m" and cmd[2] == "pip":
+                pip_calls.append(list(cmd))
+                return CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+            raise AssertionError(f"unexpected subprocess.run: {cmd}")
+
+        with patch("core.runtime.faceid_python_deps.subprocess.run", side_effect=_install_probe_run):
+            install_result = ensure_faceid_python_runtime(
+                python_executable=sys.executable,
+                dry_run=False,
+            )
+        _assert_true("D managed install ok", install_result.ok and install_result.installed)
+        _assert_true("D probe verified", install_result.assessment_after.get("verified"))
+        _pass(results, "D: managed installation establishes module readiness VERIFIED")
+
+        probe_state["n"] = 0
+        pip_calls.clear()
+        with patch("core.runtime.faceid_python_deps.subprocess.run", side_effect=_install_probe_run):
+            first = ensure_faceid_python_runtime(python_executable=sys.executable, dry_run=False)
+            second = ensure_faceid_python_runtime(python_executable=sys.executable, dry_run=False)
+        _assert_equal("E pip once", len(pip_calls), 1)
+        _assert_true("E second skipped", second.skipped_already_satisfied)
+        _pass(results, "E: repeated Full Launch/install is idempotent")
+
+        probe_state["n"] = 0
+        pip_calls.clear()
+        with patch("core.runtime.faceid_python_deps.subprocess.run", side_effect=_install_probe_run):
+            reset_launch = ensure_faceid_python_runtime(python_executable=sys.executable, dry_run=False)
+        _assert_true("F restore after reset", reset_launch.ok)
+        _pass(results, "F: Full Reset followed by Full Launch restores managed Python dependency")
+
+        dep_py_g = assess_identity_benchmark_dependencies(
+            bundle_models=verified_models,
+            bundle_nodes=pinned_nodes,
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            comfyui_runtime=paths["comfy"],
+            object_info_payload=_reactor_object_info(),
+            faceid_python_runtime_override=_faceid_python_runtime_row(
+                verified=False,
+                status="IMPORT_ERROR",
+                notes="Unable to import dependency onnxruntime.",
+            ),
+        )
+        _assert_false("G faceid not ready on import error", dep_py_g["candidates"][CANDIDATE_FACEID]["ready"])
+        _pass(results, "G: module import/initialization failure -> fail closed")
+
+        dep_py_h = assess_identity_benchmark_dependencies(
+            bundle_models=verified_models,
+            bundle_nodes=pinned_nodes,
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            comfyui_runtime=paths["comfy"],
+            object_info_payload=_reactor_object_info(),
+            faceid_python_runtime_override=_faceid_python_runtime_row(
+                verified=False,
+                status="UNCHECKED",
+                notes="probe not run under ComfyUI interpreter",
+            ),
+        )
+        _assert_false("H faceid not ready unchecked python", dep_py_h["candidates"][CANDIDATE_FACEID]["ready"])
+        _pass(results, "H: all other FaceID prerequisites VERIFIED but InsightFace module unchecked -> candidate ready NO")
+
+        dep_py_i = assess_identity_benchmark_dependencies(
+            bundle_models=verified_models,
+            bundle_nodes=pinned_nodes,
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            comfyui_runtime=paths["comfy"],
+            object_info_payload=_reactor_object_info(),
+            faceid_python_runtime_override=_faceid_python_runtime_row(
+                verified=True,
+                status="VERIFIED",
+                notes="insightface 0.7.3 importable via ComfyUI interpreter",
+            ),
+        )
+        fd_i = dep_py_i["candidates"][CANDIDATE_FACEID]
+        _assert_true("I faceid ready with python verified", fd_i["ready"])
+        _assert_true("I python verified flag", fd_i["detail"]["insightface_python_verified"])
+        _assert_false("I execution not tested", fd_i["detail"]["benchmark_execution_tested"])
+        _pass(results, "I: prerequisites VERIFIED including Python module -> candidate ready; execution untested")
+
         # --- FaceID fail-closed live registration / object_info (A–H) ---
         calls = {"n": 0}
         slept: list[float] = []
@@ -1632,6 +1817,7 @@ def main() -> int:
         _assert_true("F live registration", fd_f["detail"]["live_node_registration_verified"])
         _assert_true("F runtime clip bridge", fd_f["detail"]["runtime_clip_vision_discovery_verified"])
         _assert_true("F live clip discovery", fd_f["detail"]["live_clip_discovery_verified"])
+        _assert_true("F insightface python", fd_f["detail"]["insightface_python_verified"])
         _assert_true("F faceid ready", fd_f["ready"])
         _assert_false("F execution not tested", fd_f["detail"]["benchmark_execution_tested"])
         _pass(results, "F: all asset + bridge + live registration + resolver VERIFIED -> candidate ready YES")
@@ -1970,6 +2156,36 @@ def main() -> int:
         _assert_equal("failed recovery captured", rec_failed.get("captured"), 0)
         _assert_equal("failed ledger empty", len(load_identity_benchmark_records(ledger_failed)), 0)
         _pass(results, "Failed benchmark execution does not become successful benchmark record")
+
+        # J: both failed FaceID S1 attempts (ClipVision then insightface) stay non-successes
+        for prompt_id, err_note in (
+            ("prompt-faceid-s1-clipvision-fail", "ClipVision model not found"),
+            ("prompt-faceid-s1-insightface-fail", "No module named 'insightface'"),
+        ):
+            failed_hist = {
+                prompt_id: {
+                    "prompt": hist_entry["prompt"],
+                    "outputs": {},
+                    "status": {
+                        "completed": False,
+                        "status_str": "error",
+                        "messages": [err_note],
+                    },
+                }
+            }
+            ledger_j = paths["drive"] / "logs" / f"identity_benchmark_{prompt_id}.jsonl"
+            rec_j = recover_identity_benchmarks_from_history(
+                drive_root=paths["drive"],
+                ledger_path=ledger_j,
+                comfy_output_dir=paths["comfy"] / "output",
+                base_url="http://127.0.0.1:8188",
+                history=failed_hist,
+                drive_output_dir=paths["drive"] / "outputs",
+                evidence_path=evidence_path,
+            )
+            _assert_equal(f"J no capture ({err_note})", rec_j.get("captured"), 0)
+            _assert_equal(f"J ledger empty ({err_note})", len(load_identity_benchmark_records(ledger_j)), 0)
+        _pass(results, "J: both failed FaceID S1 attempts remain non-successes")
 
         # I: later successful execution of SAME preparation remains capturable exactly once
         cap_after_fail = capture_identity_benchmark_execution(
@@ -2739,6 +2955,7 @@ def main() -> int:
         _pass(results, "Prepare path explicitly disclaims quality benchmarking")
 
     finally:
+        faceid_python_default.stop()
         shutil.rmtree(paths["drive"], ignore_errors=True)
         shutil.rmtree(paths["runtime"], ignore_errors=True)
         shutil.rmtree(paths["comfy"], ignore_errors=True)
