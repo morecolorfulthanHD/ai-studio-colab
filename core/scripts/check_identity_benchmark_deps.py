@@ -140,7 +140,27 @@ def _print_human(report: dict) -> None:
     _print_asset_status("FaceID Plus v2 .bin", assets.get("ipadapter_faceid_plusv2_sd15"))
     _print_asset_status("matching LoRA", assets.get("ipadapter_faceid_plusv2_sd15_lora"))
     _print_asset_status("CLIP ViT-H", assets.get("clip_vision_sd15"))
-    _print_asset_status("w600k_r50.onnx", assets.get("insightface_w600k_r50"))
+    _print_asset_status("w600k_r50.onnx (recognition)", assets.get("insightface_w600k_r50"))
+    _print_asset_status("det_10g.onnx (detection)", assets.get("insightface_buffalo_det"))
+    buffalo_rt = assets.get("insightface_buffalo_runtime") or {}
+    print(
+        f"  InsightFace buffalo_l runtime: "
+        f"{_verified_or_status(fd.get('insightface_buffalo_runtime_status'), verified=fd.get('insightface_buffalo_runtime_verified'))}"
+    )
+    print(
+        f"    Detection model: "
+        f"{_verified_or_status(fd.get('insightface_buffalo_detection_status'), verified=fd.get('insightface_buffalo_detection_verified'))}"
+    )
+    print(
+        f"    Recognition model: "
+        f"{_verified_or_status(fd.get('insightface_buffalo_recognition_status'), verified=fd.get('insightface_buffalo_recognition_verified'))}"
+    )
+    print(
+        f"    FaceAnalysis initialization: "
+        f"{_verified_or_status(fd.get('insightface_buffalo_initialization_status'), verified=fd.get('insightface_buffalo_initialization_verified'))}"
+    )
+    if fd.get("insightface_buffalo_notes"):
+        print(f"    notes: {fd.get('insightface_buffalo_notes')}")
     print(
         f"  Runtime CLIP Vision bridge: "
         f"{_verified_or_status(fd.get('runtime_clip_vision_discovery_status'), verified=fd.get('runtime_clip_vision_discovery_verified'))}"
@@ -191,8 +211,9 @@ def _print_human(report: dict) -> None:
         "When registry integrity metadata is configured for FaceID, assets must be VERIFIED "
         "(existence + size + SHA256). FaceID candidate ready also requires live ComfyUI "
         "object_info, FaceID node registration, runtime CLIP/IPAdapter/LoRA bridges, "
-        "pinned CLIP resolver/discovery, and importable insightface/onnxruntime in the "
-        "ComfyUI Python interpreter — unchecked/timeout/error is not ready."
+        "pinned CLIP resolver/discovery, importable insightface/onnxruntime, complete buffalo_l "
+        "(det_10g detection + w600k_r50 recognition) with FaceAnalysis initialization verified "
+        "under the ComfyUI interpreter — unchecked/timeout/error is not ready."
     )
     failures = report.get("integrity_failures") or []
     if failures:

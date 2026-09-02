@@ -804,6 +804,34 @@ def main() -> int:
             file=sys.stderr,
         )
 
+    from core.runtime.faceid_buffalo_bridge import (
+        default_canonical_insightface_dir as buffalo_canonical_dir,
+        ensure_faceid_buffalo_bridge,
+    )
+
+    print("\nFaceID buffalo_l InsightFace runtime bridge")
+    print("=" * 40)
+    buffalo_bridge = ensure_faceid_buffalo_bridge(
+        comfyui_runtime=bundle.path("comfyui_runtime"),
+        canonical_insightface_dir=buffalo_canonical_dir(bundle.path("drive_models")),
+        bundle_models=list(bundle.models),
+        dry_run=dry_run,
+    )
+    for action in buffalo_bridge.actions:
+        print(f"  [{action.action}] {action.path}")
+        if action.target:
+            print(f"    -> {action.target}")
+    for msg in buffalo_bridge.messages:
+        print(f"  {msg}")
+    for err in buffalo_bridge.errors:
+        print(f"  {err}", file=sys.stderr)
+    if not buffalo_bridge.ok:
+        print(
+            "  WARN: FaceID buffalo_l bridge not fully verified "
+            "(det_10g and/or w600k missing). Dependency checker will report not ready.",
+            file=sys.stderr,
+        )
+
     from core.runtime.faceid_python_deps import ensure_faceid_python_runtime
 
     print("\nFaceID Python runtime (insightface + onnxruntime)")

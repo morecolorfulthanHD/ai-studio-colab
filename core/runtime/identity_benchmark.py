@@ -36,6 +36,13 @@ from .reactor_model_bridge import (
     reactor_runtime_buffalo_path,
     reactor_runtime_inswapper_path,
 )
+from .faceid_buffalo_bridge import (
+    BUFFALO_L_PACK_NAME,
+    RECOGNITION_FILENAME,
+    assess_faceid_buffalo_runtime,
+    canonical_buffalo_artifact_path,
+    runtime_buffalo_artifact_path,
+)
 from .faceid_model_bridge import (
     FACEID_LIVE_NODE_TYPES,
     assess_faceid_live_discovery,
@@ -116,6 +123,7 @@ FACEID_REQUIRED_MODEL_NAMES = (
     "ipadapter_faceid_plusv2_sd15_lora",
     "clip_vision_sd15",
     "insightface",
+    "insightface_buffalo_det",
 )
 REACTOR_REQUIRED_MODEL_NAMES = ("insightface", "reactor_inswapper_128")
 FACEID_REQUIRED_NODE = "ComfyUI_IPAdapter_plus"
@@ -935,6 +943,77 @@ def assess_faceid_model_readiness(
             integrity_map[name] = row
             continue
 
+        if name == "insightface_buffalo_det":
+            det_filename = str(entry.get("filename") or "det_10g.onnx")
+            buffalo_path = (
+                runtime_buffalo_artifact_path(runtime_root, det_filename)
+                if runtime_root is not None
+                else None
+            )
+            row: dict[str, Any] = {
+                "name": name,
+                "filename": det_filename,
+                "runtime_path": canonical_raw or None,
+                "canonical_path": canonical_raw or None,
+                "faceid_runtime_path": str(buffalo_path) if buffalo_path is not None else None,
+                "status": INTEGRITY_MISSING,
+                "verified": False,
+                "present": False,
+                "canonical_present": False,
+                "faceid_runtime_status": "RUNTIME_UNCHECKED",
+                "faceid_runtime_verified": False,
+                "task": "detection",
+            }
+            if canonical_path is None or not canonical_path.is_file():
+                row["status"] = "CANONICAL_MISSING"
+                integrity_map[name] = row
+                missing.append(name)
+                continue
+            row["canonical_present"] = True
+            row["present"] = True
+            canonical_row = verify_model_asset_integrity(
+                entry, hash_status_callback=hash_status_callback
+            )
+            if not canonical_row.get("verified"):
+                row.update(
+                    {
+                        "status": canonical_row.get("status"),
+                        "expected_sha256": canonical_row.get("expected_sha256"),
+                        "expected_size_bytes": canonical_row.get("expected_size_bytes"),
+                        "actual_sha256": canonical_row.get("actual_sha256"),
+                        "actual_size_bytes": canonical_row.get("actual_size_bytes"),
+                    }
+                )
+                integrity_map[name] = row
+                missing.append(name)
+                continue
+            if buffalo_path is None:
+                row["faceid_runtime_status"] = "RUNTIME_PATH_UNKNOWN"
+                row["status"] = "RUNTIME_MISSING"
+                integrity_map[name] = row
+                missing.append(name)
+                continue
+            runtime_assessment = assess_reactor_runtime_asset(
+                canonical_path=canonical_path,
+                runtime_path=buffalo_path,
+            )
+            row["faceid_runtime"] = runtime_assessment
+            row["faceid_runtime_status"] = runtime_assessment.get("status")
+            row["faceid_runtime_verified"] = bool(runtime_assessment.get("verified"))
+            row["actual_size_bytes"] = runtime_assessment.get("actual_size_bytes")
+            row["actual_sha256"] = runtime_assessment.get("actual_sha256")
+            row["canonical_size_bytes"] = runtime_assessment.get("canonical_size_bytes")
+            row["canonical_sha256"] = runtime_assessment.get("canonical_sha256")
+            if runtime_assessment.get("verified"):
+                row["status"] = INTEGRITY_VERIFIED
+                row["verified"] = True
+                present.append(name)
+            else:
+                row["status"] = str(runtime_assessment.get("status") or "RUNTIME_MISSING")
+                missing.append(name)
+            integrity_map[name] = row
+            continue
+
         role, runtime_path = runtime_targets.get(name, ("", None))
         row = {
             "name": name,
@@ -1446,6 +1525,27 @@ def node_pin_status(
     return payload
 
 
+def _canonical_insightface_dir_from_models(bundle_models: list[dict[str, Any]]) -> Path | None:
+    """Derive Drive canonical insightface root from registry runtime_path metadata."""
+    entry = next(
+        (m for m in bundle_models if str(m.get("name") or "") == "insightface"),
+        None,
+    )
+    if entry is None:
+        return None
+    raw = str(entry.get("runtime_path") or "").strip()
+    if not raw:
+        return None
+    path = Path(raw)
+    if (
+        path.name == RECOGNITION_FILENAME
+        and path.parent.name == BUFFALO_L_PACK_NAME
+        and path.parent.parent.name == "models"
+    ):
+        return path.parent.parent.parent
+    return path.parent
+
+
 def assess_identity_benchmark_dependencies(
     *,
     bundle_models: list[dict[str, Any]],
@@ -1459,6 +1559,7 @@ def assess_identity_benchmark_dependencies(
     object_info_payload: dict[str, Any] | None = None,
     object_info_status_override: str | None = None,
     faceid_python_runtime_override: dict[str, Any] | None = None,
+    faceid_buffalo_runtime_override: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     candidates = [candidate] if candidate else list(LIVE_CANDIDATES)
     object_info_attempts: list[dict[str, Any]] = []
@@ -1519,6 +1620,30 @@ def assess_identity_benchmark_dependencies(
         if faceid_python_runtime_override is not None
         else assess_faceid_python_runtime(python_executable=python_executable)
     )
+    canonical_insightface_dir = _canonical_insightface_dir_from_models(bundle_models)
+    faceid_buffalo_runtime = (
+        faceid_buffalo_runtime_override
+        if faceid_buffalo_runtime_override is not None
+        else (
+            assess_faceid_buffalo_runtime(
+                bundle_models=bundle_models,
+                canonical_insightface_dir=canonical_insightface_dir,
+                comfyui_runtime=resolved_runtime,
+                python_executable=python_executable,
+            )
+            if canonical_insightface_dir is not None
+            else {
+                "status": "UNCHECKED",
+                "verified": False,
+                "detection_verified": False,
+                "recognition_verified": False,
+                "initialization_verified": False,
+                "initialization_status": "UNCHECKED",
+                "notes": "Canonical InsightFace Drive path unknown; buffalo_l not checked.",
+                "benchmark_execution_tested": False,
+            }
+        )
+    )
 
     report: dict[str, Any] = {
         "package_version": PACKAGE_VERSION,
@@ -1550,6 +1675,14 @@ def assess_identity_benchmark_dependencies(
             "object_info registration does not import insightface. Full Launch installs "
             f"insightface=={INSIGHTFACE_PACKAGE_VERSION} and onnxruntime>={ONNXRUNTIME_MIN_VERSION} "
             "into the ComfyUI Python interpreter before dependency checking."
+        ),
+        "faceid_buffalo_runtime": (
+            "Pinned IPAdapter FaceID initializes FaceAnalysis(name='buffalo_l', "
+            "root=ComfyUI/models/insightface) which glob-loads models/buffalo_l/*.onnx and "
+            "asserts a detection model exists. w600k_r50.onnx alone is insufficient — "
+            "det_10g.onnx (detection) and w600k_r50.onnx (recognition) must be bridged from "
+            "Drive and verified via a bounded FaceAnalysis initialization probe with "
+            "auto-download blocked."
         ),
         "comfyui_object_info": {
             "status": object_info_status,
@@ -1639,6 +1772,14 @@ def assess_identity_benchmark_dependencies(
                     f"InsightFace Python module: {faceid_python_runtime.get('status')} — "
                     f"{faceid_python_runtime.get('notes')}"
                 )
+            if not faceid_buffalo_runtime.get("verified"):
+                integrity_failures.append(
+                    f"InsightFace buffalo_l runtime: {faceid_buffalo_runtime.get('status')} — "
+                    f"detection={faceid_buffalo_runtime.get('detection_status')}, "
+                    f"recognition={faceid_buffalo_runtime.get('recognition_status')}, "
+                    f"initialization={faceid_buffalo_runtime.get('initialization_status')} — "
+                    f"{faceid_buffalo_runtime.get('notes')}"
+                )
 
         if cand == CANDIDATE_REACTOR:
             node_row = reactor_node
@@ -1683,6 +1824,7 @@ def assess_identity_benchmark_dependencies(
             lora_row = integrity_map.get("ipadapter_faceid_plusv2_sd15_lora") or {}
             clip_row = integrity_map.get("clip_vision_sd15") or {}
             insight_row = integrity_map.get("insightface") or {}
+            det_row = integrity_map.get("insightface_buffalo_det") or {}
             resolver_row = integrity_map.get("_faceid_pinned_resolver") or faceid_resolver
             live_reg_status = node_row.get("registration_status")
             live_reg_verified = live_reg_status == "ok"
@@ -1707,6 +1849,24 @@ def assess_identity_benchmark_dependencies(
                 "faceid_plusv2_lora": lora_row.get("status") == INTEGRITY_VERIFIED,
                 "clip_vit_h": clip_row.get("status") == INTEGRITY_VERIFIED,
                 "w600k_r50_onnx": insight_row.get("verified", False),
+                "det_10g_onnx": det_row.get("verified", False),
+                "insightface_buffalo_runtime_status": faceid_buffalo_runtime.get("status"),
+                "insightface_buffalo_runtime_verified": bool(faceid_buffalo_runtime.get("verified")),
+                "insightface_buffalo_detection_status": faceid_buffalo_runtime.get("detection_status"),
+                "insightface_buffalo_detection_verified": bool(
+                    faceid_buffalo_runtime.get("detection_verified")
+                ),
+                "insightface_buffalo_recognition_status": faceid_buffalo_runtime.get("recognition_status"),
+                "insightface_buffalo_recognition_verified": bool(
+                    faceid_buffalo_runtime.get("recognition_verified")
+                ),
+                "insightface_buffalo_initialization_status": faceid_buffalo_runtime.get(
+                    "initialization_status"
+                ),
+                "insightface_buffalo_initialization_verified": bool(
+                    faceid_buffalo_runtime.get("initialization_verified")
+                ),
+                "insightface_buffalo_notes": faceid_buffalo_runtime.get("notes") or "",
                 "runtime_clip_vision_discovery_status": clip_row.get("faceid_runtime_status"),
                 "runtime_clip_vision_discovery_verified": bool(
                     clip_row.get("faceid_runtime_verified")
@@ -1733,6 +1893,8 @@ def assess_identity_benchmark_dependencies(
                     "ipadapter_faceid_plusv2_sd15_lora": lora_row,
                     "clip_vision_sd15": clip_row,
                     "insightface_w600k_r50": insight_row,
+                    "insightface_buffalo_det": det_row,
+                    "insightface_buffalo_runtime": faceid_buffalo_runtime,
                     "pinned_resolver": resolver_row,
                     "live_clip_discovery": faceid_live_discovery,
                     "insightface_python_runtime": faceid_python_runtime,
@@ -1772,6 +1934,7 @@ def assess_identity_benchmark_dependencies(
                 and object_info_status == "ok"
                 and bool(faceid_live_discovery.get("verified"))
                 and bool(faceid_python_runtime.get("verified"))
+                and bool(faceid_buffalo_runtime.get("verified"))
                 and runtime_bridge_ok
             )
         report["candidates"][cand] = {

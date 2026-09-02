@@ -133,9 +133,24 @@
         "identity_benchmark"
       ],
       "status": "planned",
-      "notes": "InsightFace buffalo_l w600k_r50.onnx. Research-restricted — manual placement only; no auto-download.",
+      "notes": "InsightFace buffalo_l recognition weight (w600k_r50.onnx). Research-restricted — manual placement only; no auto-download. FaceID also requires det_10g.onnx in the same buffalo_l directory.",
       "source_url": "InsightFace buffalo_l pack (operator-obtained; review license before use)",
       "filename": "w600k_r50.onnx",
+      "install_policy": "manual_only"
+    },
+    {
+      "name": "insightface_buffalo_det",
+      "category": "face",
+      "intended_path": "assets/insightface/models/buffalo_l/det_10g.onnx",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/insightface/models/buffalo_l/det_10g.onnx",
+      "required_for": [
+        "ipadapter_faceid_sd15_benchmark",
+        "identity_benchmark"
+      ],
+      "status": "planned",
+      "notes": "InsightFace buffalo_l detection weight (det_10g.onnx). Required for FaceAnalysis initialization on the FaceID path. Manual placement only; no auto-download.",
+      "source_url": "InsightFace buffalo_l pack (operator-obtained; review license before use)",
+      "filename": "det_10g.onnx",
       "install_policy": "manual_only"
     },
     {

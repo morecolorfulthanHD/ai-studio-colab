@@ -866,6 +866,24 @@ main() {
     fi
   fi
 
+  # Package 4.12: FaceAnalysis buffalo_l requires det_10g + w600k under models/buffalo_l/.
+  if [[ -f "${_repo_root}/core/scripts/ensure_faceid_buffalo_bridge.py" ]]; then
+    log "Ensuring FaceID buffalo_l InsightFace bridge (Drive -> ComfyUI/models/insightface/models/buffalo_l/)"
+    if [[ "${EXECUTE}" -eq 1 ]]; then
+      "${PYTHON}" "${_repo_root}/core/scripts/ensure_faceid_buffalo_bridge.py" \
+        --comfyui-runtime "${COMFYUI_DIR}" \
+        --canonical-insightface-dir "${SHARED_MODELS}/insightface" \
+        --execute \
+        || log "WARN: FaceID buffalo_l bridge not verified (canonical may be missing; checker stays fail-closed)"
+    else
+      "${PYTHON}" "${_repo_root}/core/scripts/ensure_faceid_buffalo_bridge.py" \
+        --comfyui-runtime "${COMFYUI_DIR}" \
+        --canonical-insightface-dir "${SHARED_MODELS}/insightface" \
+        --dry-run \
+        || log "WARN: FaceID buffalo_l bridge dry-run reported issues"
+    fi
+  fi
+
   # Package 4.12: pinned IPAdapter FaceID requires lazy insightface import at execution.
   if [[ -f "${_repo_root}/core/scripts/ensure_faceid_python_deps.py" ]]; then
     log "Ensuring FaceID Python runtime (insightface + onnxruntime in ComfyUI interpreter)"

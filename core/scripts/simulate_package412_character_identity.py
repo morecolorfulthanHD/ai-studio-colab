@@ -72,6 +72,11 @@ from core.runtime.reactor_model_bridge import (
     reactor_runtime_inswapper_path,
     reactor_style_list_swap_models,
 )
+from core.runtime.faceid_buffalo_bridge import (
+    DETECTION_FILENAME,
+    assess_faceid_buffalo_runtime,
+    ensure_faceid_buffalo_bridge,
+)
 from core.runtime.faceid_model_bridge import (
     CLIP_VISION_CANONICAL_FILENAME,
     IPADAPTER_DISCOVERY_FILENAME,
@@ -105,6 +110,41 @@ def _faceid_python_runtime_row(
         "providers": ["CPUExecutionProvider"] if verified else [],
         "required_provider": "CPU",
         "benchmark_execution_tested": False,
+    }
+
+
+def _faceid_buffalo_runtime_row(
+    *,
+    verified: bool,
+    status: str = "VERIFIED",
+    detection_verified: bool | None = None,
+    recognition_verified: bool | None = None,
+    initialization_verified: bool | None = None,
+    detection_status: str = "VERIFIED",
+    recognition_status: str = "VERIFIED",
+    initialization_status: str = "VERIFIED",
+    notes: str = "",
+) -> dict:
+    det_ok = detection_verified if detection_verified is not None else verified
+    rec_ok = recognition_verified if recognition_verified is not None else verified
+    init_ok = initialization_verified if initialization_verified is not None else verified
+    return {
+        "status": status if verified else status,
+        "verified": verified,
+        "pack_name": "buffalo_l",
+        "detection_status": detection_status if det_ok else "MISSING",
+        "detection_verified": det_ok,
+        "recognition_status": recognition_status if rec_ok else "MISSING",
+        "recognition_verified": rec_ok,
+        "initialization_status": initialization_status if init_ok else "ERROR",
+        "initialization_verified": init_ok,
+        "notes": notes or (
+            "FaceAnalysis buffalo_l initialized (simulation default)"
+            if verified
+            else "buffalo_l incomplete (simulation)"
+        ),
+        "benchmark_execution_tested": False,
+        "missing_required": [] if verified else ["det_10g.onnx"],
     }
 
 
@@ -325,6 +365,8 @@ def _setup_temp_repo(repo_root: Path) -> dict[str, Path]:
     insight = drive / "models" / "shared" / "insightface" / "models" / "buffalo_l" / "w600k_r50.onnx"
     insight.parent.mkdir(parents=True, exist_ok=True)
     insight.write_bytes(b"onnx-stub")
+    det = insight.parent / DETECTION_FILENAME
+    det.write_bytes(b"det-stub")
     inswapper = drive / "models" / "shared" / "insightface" / "inswapper_128.onnx"
     inswapper.parent.mkdir(parents=True, exist_ok=True)
     inswapper.write_bytes(b"inswapper-stub")
@@ -335,6 +377,7 @@ def _setup_temp_repo(repo_root: Path) -> dict[str, Path]:
         "prepared": prepared,
         "input": comfy / "input",
         "insight": insight,
+        "det": det,
         "inswapper": inswapper,
         "drive_prepared": drive / "workflows" / "prepared",
     }
@@ -384,6 +427,14 @@ def _faceid_integrity_models(
             insight.parent.mkdir(parents=True, exist_ok=True)
             if not insight.is_file():
                 insight.write_bytes(b"onnx-stub")
+        elif name == "insightface_buffalo_det":
+            row["runtime_path"] = str(
+                drive / "models/shared/insightface/models/buffalo_l/det_10g.onnx"
+            )
+            det_path = Path(row["runtime_path"])
+            det_path.parent.mkdir(parents=True, exist_ok=True)
+            if not det_path.is_file():
+                det_path.write_bytes(b"det-stub")
         elif name == "reactor_inswapper_128":
             row["runtime_path"] = str(drive / "models/shared/insightface/inswapper_128.onnx")
             swap = Path(row["runtime_path"])
@@ -423,6 +474,13 @@ def _ensure_faceid_test_bridges(comfy: Path, drive: Path) -> None:
         dry_run=False,
         require_inswapper=True,
     )
+    buffalo = ensure_faceid_buffalo_bridge(
+        comfyui_runtime=comfy,
+        canonical_insightface_dir=default_canonical_insightface_dir(drive / "models" / "shared"),
+        dry_run=False,
+    )
+    if not buffalo.ok:
+        raise AssertionError(f"FaceID buffalo_l test bridge failed: {buffalo.errors}")
     bridge = ensure_faceid_runtime_bridge(
         comfyui_runtime=comfy,
         canonical_clip_vision_dir=clip_dir,
@@ -449,6 +507,14 @@ def main() -> int:
         ),
     )
     faceid_python_default.start()
+    faceid_buffalo_default = patch(
+        "core.runtime.identity_benchmark.assess_faceid_buffalo_runtime",
+        return_value=_faceid_buffalo_runtime_row(
+            verified=True,
+            notes="simulation default: buffalo_l FaceAnalysis initialization verified",
+        ),
+    )
+    faceid_buffalo_default.start()
 
     try:
         # Character register / list / verify
@@ -1320,10 +1386,15 @@ def main() -> int:
 
         install_sh = (repo_root / "core/comfyui/install.sh").read_text(encoding="utf-8")
         faceid_pos = install_sh.find("ensure_faceid_runtime_bridge.py")
+        buffalo_pos = install_sh.find("ensure_faceid_buffalo_bridge.py")
+        python_pos = install_sh.find("ensure_faceid_python_deps.py")
         complete_pos = install_sh.find('phase "Complete"')
         _assert_true("install.sh wires FaceID bridge", faceid_pos >= 0)
+        _assert_true("install.sh wires buffalo_l bridge", buffalo_pos >= 0)
         _assert_true("FaceID bridge before Complete phase", faceid_pos < complete_pos)
-        _pass(results, "Full Launch ordering: FaceID bridge before ComfyUI Complete phase")
+        _assert_true("buffalo_l bridge before python deps", buffalo_pos < python_pos)
+        _assert_true("buffalo_l bridge before Complete phase", buffalo_pos < complete_pos)
+        _pass(results, "Full Launch ordering: FaceID + buffalo_l bridges before python deps / Complete")
 
         # D: canonical/runtime SHA mismatch after bridge -> NOT ready
         canonical_ipa = (
@@ -1671,6 +1742,170 @@ def main() -> int:
         _assert_true("I python verified flag", fd_i["detail"]["insightface_python_verified"])
         _assert_false("I execution not tested", fd_i["detail"]["benchmark_execution_tested"])
         _pass(results, "I: prerequisites VERIFIED including Python module -> candidate ready; execution untested")
+
+        # --- FaceID buffalo_l InsightFace runtime A-K ---
+        from core.runtime.faceid_buffalo_bridge import assess_faceid_buffalo_inventory
+
+        dep_buff_a = assess_identity_benchmark_dependencies(
+            bundle_models=verified_models,
+            bundle_nodes=pinned_nodes,
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            comfyui_runtime=paths["comfy"],
+            object_info_payload=_reactor_object_info(),
+            faceid_buffalo_runtime_override=_faceid_buffalo_runtime_row(
+                verified=False,
+                status="MISSING",
+                detection_verified=False,
+                recognition_verified=True,
+                initialization_verified=False,
+                detection_status="CANONICAL_MISSING",
+                initialization_status="SKIPPED",
+                notes="Missing required buffalo_l artifacts: det_10g.onnx (manual Drive placement only).",
+            ),
+        )
+        _assert_false("buff A faceid not ready", dep_buff_a["candidates"][CANDIDATE_FACEID]["ready"])
+        _pass(results, "A: w600k present but detection model absent -> FaceID ready NO")
+
+        inv_b = assess_faceid_buffalo_inventory(
+            bundle_models=verified_models,
+            canonical_insightface_dir=default_canonical_insightface_dir(
+                paths["drive"] / "models" / "shared"
+            ),
+            comfyui_runtime=paths["comfy"],
+        )
+        _assert_true("buff B inventory verified", inv_b.get("verified"))
+        _assert_true("buff B detection verified", inv_b.get("detection_verified"))
+        _assert_true("buff B recognition verified", inv_b.get("recognition_verified"))
+        _pass(results, "B: complete required buffalo_l inventory present -> asset-level readiness advances")
+
+        dep_buff_c = assess_identity_benchmark_dependencies(
+            bundle_models=verified_models,
+            bundle_nodes=pinned_nodes,
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            comfyui_runtime=paths["comfy"],
+            object_info_payload=_reactor_object_info(),
+            faceid_buffalo_runtime_override=_faceid_buffalo_runtime_row(
+                verified=False,
+                status="INCOMPLETE",
+                detection_verified=True,
+                recognition_verified=True,
+                initialization_verified=False,
+                initialization_status="DETECTION_MISSING",
+                notes="AssertionError: detection model missing from FaceAnalysis.models",
+            ),
+        )
+        _assert_false("buff C not ready", dep_buff_c["candidates"][CANDIDATE_FACEID]["ready"])
+        _pass(results, "C: detection file present but FaceAnalysis classification/init fails -> ready NO")
+
+        dep_buff_d = assess_identity_benchmark_dependencies(
+            bundle_models=verified_models,
+            bundle_nodes=pinned_nodes,
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            comfyui_runtime=paths["comfy"],
+            object_info_payload=_reactor_object_info(),
+            faceid_buffalo_runtime_override=_faceid_buffalo_runtime_row(
+                verified=False,
+                status="MISSING",
+                detection_verified=True,
+                recognition_verified=False,
+                initialization_verified=False,
+                recognition_status="CANONICAL_MISSING",
+                initialization_status="SKIPPED",
+                notes="Missing required buffalo_l artifacts: w600k_r50.onnx",
+            ),
+        )
+        _assert_false("buff D not ready", dep_buff_d["candidates"][CANDIDATE_FACEID]["ready"])
+        _pass(results, "D: recognition file absent -> ready NO")
+
+        dep_buff_e = assess_identity_benchmark_dependencies(
+            bundle_models=verified_models,
+            bundle_nodes=pinned_nodes,
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            comfyui_runtime=paths["comfy"],
+            object_info_payload=_reactor_object_info(),
+            faceid_buffalo_runtime_override=_faceid_buffalo_runtime_row(
+                verified=False,
+                status="INCOMPLETE",
+                detection_verified=False,
+                recognition_verified=False,
+                initialization_status="ERROR",
+                notes="Runtime bridge does not match canonical Drive content.",
+            ),
+        )
+        _assert_false("buff E not ready", dep_buff_e["candidates"][CANDIDATE_FACEID]["ready"])
+        _pass(results, "E: wrong runtime path / bridge mismatch -> ready NO")
+
+        def _probe_ok(*args, **kwargs):
+            return True, {
+                "ok": True,
+                "detection_verified": True,
+                "recognition_verified": True,
+                "initialization_verified": True,
+                "tasks": {"detection": True, "recognition": True},
+            }, ""
+
+        with patch(
+            "core.runtime.faceid_buffalo_bridge._run_faceanalysis_init_probe",
+            side_effect=_probe_ok,
+        ):
+            runtime_f = assess_faceid_buffalo_runtime(
+                bundle_models=verified_models,
+                canonical_insightface_dir=default_canonical_insightface_dir(
+                    paths["drive"] / "models" / "shared"
+                ),
+                comfyui_runtime=paths["comfy"],
+                python_executable=sys.executable,
+            )
+        _assert_true("buff F verified", runtime_f.get("verified"))
+        _assert_true("buff F init verified", runtime_f.get("initialization_verified"))
+        _assert_equal("buff F init status", runtime_f.get("initialization_status"), "VERIFIED")
+        _pass(results, "F: same-interpreter FaceAnalysis initialization succeeds -> initialization VERIFIED")
+
+        def _probe_download(*args, **kwargs):
+            return False, {}, "RuntimeError: InsightFace auto-download prohibited by AI Studio"
+
+        with patch(
+            "core.runtime.faceid_buffalo_bridge._run_faceanalysis_init_probe",
+            side_effect=_probe_download,
+        ):
+            runtime_g = assess_faceid_buffalo_runtime(
+                bundle_models=verified_models,
+                canonical_insightface_dir=default_canonical_insightface_dir(
+                    paths["drive"] / "models" / "shared"
+                ),
+                comfyui_runtime=paths["comfy"],
+                python_executable=sys.executable,
+            )
+        _assert_false("buff G not verified", runtime_g.get("verified"))
+        _assert_equal("buff G init status", runtime_g.get("initialization_status"), "DOWNLOAD_REQUIRED")
+        _pass(results, "G: initialization requiring auto-download -> fail closed / prohibited")
+
+        buffalo_runtime = paths["comfy"] / "models" / "insightface" / "models" / "buffalo_l"
+        for artifact in list(buffalo_runtime.glob("*.onnx")):
+            if artifact.is_symlink() or artifact.is_file():
+                artifact.unlink()
+        _assert_false("buff H bridges removed", (buffalo_runtime / DETECTION_FILENAME).exists())
+        recreate_h = ensure_faceid_buffalo_bridge(
+            comfyui_runtime=paths["comfy"],
+            canonical_insightface_dir=default_canonical_insightface_dir(
+                paths["drive"] / "models" / "shared"
+            ),
+            bundle_models=verified_models,
+            dry_run=False,
+        )
+        _assert_true(f"buff H recreate ok ({recreate_h.errors})", recreate_h.ok)
+        _pass(results, "H: Full Reset -> Full Launch recreates buffalo_l runtime bridges from Drive")
+
+        dep_reactor_i = assess_identity_benchmark_dependencies(
+            bundle_models=verified_models,
+            bundle_nodes=pinned_nodes,
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            comfyui_runtime=paths["comfy"],
+            object_info_payload=_reactor_object_info(),
+            candidate=CANDIDATE_REACTOR,
+        )
+        _assert_true("buff I reactor still ready", dep_reactor_i["candidates"][CANDIDATE_REACTOR]["ready"])
+        _pass(results, "I: ReActor behavior remains unchanged")
 
         # --- FaceID fail-closed live registration / object_info (A–H) ---
         calls = {"n": 0}
@@ -2157,10 +2392,14 @@ def main() -> int:
         _assert_equal("failed ledger empty", len(load_identity_benchmark_records(ledger_failed)), 0)
         _pass(results, "Failed benchmark execution does not become successful benchmark record")
 
-        # J: both failed FaceID S1 attempts (ClipVision then insightface) stay non-successes
+        # J: three failed FaceID S1 attempts stay non-successes
         for prompt_id, err_note in (
             ("prompt-faceid-s1-clipvision-fail", "ClipVision model not found"),
             ("prompt-faceid-s1-insightface-fail", "No module named 'insightface'"),
+            (
+                "prompt-faceid-s1-faceanalysis-fail",
+                "AssertionError during FaceAnalysis initialization",
+            ),
         ):
             failed_hist = {
                 prompt_id: {
@@ -2185,9 +2424,9 @@ def main() -> int:
             )
             _assert_equal(f"J no capture ({err_note})", rec_j.get("captured"), 0)
             _assert_equal(f"J ledger empty ({err_note})", len(load_identity_benchmark_records(ledger_j)), 0)
-        _pass(results, "J: both failed FaceID S1 attempts remain non-successes")
+        _pass(results, "J: three failed FaceID S1 attempts remain non-successes")
 
-        # I: later successful execution of SAME preparation remains capturable exactly once
+        # K: later successful execution of SAME preparation remains capturable exactly once
         cap_after_fail = capture_identity_benchmark_execution(
             drive_root=paths["drive"],
             ledger_path=ledger,
@@ -2203,7 +2442,7 @@ def main() -> int:
         )
         _assert_true(f"capture after fail ok ({cap_after_fail.errors})", cap_after_fail.ok)
         _assert_false("not duplicate of prior success", cap_after_fail.skipped_duplicate)
-        _pass(results, "Later successful execution of SAME prep capturable without ambiguity")
+        _pass(results, "K: later successful execution of SAME prep capturable without ambiguity")
 
         # Source disappears after durable copy — benchmark row remains valid
         missed.unlink(missing_ok=True)
@@ -2956,6 +3195,7 @@ def main() -> int:
 
     finally:
         faceid_python_default.stop()
+        faceid_buffalo_default.stop()
         shutil.rmtree(paths["drive"], ignore_errors=True)
         shutil.rmtree(paths["runtime"], ignore_errors=True)
         shutil.rmtree(paths["comfy"], ignore_errors=True)

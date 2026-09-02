@@ -20,12 +20,25 @@ CODE/SIM readiness proves character foundation + **executable** benchmark graphs
 
 | Asset | Exact filename | Drive destination |
 |-------|----------------|-------------------|
-| InsightFace buffalo | `w600k_r50.onnx` | `/content/drive/MyDrive/AI_Studio/models/shared/insightface/models/buffalo_l/w600k_r50.onnx` |
+| InsightFace buffalo detection | `det_10g.onnx` | `/content/drive/MyDrive/AI_Studio/models/shared/insightface/models/buffalo_l/det_10g.onnx` |
+| InsightFace buffalo recognition | `w600k_r50.onnx` | `/content/drive/MyDrive/AI_Studio/models/shared/insightface/models/buffalo_l/w600k_r50.onnx` |
 | ReActor swap model | `inswapper_128.onnx` | `/content/drive/MyDrive/AI_Studio/models/shared/insightface/inswapper_128.onnx` |
 | FaceID Plus v2 SD1.5 | `ip-adapter-faceid-plusv2_sd15.bin` | `/content/drive/MyDrive/AI_Studio/models/shared/ipadapter/ip-adapter-faceid-plusv2_sd15.bin` |
 | Matching FaceID LoRA | `ip-adapter-faceid-plusv2_sd15_lora.safetensors` | `/content/drive/MyDrive/AI_Studio/models/shared/loras/ip-adapter-faceid-plusv2_sd15_lora.safetensors` |
 | CLIP ViT-H | `CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors` | `/content/drive/MyDrive/AI_Studio/models/shared/clip_vision/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors` |
 | SD1.5 checkpoint | existing accepted path | (unchanged) |
+
+### FaceID runtime prerequisites (dependency checker)
+
+| Prerequisite | What “ready” means |
+|--------------|-------------------|
+| InsightFace Python package | `insightface==0.7.3` importable in ComfyUI interpreter |
+| ONNX Runtime | `onnxruntime>=1.16.0` with `CPUExecutionProvider` |
+| buffalo_l detection | `det_10g.onnx` present on Drive + bridged to runtime |
+| buffalo_l recognition | `w600k_r50.onnx` present on Drive + bridged to runtime |
+| FaceAnalysis initialization | bounded probe succeeds (`detection` + `recognition` in models; no auto-download) |
+| FaceID IPAdapter weights | `.bin` + LoRA verified on Drive + runtime discovery |
+| CLIP Vision | ViT-H verified on Drive + runtime discovery |
 
 Verify afterward with Characters → **4. Check identity-benchmark dependencies** (`ready_for_case_c=True`).
 
