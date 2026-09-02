@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import os
 import shutil
 import socket
 import sys
@@ -74,7 +75,11 @@ from core.runtime.reactor_model_bridge import (
 )
 from core.runtime.faceid_buffalo_bridge import (
     DETECTION_FILENAME,
+    FACEANALYSIS_DOWNLOAD_BLOCK_BINDINGS,
+    INSIGHTFACE_DOWNLOAD_PROHIBITED_MESSAGE,
+    assess_faceid_buffalo_inventory,
     assess_faceid_buffalo_runtime,
+    build_faceanalysis_init_probe_script,
     ensure_faceid_buffalo_bridge,
 )
 from core.runtime.faceid_model_bridge import (
@@ -146,6 +151,93 @@ def _faceid_buffalo_runtime_row(
         "benchmark_execution_tested": False,
         "missing_required": [] if verified else ["det_10g.onnx"],
     }
+
+
+def _write_insightface_073_binding_harness(site_root: Path) -> Path:
+    """Write a minimal insightface 0.7.3 import-binding harness for probe tests."""
+    pkg = site_root / "insightface"
+    utils = pkg / "utils"
+    app = pkg / "app"
+    utils.mkdir(parents=True, exist_ok=True)
+    app.mkdir(parents=True, exist_ok=True)
+    (pkg / "__init__.py").write_text('__version__ = "0.7.3"\n', encoding="utf-8")
+    (utils / "__init__.py").write_text(
+        "from .storage import download, ensure_available\n",
+        encoding="utf-8",
+    )
+    (utils / "download.py").write_text(
+        "NETWORK_CALLS = []\n"
+        "def download_file(url, path=None, overwrite=False, sha1_hash=None):\n"
+        "    NETWORK_CALLS.append(url)\n"
+        "    raise RuntimeError('network download attempted')\n",
+        encoding="utf-8",
+    )
+    (utils / "storage.py").write_text(
+        "import os\n"
+        "import os.path as osp\n"
+        "from .download import download_file\n"
+        "def download(sub_dir, name, force=False, root='~/.insightface'):\n"
+        "    dir_path = os.path.join(os.path.expanduser(root), sub_dir, name)\n"
+        "    if osp.exists(dir_path) and not force:\n"
+        "        return dir_path\n"
+        "    zip_path = dir_path + '.zip'\n"
+        "    download_file(f'https://example.invalid/{name}.zip', path=zip_path)\n"
+        "    os.makedirs(dir_path, exist_ok=True)\n"
+        "    return dir_path\n"
+        "def ensure_available(sub_dir, name, root='~/.insightface'):\n"
+        "    return download(sub_dir, name, force=False, root=root)\n",
+        encoding="utf-8",
+    )
+    (app / "__init__.py").write_text("from .face_analysis import FaceAnalysis\n", encoding="utf-8")
+    (app / "face_analysis.py").write_text(
+        "import glob\n"
+        "import os.path as osp\n"
+        "from ..utils import ensure_available\n\n"
+        "class FaceAnalysis:\n"
+        "    def __init__(self, name='buffalo_l', root='~/.insightface', allowed_modules=None, **kwargs):\n"
+        "        self.models = {}\n"
+        "        self.model_dir = ensure_available('models', name, root=root)\n"
+        "        for onnx_file in sorted(glob.glob(osp.join(self.model_dir, '*.onnx'))):\n"
+        "            base = osp.basename(onnx_file)\n"
+        "            if 'det' in base:\n"
+        "                self.models['detection'] = object()\n"
+        "            elif 'w600k' in base:\n"
+        "                self.models['recognition'] = object()\n"
+        "        assert 'detection' in self.models\n"
+        "    def prepare(self, ctx_id, det_thresh=0.5, det_size=(640, 640)):\n"
+        "        return None\n",
+        encoding="utf-8",
+    )
+    return site_root
+
+
+def _run_probe_with_harness(
+    *,
+    python_executable: str,
+    insightface_root: Path,
+    harness_site: Path,
+) -> tuple[bool, dict, str]:
+    import subprocess
+
+    script = build_faceanalysis_init_probe_script(insightface_root=insightface_root)
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(harness_site) + (
+        os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else ""
+    )
+    proc = subprocess.run(
+        [python_executable, "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+        env=env,
+    )
+    stdout = (proc.stdout or "").strip()
+    if not stdout:
+        return False, {}, (proc.stderr or "").strip() or f"exit {proc.returncode}"
+    payload = json.loads(stdout.splitlines()[-1])
+    ok = bool(payload.get("ok")) and proc.returncode == 0
+    return ok, payload, str(payload.get("error") or "")
 
 
 def _reactor_object_info(
@@ -1835,18 +1927,65 @@ def main() -> int:
         _assert_false("buff E not ready", dep_buff_e["candidates"][CANDIDATE_FACEID]["ready"])
         _pass(results, "E: wrong runtime path / bridge mismatch -> ready NO")
 
-        def _probe_ok(*args, **kwargs):
-            return True, {
-                "ok": True,
-                "detection_verified": True,
-                "recognition_verified": True,
-                "initialization_verified": True,
-                "tasks": {"detection": True, "recognition": True},
-            }, ""
+        harness_site = Path(tempfile.mkdtemp(prefix="pk412_if_harness_"))
+        _write_insightface_073_binding_harness(harness_site)
+        missing_root = Path(tempfile.mkdtemp(prefix="pk412_if_missing_"))
+        ok_g_missing, payload_g_missing, err_g_missing = _run_probe_with_harness(
+            python_executable=sys.executable,
+            insightface_root=missing_root,
+            harness_site=harness_site,
+        )
+        _assert_false("buff G missing pack not ok", ok_g_missing)
+        _assert_true(
+            "buff G block invoked",
+            bool(payload_g_missing.get("download_block_invoked")),
+        )
+        _assert_true(
+            "buff G prohibited message",
+            INSIGHTFACE_DOWNLOAD_PROHIBITED_MESSAGE in err_g_missing,
+        )
+        _assert_equal("buff G no network calls", payload_g_missing.get("network_calls"), 0)
+        with patch(
+            "core.runtime.faceid_buffalo_bridge._run_faceanalysis_init_probe",
+            return_value=(False, payload_g_missing, err_g_missing),
+        ):
+            mapped_g = assess_faceid_buffalo_runtime(
+                bundle_models=verified_models,
+                canonical_insightface_dir=default_canonical_insightface_dir(
+                    paths["drive"] / "models" / "shared"
+                ),
+                comfyui_runtime=paths["comfy"],
+                python_executable=sys.executable,
+            )
+        _assert_equal("buff G init status", mapped_g.get("initialization_status"), "DOWNLOAD_REQUIRED")
+        _assert_true(
+            "buff G bindings documented",
+            "insightface.app.face_analysis.ensure_available" in FACEANALYSIS_DOWNLOAD_BLOCK_BINDINGS,
+        )
+        _pass(results, "G: real probe blocks bound ensure_available path; missing pack -> DOWNLOAD_REQUIRED")
+
+        local_root = Path(tempfile.mkdtemp(prefix="pk412_if_local_"))
+        local_pack = local_root / "models" / "buffalo_l"
+        local_pack.mkdir(parents=True)
+        (local_pack / DETECTION_FILENAME).write_bytes(b"det-stub")
+        (local_pack / "w600k_r50.onnx").write_bytes(b"rec-stub")
+        ok_g_local, payload_g_local, err_g_local = _run_probe_with_harness(
+            python_executable=sys.executable,
+            insightface_root=local_root,
+            harness_site=harness_site,
+        )
+        _assert_true("buff G local pack ok", ok_g_local)
+        _assert_false(
+            "buff G local pack block not invoked",
+            bool(payload_g_local.get("download_block_invoked")),
+        )
+        _assert_true("buff G local detection", payload_g_local.get("detection_verified"))
+        _assert_true("buff G local recognition", payload_g_local.get("recognition_verified"))
+        _pass(results, "G: complete local det_10g + w600k pack initializes without download block")
 
         with patch(
             "core.runtime.faceid_buffalo_bridge._run_faceanalysis_init_probe",
-            side_effect=_probe_ok,
+            return_value=(ok_g_local, payload_g_local, err_g_local),
         ):
             runtime_f = assess_faceid_buffalo_runtime(
                 bundle_models=verified_models,
@@ -1860,25 +1999,6 @@ def main() -> int:
         _assert_true("buff F init verified", runtime_f.get("initialization_verified"))
         _assert_equal("buff F init status", runtime_f.get("initialization_status"), "VERIFIED")
         _pass(results, "F: same-interpreter FaceAnalysis initialization succeeds -> initialization VERIFIED")
-
-        def _probe_download(*args, **kwargs):
-            return False, {}, "RuntimeError: InsightFace auto-download prohibited by AI Studio"
-
-        with patch(
-            "core.runtime.faceid_buffalo_bridge._run_faceanalysis_init_probe",
-            side_effect=_probe_download,
-        ):
-            runtime_g = assess_faceid_buffalo_runtime(
-                bundle_models=verified_models,
-                canonical_insightface_dir=default_canonical_insightface_dir(
-                    paths["drive"] / "models" / "shared"
-                ),
-                comfyui_runtime=paths["comfy"],
-                python_executable=sys.executable,
-            )
-        _assert_false("buff G not verified", runtime_g.get("verified"))
-        _assert_equal("buff G init status", runtime_g.get("initialization_status"), "DOWNLOAD_REQUIRED")
-        _pass(results, "G: initialization requiring auto-download -> fail closed / prohibited")
 
         buffalo_runtime = paths["comfy"] / "models" / "insightface" / "models" / "buffalo_l"
         for artifact in list(buffalo_runtime.glob("*.onnx")):

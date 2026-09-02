@@ -46,6 +46,58 @@ OPTIONAL_BUFFALO_FILENAMES = (
     "genderage.onnx",
 )
 
+# InsightFace 0.7.3 bindings intercepted by the init probe (verified upstream):
+# face_analysis.py: from ..utils import ensure_available
+# utils/__init__.py: from .storage import download, ensure_available
+# storage.ensure_available -> storage.download -> download.download_file (network)
+FACEANALYSIS_DOWNLOAD_BLOCK_BINDINGS = (
+    "insightface.utils.storage.download",
+    "insightface.utils.storage.ensure_available",
+    "insightface.utils.download.download_file",
+    "insightface.utils.download",
+    "insightface.utils.ensure_available",
+    "insightface.app.face_analysis.ensure_available",
+)
+INSIGHTFACE_DOWNLOAD_PROHIBITED_MESSAGE = "InsightFace auto-download prohibited by AI Studio"
+
+
+_DOWNLOAD_BLOCK_PREAMBLE = """\
+import os
+import os.path as osp
+
+download_block_invoked = False
+
+def _blocked_insightface_pack_download(sub_dir, name, force=False, root='~/.insightface'):
+    global download_block_invoked
+    dir_path = os.path.join(os.path.expanduser(root), sub_dir, name)
+    if osp.exists(dir_path) and not force:
+        return dir_path
+    download_block_invoked = True
+    raise RuntimeError(__DOWNLOAD_MSG__)
+
+def _blocked_insightface_network_download(*args, **kwargs):
+    global download_block_invoked
+    download_block_invoked = True
+    raise RuntimeError(__DOWNLOAD_MSG__)
+
+# Patch storage + network layer before FaceAnalysis import (insightface 0.7.3 path).
+import insightface.utils.storage as _if_storage
+_if_storage.download = _blocked_insightface_pack_download
+_if_storage.ensure_available = _blocked_insightface_pack_download
+
+import insightface.utils.download as _if_download_mod
+_if_download_mod.download_file = _blocked_insightface_network_download
+
+import insightface.utils as _if_utils
+_if_utils.download = _blocked_insightface_pack_download
+_if_utils.ensure_available = _blocked_insightface_pack_download
+
+import insightface.app.face_analysis as _if_face_analysis
+_if_face_analysis.ensure_available = _blocked_insightface_pack_download
+
+from insightface.app.face_analysis import FaceAnalysis
+"""
+
 
 @dataclass(frozen=True)
 class BuffaloArtifactSpec:
@@ -277,25 +329,18 @@ payload = {
     "tasks": {},
     "error": None,
     "download_blocked": True,
+    "download_block_invoked": False,
 }
 root = __ROOT__
 provider = __PROVIDER__
 try:
-    import insightface.utils.storage as storage
-
-    def _blocked_download(*args, **kwargs):
-        raise RuntimeError("InsightFace auto-download prohibited by AI Studio")
-
-    storage.download = _blocked_download
-    storage.ensure_available = _blocked_download
-
-    from insightface.app import FaceAnalysis
-
+__DOWNLOAD_BLOCK__
     app = FaceAnalysis(
         name=__PACK__,
         root=root,
         providers=[provider + "ExecutionProvider"],
     )
+    payload["download_block_invoked"] = bool(download_block_invoked)
     payload["tasks"] = {name: True for name in app.models.keys()}
     payload["detection_verified"] = "detection" in app.models
     payload["recognition_verified"] = "recognition" in app.models
@@ -307,10 +352,38 @@ try:
     payload["initialization_verified"] = True
     payload["ok"] = True
 except Exception as exc:
+    payload["download_block_invoked"] = bool(globals().get("download_block_invoked"))
     payload["error"] = f"{type(exc).__name__}: {exc}"
+try:
+    import insightface.utils.download as _net_probe
+    payload["network_calls"] = len(getattr(_net_probe, "NETWORK_CALLS", []))
+except Exception:
+    payload["network_calls"] = None
 print(json.dumps(payload))
 sys.exit(0 if payload["ok"] else 1)
 """
+
+
+def build_faceanalysis_init_probe_script(
+    *,
+    insightface_root: Path | str,
+    provider: str = FACEID_PYTHON_PROBE_PROVIDER,
+    pack_name: str = BUFFALO_L_PACK_NAME,
+) -> str:
+    """Build the subprocess FaceAnalysis probe with deterministic download blocking."""
+    preamble = _DOWNLOAD_BLOCK_PREAMBLE.replace(
+        "__DOWNLOAD_MSG__",
+        repr(INSIGHTFACE_DOWNLOAD_PROHIBITED_MESSAGE),
+    )
+    indented_preamble = "\n".join(
+        f"    {line}" if line.strip() else line for line in preamble.splitlines()
+    )
+    return (
+        _INIT_PROBE_SCRIPT.replace("__ROOT__", repr(str(insightface_root)))
+        .replace("__PROVIDER__", repr(provider))
+        .replace("__PACK__", repr(pack_name))
+        .replace("__DOWNLOAD_BLOCK__", indented_preamble)
+    )
 
 
 def _run_faceanalysis_init_probe(
@@ -320,13 +393,14 @@ def _run_faceanalysis_init_probe(
     provider: str = FACEID_PYTHON_PROBE_PROVIDER,
     timeout: float = 120.0,
 ) -> tuple[bool, dict[str, Any], str]:
-    script = (
-        _INIT_PROBE_SCRIPT.replace("__ROOT__", repr(str(insightface_root)))
-        .replace("__PROVIDER__", repr(provider))
-        .replace("__PACK__", repr(BUFFALO_L_PACK_NAME))
+    script = build_faceanalysis_init_probe_script(
+        insightface_root=insightface_root,
+        provider=provider,
     )
     env = os.environ.copy()
-    env["INSIGHTFACE_DISABLE_DOWNLOAD"] = "1"
+    # Do not rely on INSIGHTFACE_DISABLE_DOWNLOAD — upstream 0.7.3 does not honor it
+    # for FaceAnalysis model-pack resolution; explicit binding patches are required.
+    env.pop("INSIGHTFACE_DISABLE_DOWNLOAD", None)
     try:
         proc = subprocess.run(
             [python_executable, "-c", script],
