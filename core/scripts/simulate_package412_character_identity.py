@@ -3068,6 +3068,258 @@ def main() -> int:
         _assert_equal("H no extra Drive file", _idbench_png_count(), before_h)
         _pass(results, "H: missed-history recovery -> no extra Drive copy")
 
+        # --- Recovery pre-persistence ledger check (live 000004/5/6 bug) ---
+        from core.runtime.identity_benchmark_capture import (
+            STATUS_DUPLICATE_REUSED_LEDGER_ARTIFACT,
+            STATUS_REPAIR_REQUIRED_MISSING,
+            STATUS_REPAIR_REQUIRED_SHA_MISMATCH,
+        )
+
+        def _seed_ledger_row(
+            *,
+            ledger_path: Path,
+            prompt_id: str,
+            output_path: Path,
+            output_sha: str,
+            preparation_id: str,
+        ) -> None:
+            append_identity_benchmark_record(
+                ledger_path,
+                IdentityBenchmarkRecord(
+                    candidate=CANDIDATE_FACEID,
+                    scenario="S1_near_front_portrait",
+                    character_id=reg.character.character_id,
+                    seed=1,
+                    preparation_id=preparation_id,
+                    prompt_id=prompt_id,
+                    output_node_id="9",
+                    output_path=str(output_path),
+                    output_sha256=output_sha,
+                    capture_idempotence_key=benchmark_idempotence_key(prompt_id, "9", output_sha),
+                    success=True,
+                ),
+            )
+
+        # A: already-ledgered + valid Drive artifact → duplicate, zero new files
+        local_rec_a = paths["comfy"] / "output" / "recover_a.png"
+        local_rec_a.write_bytes(b"\x89PNG\r\n\x1a\n" + b"RECOVER-A")
+        sha_rec_a = file_sha256(local_rec_a)
+        drive_rec_a = paths["drive"] / "outputs" / "identity_benchmark_rec_a.png"
+        drive_rec_a.write_bytes(local_rec_a.read_bytes())
+        ledger_rec = paths["drive"] / "logs" / "identity_benchmark_recover_order.jsonl"
+        _seed_ledger_row(
+            ledger_path=ledger_rec,
+            prompt_id="prompt-recover-a",
+            output_path=drive_rec_a,
+            output_sha=sha_rec_a,
+            preparation_id=capture_prep.preparation_id,
+        )
+        before_rec_a = _idbench_png_count()
+        before_all_a = len(list((paths["drive"] / "outputs").glob("*.png")))
+        cap_rec_a = capture_identity_benchmark_execution(
+            drive_root=paths["drive"],
+            ledger_path=ledger_rec,
+            prompt_id="prompt-recover-a",
+            output_node_id="9",
+            output_path=local_rec_a,
+            output_sha256=sha_rec_a,
+            provenance=prov,
+            ui_workflow=prep_wf,
+            local_path=str(local_rec_a),
+            ensure_durable=True,
+            drive_output_dir=paths["drive"] / "outputs",
+            evidence_path=evidence,
+            reclassify_ordinary=False,
+        )
+        _assert_true("rec A duplicate", cap_rec_a.ok and cap_rec_a.skipped_duplicate)
+        _assert_equal("rec A status", cap_rec_a.status, STATUS_DUPLICATE_REUSED_LEDGER_ARTIFACT)
+        _assert_true(
+            "rec A zero-write message",
+            any("zero persistence writes" in m for m in cap_rec_a.messages),
+        )
+        _assert_equal("rec A file count", len(list((paths["drive"] / "outputs").glob("*.png"))), before_all_a)
+        _assert_equal("rec A idbench count", _idbench_png_count(), before_rec_a)
+        _pass(results, "A: already-ledgered + valid artifact -> duplicate, zero new files")
+
+        # B: three already-ledgered recovered together (reproduce 000004/5/6 class bug)
+        hist_b_rows = []
+        ledger_b = paths["drive"] / "logs" / "identity_benchmark_recover_three.jsonl"
+        for label in ("b1", "b2", "b3"):
+            local_i = paths["comfy"] / "output" / f"recover_{label}.png"
+            local_i.write_bytes(b"\x89PNG\r\n\x1a\n" + f"RECOVER-{label}".encode())
+            sha_i = file_sha256(local_i)
+            drive_i = paths["drive"] / "outputs" / f"identity_benchmark_rec_{label}.png"
+            drive_i.write_bytes(local_i.read_bytes())
+            pid = f"prompt-recover-{label}"
+            _seed_ledger_row(
+                ledger_path=ledger_b,
+                prompt_id=pid,
+                output_path=drive_i,
+                output_sha=sha_i,
+                preparation_id=capture_prep.preparation_id,
+            )
+            hist_b_rows.append((pid, local_i.name, sha_i))
+        hist_b = {
+            pid: {
+                "prompt": hist_entry["prompt"],
+                "outputs": {
+                    "9": {
+                        "images": [
+                            {"filename": fname, "subfolder": "", "type": "output"}
+                        ]
+                    }
+                },
+                "status": {"completed": True},
+            }
+            for pid, fname, _sha in hist_b_rows
+        }
+        before_b_files = len(list((paths["drive"] / "outputs").glob("*.png")))
+        rec_b = recover_identity_benchmarks_from_history(
+            drive_root=paths["drive"],
+            ledger_path=ledger_b,
+            comfy_output_dir=paths["comfy"] / "output",
+            base_url="http://127.0.0.1:8188",
+            history=hist_b,
+            drive_output_dir=paths["drive"] / "outputs",
+            evidence_path=evidence,
+        )
+        _assert_equal("rec B examined", rec_b.get("examined"), 3)
+        _assert_equal("rec B duplicates", rec_b.get("duplicates"), 3)
+        _assert_equal("rec B captured", rec_b.get("captured"), 0)
+        _assert_equal("rec B failed", rec_b.get("failed"), 0)
+        _assert_equal(
+            "rec B file count unchanged",
+            len(list((paths["drive"] / "outputs").glob("*.png"))),
+            before_b_files,
+        )
+        _pass(results, "B: three already-ledgered recovered together -> duplicates=3, zero new files")
+
+        # C: repeated recovery → file count constant
+        before_c_files = len(list((paths["drive"] / "outputs").glob("*.png")))
+        for n in range(3):
+            rec_c = recover_identity_benchmarks_from_history(
+                drive_root=paths["drive"],
+                ledger_path=ledger_b,
+                comfy_output_dir=paths["comfy"] / "output",
+                base_url="http://127.0.0.1:8188",
+                history=hist_b,
+                drive_output_dir=paths["drive"] / "outputs",
+                evidence_path=evidence,
+            )
+            _assert_equal(f"rec C{n} duplicates", rec_c.get("duplicates"), 3)
+            _assert_equal(f"rec C{n} captured", rec_c.get("captured"), 0)
+            _assert_equal(
+                f"rec C{n} files",
+                len(list((paths["drive"] / "outputs").glob("*.png"))),
+                before_c_files,
+            )
+        _pass(results, "C: repeated report/recovery -> file count constant")
+
+        # D: already-ledgered + missing output_path → REPAIR_REQUIRED, zero files
+        local_d2 = paths["comfy"] / "output" / "recover_missing.png"
+        local_d2.write_bytes(b"\x89PNG\r\n\x1a\n" + b"RECOVER-MISSING")
+        sha_d2 = file_sha256(local_d2)
+        missing_path = paths["drive"] / "outputs" / "identity_benchmark_missing_gone.png"
+        ledger_d = paths["drive"] / "logs" / "identity_benchmark_recover_missing.jsonl"
+        _seed_ledger_row(
+            ledger_path=ledger_d,
+            prompt_id="prompt-recover-missing",
+            output_path=missing_path,
+            output_sha=sha_d2,
+            preparation_id=capture_prep.preparation_id,
+        )
+        before_d2 = len(list((paths["drive"] / "outputs").glob("*.png")))
+        cap_d2 = capture_identity_benchmark_execution(
+            drive_root=paths["drive"],
+            ledger_path=ledger_d,
+            prompt_id="prompt-recover-missing",
+            output_node_id="9",
+            output_path=local_d2,
+            output_sha256=sha_d2,
+            provenance=prov,
+            ui_workflow=prep_wf,
+            ensure_durable=True,
+            drive_output_dir=paths["drive"] / "outputs",
+            evidence_path=evidence,
+            reclassify_ordinary=False,
+        )
+        _assert_false("rec D not ok", cap_d2.ok)
+        _assert_false("rec D not duplicate skip", cap_d2.skipped_duplicate)
+        _assert_equal("rec D status", cap_d2.status, STATUS_REPAIR_REQUIRED_MISSING)
+        _assert_true(
+            "rec D error mentions REPAIR_REQUIRED",
+            any("REPAIR_REQUIRED" in e for e in cap_d2.errors),
+        )
+        _assert_false("rec D missing path still absent", missing_path.is_file())
+        _assert_equal(
+            "rec D zero replacement files",
+            len(list((paths["drive"] / "outputs").glob("*.png"))),
+            before_d2,
+        )
+        _pass(results, "D: already-ledgered + missing output_path -> REPAIR_REQUIRED, zero files")
+
+        # E: already-ledgered + SHA mismatch → fail closed, zero files
+        local_e2 = paths["comfy"] / "output" / "recover_mismatch.png"
+        local_e2.write_bytes(b"\x89PNG\r\n\x1a\n" + b"RECOVER-MISMATCH-SRC")
+        sha_e2 = file_sha256(local_e2)
+        drive_e2 = paths["drive"] / "outputs" / "identity_benchmark_mismatch.png"
+        drive_e2.write_bytes(b"\x89PNG\r\n\x1a\n" + b"RECOVER-MISMATCH-WRONG")
+        ledger_e = paths["drive"] / "logs" / "identity_benchmark_recover_mismatch.jsonl"
+        _seed_ledger_row(
+            ledger_path=ledger_e,
+            prompt_id="prompt-recover-mismatch",
+            output_path=drive_e2,
+            output_sha=sha_e2,
+            preparation_id=capture_prep.preparation_id,
+        )
+        before_e2 = len(list((paths["drive"] / "outputs").glob("*.png")))
+        cap_e2 = capture_identity_benchmark_execution(
+            drive_root=paths["drive"],
+            ledger_path=ledger_e,
+            prompt_id="prompt-recover-mismatch",
+            output_node_id="9",
+            output_path=local_e2,
+            output_sha256=sha_e2,
+            provenance=prov,
+            ui_workflow=prep_wf,
+            ensure_durable=True,
+            drive_output_dir=paths["drive"] / "outputs",
+            evidence_path=evidence,
+            reclassify_ordinary=False,
+        )
+        _assert_false("rec E not ok", cap_e2.ok)
+        _assert_equal("rec E status", cap_e2.status, STATUS_REPAIR_REQUIRED_SHA_MISMATCH)
+        _assert_equal(
+            "rec E zero replacement",
+            len(list((paths["drive"] / "outputs").glob("*.png"))),
+            before_e2,
+        )
+        _assert_true(
+            "rec E file not overwritten",
+            b"RECOVER-MISMATCH-WRONG" in drive_e2.read_bytes(),
+        )
+        _pass(results, "E: already-ledgered + SHA mismatch -> fail closed, zero files")
+
+        checklist = (repo_root / "docs/dogfooding/identity-method-benchmark-checklist.md").read_text(
+            encoding="utf-8"
+        )
+        _assert_true(
+            "docs S2 nearly frontal",
+            "nearly frontal" in checklist.lower() or "face-forward" in checklist.lower(),
+        )
+        _assert_true("docs S2 40", "40" in checklist and "three-quarter" in checklist.lower())
+        _assert_true(
+            "docs S3 smile",
+            "genuine smile" in checklist.lower() and "visible teeth" in checklist.lower(),
+        )
+        _assert_true(
+            "docs S3 neutral",
+            "essentially neutral" in checklist.lower(),
+        )
+        _assert_true("docs no auto-promote", "Do not auto-promote FaceID" in checklist)
+        _assert_true("docs neither valid", "Neither" in checklist)
+        _pass(results, "Docs preserve S2/S3 live visual notes; FaceID promotion pending")
+
         # I: ledger idempotence remains exactly once (re-capture)
         rows_before_i = len(
             [r for r in load_identity_benchmark_records(ledger) if r.get("prompt_id") == "prompt-dedup-a"]

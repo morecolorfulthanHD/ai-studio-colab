@@ -105,12 +105,105 @@ class BenchmarkCaptureResult:
     ok: bool
     skipped_duplicate: bool = False
     skipped_not_benchmark: bool = False
+    status: str = ""
     record: dict[str, Any] | None = None
     errors: list[str] = field(default_factory=list)
     messages: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+STATUS_DUPLICATE_REUSED_LEDGER_ARTIFACT = "DUPLICATE_REUSED_LEDGER_ARTIFACT"
+STATUS_REPAIR_REQUIRED_MISSING = "REPAIR_REQUIRED"
+STATUS_REPAIR_REQUIRED_SHA_MISMATCH = "REPAIR_REQUIRED_SHA_MISMATCH"
+STATUS_CAPTURED = "CAPTURED"
+
+
+def find_identity_benchmark_ledger_row(
+    ledger_path: Path,
+    *,
+    prompt_id: str,
+    output_node_id: str,
+    output_sha256: str,
+) -> dict[str, Any] | None:
+    """Return the first ledger row for exact prompt/node/SHA (idempotence key)."""
+    key = benchmark_idempotence_key(prompt_id, output_node_id, output_sha256)
+    if not key or key == "||":
+        return None
+    for row in load_identity_benchmark_records(ledger_path):
+        if str(row.get("capture_idempotence_key") or "") == key:
+            return row
+        legacy = benchmark_idempotence_key(
+            str(row.get("prompt_id") or ""),
+            str(row.get("output_node_id") or ""),
+            str(row.get("output_sha256") or ""),
+        )
+        if legacy == key:
+            return row
+    return None
+
+
+def verify_existing_ledger_artifact(
+    row: dict[str, Any],
+    *,
+    expected_sha256: str,
+) -> tuple[str, Path | None, list[str], list[str]]:
+    """Verify a ledger-referenced durable artifact without creating files.
+
+    Returns ``(status, path_or_none, messages, errors)``.
+    """
+    sha = str(expected_sha256 or "").strip().lower()
+    raw = str(row.get("output_path") or "").strip()
+    if not raw:
+        return (
+            STATUS_REPAIR_REQUIRED_MISSING,
+            None,
+            [],
+            [
+                "ERROR: REPAIR_REQUIRED — existing identity benchmark ledger row "
+                "has empty output_path; refuse silent replacement."
+            ],
+        )
+    path = Path(raw)
+    if not path.is_file():
+        return (
+            STATUS_REPAIR_REQUIRED_MISSING,
+            path,
+            [],
+            [
+                f"ERROR: REPAIR_REQUIRED — ledger artifact missing at {path}; "
+                "refuse silent replacement / new Drive copy."
+            ],
+        )
+    try:
+        actual = file_sha256(path).lower()
+    except OSError as exc:
+        return (
+            STATUS_REPAIR_REQUIRED_MISSING,
+            path,
+            [],
+            [f"ERROR: REPAIR_REQUIRED — unable to read ledger artifact {path}: {exc}"],
+        )
+    if actual != sha:
+        return (
+            STATUS_REPAIR_REQUIRED_SHA_MISMATCH,
+            path,
+            [],
+            [
+                f"ERROR: REPAIR_REQUIRED_SHA_MISMATCH — ledger artifact {path} "
+                f"has SHA {actual}, expected {sha}; refuse overwrite/replacement."
+            ],
+        )
+    return (
+        STATUS_DUPLICATE_REUSED_LEDGER_ARTIFACT,
+        path,
+        [
+            f"Durable benchmark artifact: {STATUS_DUPLICATE_REUSED_LEDGER_ARTIFACT}",
+            f"Reused existing ledger artifact (zero persistence writes): {path}",
+        ],
+        [],
+    )
 
 
 def _load_prep_metadata(drive_root: Path, preparation_id: str) -> dict[str, Any] | None:
@@ -720,7 +813,14 @@ def capture_identity_benchmark_execution(
     evidence_path: Path | None = None,
     reclassify_ordinary: bool = True,
 ) -> BenchmarkCaptureResult:
-    """Append one identity benchmark ledger row for a verified durable execution output."""
+    """Append one identity benchmark ledger row for a verified durable execution output.
+
+    Ordering (Package 4.12.1 recovery fix):
+      validate → SHA → context → idempotence key → **ledger search** →
+      only then durable ensure → append-once.
+
+    Already-ledgered executions perform ZERO artifact writes.
+    """
     result = BenchmarkCaptureResult(ok=False)
     if not is_identity_benchmark_provenance(provenance, ui_workflow):
         result.skipped_not_benchmark = True
@@ -746,7 +846,7 @@ def capture_identity_benchmark_execution(
             result.errors.append(f"ERROR: Unable to hash benchmark output: {exc}")
             return result
     if not allow_missing_output and not source.is_file() and ensure_durable:
-        # Durable ensure may still succeed via existing Drive evidence.
+        # Durable ensure may still succeed via existing Drive evidence / ledger.
         pass
     elif not allow_missing_output and not source.is_file() and not ensure_durable:
         result.errors.append(f"ERROR: Benchmark output file missing: {source}")
@@ -777,6 +877,31 @@ def capture_identity_benchmark_execution(
         result.errors.append("ERROR: Executed seed missing from ComfyUI history provenance.")
         return result
 
+    # Pre-persistence ledger idempotence: already-captured executions must not
+    # allocate filenames, copy bytes, or append durability evidence.
+    key = benchmark_idempotence_key(prompt_id, output_node_id, sha)
+    existing_row = find_identity_benchmark_ledger_row(
+        ledger_path,
+        prompt_id=prompt_id,
+        output_node_id=output_node_id,
+        output_sha256=sha,
+    )
+    if existing_row is not None:
+        status, existing_path, msgs, errs = verify_existing_ledger_artifact(
+            existing_row, expected_sha256=sha
+        )
+        result.messages.extend(msgs)
+        result.status = status
+        if status == STATUS_DUPLICATE_REUSED_LEDGER_ARTIFACT:
+            result.ok = True
+            result.skipped_duplicate = True
+            result.record = dict(existing_row)
+            result.messages.append(f"Already captured (idempotent, pre-persistence): {key}")
+            return result
+        result.ok = False
+        result.errors.extend(errs)
+        return result
+
     durable_path = source
     durable_sha = sha
     if ensure_durable:
@@ -796,8 +921,12 @@ def capture_identity_benchmark_execution(
             return result
         durable_path = durable.drive_path
         durable_sha = durable.drive_sha256
+        if durable_sha != sha:
+            result.errors.append(
+                f"ERROR: Durable SHA must equal source SHA (expected {sha}, got {durable_sha})."
+            )
+            return result
 
-    key = benchmark_idempotence_key(prompt_id, output_node_id, durable_sha)
     human_review = {k: "pending" for k in HUMAN_REVIEW_RUBRIC}
     record = IdentityBenchmarkRecord(
         candidate=ctx.candidate,
@@ -847,8 +976,11 @@ def capture_identity_benchmark_execution(
         result.errors.append("ERROR: Failed to append identity benchmark ledger row.")
         return result
     if skipped_dup:
+        # Race: another writer appended between our pre-check and append.
+        # Do not treat as failure; durable ensure may have already run.
         result.ok = True
         result.skipped_duplicate = True
+        result.status = STATUS_DUPLICATE_REUSED_LEDGER_ARTIFACT
         result.messages.append(f"Already captured (idempotent): {key}")
         return result
 
@@ -873,6 +1005,7 @@ def capture_identity_benchmark_execution(
             )
 
     result.ok = True
+    result.status = STATUS_CAPTURED
     result.record = record.to_dict()
     result.messages.append(
         f"Captured identity benchmark execution: {ctx.candidate}/{ctx.scenario} "

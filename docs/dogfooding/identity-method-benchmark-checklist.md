@@ -52,8 +52,49 @@ Review FaceID / InsightFace license cards before any production promotion.
 |------|----------------|
 | A | **LIVE PASS** — character register/list/show + SHA |
 | B | **LIVE PASS** — Full Reset + relaunch; character still resolves |
-| C | **NOT STARTED** — both candidates × S1–S4: prepare (`--allow-benchmark`) → open → **Run** → ledger + human rubric |
+| C | **IN PROGRESS** — ReActor S1–S4 + FaceID S1–S3 executed; FaceID S4 not yet run; human rubric pending |
 | D–F | **NOT STARTED** |
+
+## Live Case C notes (human-observed; not automated scores)
+
+Character: `char_7471a702-55cf-4c7b-adb2-e17404d28c91` (Benchmark Persona).  
+Do **not** overwrite `human_review=pending` ledger fields automatically — enter rubric manually.
+
+### ReActor (summary)
+
+- Pipeline operational; visual identity consistency poor across S1–S4.
+- Not acceptable for 4.13 virtual-character identity as currently observed.
+
+### FaceID — S1 (`prep_efa7b6d8-58ec-4d26-8d19-697ec3ce9558`, seed `4791031672062905`)
+
+- Historical successful executions (same prep/seed/SHA, different prompt IDs) preserved on Drive; do not delete.
+- Visual: identity similarity good; facial naturalness good; near-front adherence acceptable.
+- Strongest FaceID result so far; does **not** alone prove pose/expression robustness.
+
+### FaceID — S2 (`prep_dcacc2ae-dc0a-45e7-90a5-5b6eb8026b1b`, seed `470280831310422`)
+
+- Prompt requested ~40° right / three-quarter view.
+- Output remained essentially face-forward / near-front (minimal head-angle change).
+- Identity held; **pose-angle robustness NOT demonstrated**; pose instruction adherence failed.
+- Operator note: *FaceID preserved recognizable identity and facial naturalness, but failed the intended ~40° three-quarter pose. The subject remained nearly frontal, so this run does not demonstrate robust identity preservation under meaningful head-angle change.*
+
+### FaceID — S3 (`prep_5b0773a9-30fc-436a-aa30-d40dec98e517`, seed `5926742613902171`)
+
+- Prompt requested genuine smile with visible teeth.
+- Output remained essentially neutral (no meaningful smile / visible teeth).
+- Identity held reasonably well; **expression robustness NOT demonstrated**; expression adherence failed.
+- Operator note: *FaceID preserved identity reasonably well, but failed the requested expression change. The output remained essentially neutral rather than producing a genuine smile with visible teeth.*
+
+### FaceID — S4
+
+- **Not yet run.** Do not start until operator requests.
+
+### Promotion stance (Package 4.12)
+
+- FaceID is currently stronger than ReActor for near-front identity fidelity.
+- FaceID has **not** demonstrated robust controlled pose/expression variation (S2/S3).
+- **Do not auto-promote FaceID.** Promotion remains pending until S1–S4 complete, licensing/ops acceptable, and explicit human selection.
+- **Neither** remains a valid final Package 4.12 outcome.
 
 ## Explicit non-claims
 
@@ -61,3 +102,4 @@ Review FaceID / InsightFace license cards before any production promotion.
 - Prepare/open does not quality-benchmark either method  
 - Package 4.12 does not select the 4.13 winner
 - Case C readiness is structural/execution readiness only
+- Live visual notes above are human-observed; not automated perceptual scores
