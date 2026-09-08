@@ -313,8 +313,84 @@ class DurableArtifactResult:
     drive_sha256: str = ""
     local_path: str = ""
     reused_existing: bool = False
+    status: str = ""
+    historical_duplicates: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     messages: list[str] = field(default_factory=list)
+
+
+def find_verified_drive_copies_for_execution(
+    evidence_path: Path,
+    *,
+    prompt_id: str,
+    output_node_id: str,
+    output_sha256: str,
+) -> list[Path]:
+    """Return verified Drive paths for exact prompt/node/SHA (fail closed on mismatch)."""
+    from .identity_benchmark_artifact import (
+        find_verified_drive_copies_for_execution as _find,
+    )
+
+    return _find(
+        evidence_path,
+        prompt_id=prompt_id,
+        output_node_id=output_node_id,
+        output_sha256=output_sha256,
+    )
+
+
+def ensure_durable_benchmark_artifact(
+    *,
+    drive_root: Path,
+    source_path: Path,
+    prompt_id: str,
+    output_node_id: str,
+    source_sha256: str,
+    drive_output_dir: Path | None = None,
+    evidence_path: Path | None = None,
+    preferred_drive_path: Path | None = None,
+    wait_for_autosync_seconds: float | None = None,
+    created_by: str = "benchmark_capture",
+) -> DurableArtifactResult:
+    """Ensure a verified canonical Drive copy exists before ledger append.
+
+    Cross-path ownership (Package 4.12.1): reuse verified autosync Drive copies
+    when present; create a canonical fallback only when watcher evidence is absent.
+    """
+    from .identity_benchmark_artifact import (
+        DEFAULT_AUTOSYNC_WAIT_SECONDS,
+        ensure_canonical_identity_benchmark_artifact,
+    )
+
+    wait = (
+        DEFAULT_AUTOSYNC_WAIT_SECONDS
+        if wait_for_autosync_seconds is None
+        else float(wait_for_autosync_seconds)
+    )
+    canonical = ensure_canonical_identity_benchmark_artifact(
+        drive_root=drive_root,
+        source_path=source_path,
+        prompt_id=prompt_id,
+        output_node_id=output_node_id,
+        source_sha256=source_sha256,
+        drive_output_dir=drive_output_dir,
+        evidence_path=evidence_path,
+        preferred_drive_path=preferred_drive_path,
+        wait_for_autosync_seconds=wait,
+        allow_create_fallback=True,
+        created_by=created_by,
+    )
+    return DurableArtifactResult(
+        ok=canonical.ok,
+        drive_path=canonical.drive_path,
+        drive_sha256=canonical.drive_sha256,
+        local_path=canonical.local_path,
+        reused_existing=canonical.reused_existing,
+        status=canonical.status,
+        historical_duplicates=list(canonical.historical_duplicates),
+        errors=list(canonical.errors),
+        messages=list(canonical.messages),
+    )
 
 
 @dataclass
@@ -351,221 +427,6 @@ def _path_under(child: Path, parent: Path) -> bool:
         return True
     except (OSError, ValueError):
         return False
-
-
-def find_verified_drive_copies_for_execution(
-    evidence_path: Path,
-    *,
-    prompt_id: str,
-    output_node_id: str,
-    output_sha256: str,
-) -> list[Path]:
-    """Return verified Drive paths for exact prompt/node/SHA (fail closed on mismatch)."""
-    from .generation_evidence_ledger import EvidenceLedger
-
-    sha = str(output_sha256 or "").strip().lower()
-    if not sha or not evidence_path.is_file():
-        return []
-    matches: list[Path] = []
-    seen: set[str] = set()
-    for row in EvidenceLedger(evidence_path).read_all():
-        if str(row.get("sync_status") or "") != "verified":
-            continue
-        if str(row.get("prompt_id") or "") != prompt_id:
-            continue
-        if str(row.get("output_node_id") or "") != output_node_id:
-            continue
-        row_sha = str(row.get("drive_sha256") or row.get("local_sha256") or "").strip().lower()
-        if row_sha != sha:
-            continue
-        drive_path = Path(str(row.get("drive_path") or ""))
-        if not drive_path.is_file():
-            continue
-        key = str(drive_path.resolve())
-        if key in seen:
-            continue
-        seen.add(key)
-        matches.append(drive_path)
-    return matches
-
-
-def ensure_durable_benchmark_artifact(
-    *,
-    drive_root: Path,
-    source_path: Path,
-    prompt_id: str,
-    output_node_id: str,
-    source_sha256: str,
-    drive_output_dir: Path | None = None,
-    evidence_path: Path | None = None,
-    preferred_drive_path: Path | None = None,
-) -> DurableArtifactResult:
-    """Ensure a verified canonical Drive copy exists before ledger append."""
-    from .generation_evidence_ledger import EvidenceLedger, EvidenceRecord
-    from .output_autosync import copy_with_verification
-    from .permanent_output_naming import resolve_permanent_destination
-
-    result = DurableArtifactResult(ok=False, local_path=str(source_path))
-    source = Path(source_path)
-    sha = str(source_sha256 or "").strip().lower()
-    out_dir = Path(drive_output_dir) if drive_output_dir else _default_drive_output_dir(drive_root)
-    ev_path = Path(evidence_path) if evidence_path else _default_evidence_path(drive_root)
-
-    if not sha:
-        result.errors.append("ERROR: source SHA required for durable benchmark artifact.")
-        return result
-    if not source.is_file():
-        # Preferred/existing Drive path may still be authoritative after runtime wipe.
-        preferred = Path(preferred_drive_path) if preferred_drive_path else None
-        candidates = find_verified_drive_copies_for_execution(
-            ev_path, prompt_id=prompt_id, output_node_id=output_node_id, output_sha256=sha
-        )
-        if preferred is not None:
-            candidates = [preferred] + [c for c in candidates if c != preferred]
-        for candidate in candidates:
-            try:
-                actual = file_sha256(candidate).lower()
-            except OSError as exc:
-                result.errors.append(f"ERROR: Unable to read Drive artifact {candidate}: {exc}")
-                return result
-            if actual != sha:
-                result.errors.append(
-                    f"ERROR: Drive SHA mismatch for {candidate} (expected {sha}, actual {actual})"
-                )
-                return result
-            result.ok = True
-            result.drive_path = candidate
-            result.drive_sha256 = actual
-            result.reused_existing = True
-            result.messages.append(f"Reused verified Drive artifact (source missing): {candidate}")
-            return result
-        result.errors.append(f"ERROR: Benchmark output missing and no verified Drive copy: {source}")
-        return result
-
-    try:
-        actual_source = file_sha256(source).lower()
-    except OSError as exc:
-        result.errors.append(f"ERROR: Unable to hash source output: {exc}")
-        return result
-    if actual_source != sha:
-        result.errors.append(
-            f"ERROR: Source SHA mismatch (expected {sha}, actual {actual_source}) for {source}"
-        )
-        return result
-
-    # Prefer an already-verified Drive path for this exact execution.
-    existing = find_verified_drive_copies_for_execution(
-        ev_path, prompt_id=prompt_id, output_node_id=output_node_id, output_sha256=sha
-    )
-    if preferred_drive_path is not None and Path(preferred_drive_path).is_file():
-        preferred = Path(preferred_drive_path)
-        if preferred not in existing:
-            existing = [preferred] + existing
-    if len(existing) > 1:
-        # Distinct paths with same prompt/node/sha — verify all agree on bytes.
-        verified: list[Path] = []
-        for candidate in existing:
-            try:
-                if file_sha256(candidate).lower() == sha:
-                    verified.append(candidate)
-                else:
-                    result.errors.append(
-                        f"ERROR: Drive SHA mismatch for evidence path {candidate}"
-                    )
-                    return result
-            except OSError as exc:
-                result.errors.append(f"ERROR: Unable to read Drive artifact {candidate}: {exc}")
-                return result
-        if len({str(p.resolve()) for p in verified}) > 1:
-            result.errors.append(
-                "ERROR: Ambiguous verified Drive copies for same prompt/node/SHA; fail closed."
-            )
-            return result
-        existing = verified[:1]
-    if existing:
-        candidate = existing[0]
-        try:
-            actual = file_sha256(candidate).lower()
-        except OSError as exc:
-            result.errors.append(f"ERROR: Unable to read Drive artifact {candidate}: {exc}")
-            return result
-        if actual != sha:
-            result.errors.append(
-                f"ERROR: Drive SHA mismatch for {candidate} (expected {sha}, actual {actual})"
-            )
-            return result
-        result.ok = True
-        result.drive_path = candidate
-        result.drive_sha256 = actual
-        result.reused_existing = True
-        result.messages.append(f"Reused verified Drive artifact: {candidate}")
-        return result
-
-    # Source itself may already be the canonical Drive destination (live autosync path).
-    if _path_under(source, out_dir):
-        result.ok = True
-        result.drive_path = source
-        result.drive_sha256 = sha
-        result.reused_existing = True
-        result.messages.append(f"Source already under Drive outputs: {source}")
-        return result
-
-    try:
-        destination = resolve_permanent_destination(
-            out_dir,
-            capability=BENCHMARK_CAPABILITY,
-            source_path=source,
-        )
-    except RuntimeError as exc:
-        result.errors.append(f"ERROR: Unable to allocate durable Drive destination: {exc}")
-        return result
-
-    destination_result, sync_status, _retries, error = copy_with_verification(source, destination)
-    if sync_status != "verified" or destination_result is None:
-        result.errors.append(
-            f"ERROR: Durable Drive copy failed: {error or sync_status}"
-        )
-        return result
-    try:
-        drive_sha = file_sha256(destination_result).lower()
-    except OSError as exc:
-        result.errors.append(f"ERROR: Unable to verify Drive copy SHA: {exc}")
-        return result
-    if drive_sha != sha:
-        result.errors.append(
-            f"ERROR: Drive copy SHA mismatch (expected {sha}, actual {drive_sha})"
-        )
-        return result
-
-    # Record verified evidence so restart recovery can reuse the Drive copy.
-    EvidenceLedger(ev_path).append(
-        EvidenceRecord(
-            prompt_id=prompt_id,
-            schema_version=2,
-            output_node_id=output_node_id,
-            local_path=str(source),
-            drive_path=str(destination_result),
-            source_filename=source.name,
-            drive_filename=destination_result.name,
-            local_sha256=sha,
-            drive_sha256=drive_sha,
-            byte_size=destination_result.stat().st_size,
-            created_timestamp=utc_now(),
-            synchronized_timestamp=utc_now(),
-            sync_status="verified",
-            capability=BENCHMARK_CAPABILITY,
-            snapshot_status="skipped_identity_benchmark",
-            messages=["identity_benchmark_recovery_durable_copy"],
-            generation_id="",
-        )
-    )
-
-    result.ok = True
-    result.drive_path = destination_result
-    result.drive_sha256 = drive_sha
-    result.reused_existing = False
-    result.messages.append(f"Created verified Drive artifact: {destination_result}")
-    return result
 
 
 def reclassify_legacy_ordinary_generation(

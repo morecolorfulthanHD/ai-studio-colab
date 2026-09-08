@@ -685,47 +685,89 @@ class OutputAutoSyncService:
         self.recompute_counters()
         self.write_status()
 
-        try:
-            destination = resolve_permanent_destination(
-                self.drive_output_dir,
-                capability=effective_capability,
-                source_path=local_path,
-            )
-        except RuntimeError as exc:
-            record = EvidenceRecord(
-                prompt_id=prompt_id,
-                schema_version=SCHEMA_VERSION if provenance else 1,
-                workflow_identifier=workflow_identifier,
-                workflow_hash=workflow_hash,
-                output_node_id=output_node_id,
-                local_path=str(local_path),
-                source_filename=source_filename,
-                local_sha256=local_hash,
-                byte_size=local_path.stat().st_size,
-                created_timestamp=now,
-                sync_status="failed",
-                retry_count=prior_retries,
-                error_summary=str(exc),
-                prior_error_summary=prior_error,
-                candidate_model=candidate_model,
-                capability=effective_capability,
-            )
-            self._apply_provenance(record, provenance)
-            self.ledger.append(record)
-            self.status.last_verification = "failed"
-            self.status.evidence_status = "failed"
-            self.status.last_error = record.error_summary
-            self.recompute_counters()
-            self.write_status()
-            return record
+        from .identity_benchmark_capture import is_identity_benchmark_provenance
 
-        destination_result, sync_status, retries, error = copy_with_verification(
-            local_path,
-            destination,
-            max_retries=self.max_copy_retries,
-            sleep_fn=self.sleep_fn,
-            copy_fn=self.copy_fn,
+        is_id_bench_early = is_identity_benchmark_provenance(provenance, ui_workflow) or (
+            str(effective_capability or "") == "identity_benchmark"
         )
+
+        destination_result: Path | None = None
+        sync_status = "failed"
+        retries = 0
+        error = ""
+        artifact_status = ""
+
+        if is_id_bench_early:
+            # Preferred owner: autosync creates/reuses ONE Drive file for this
+            # prompt|node|sha via the shared identity-benchmark artifact lock.
+            from .identity_benchmark_artifact import (
+                ensure_canonical_identity_benchmark_artifact,
+            )
+
+            canonical = ensure_canonical_identity_benchmark_artifact(
+                drive_root=Path(self.drive_root),
+                source_path=local_path,
+                prompt_id=prompt_id,
+                output_node_id=output_node_id,
+                source_sha256=local_hash,
+                drive_output_dir=self.drive_output_dir,
+                evidence_path=self.ledger.path,
+                wait_for_autosync_seconds=0.0,
+                allow_create_fallback=True,
+                created_by="autosync",
+            )
+            artifact_status = canonical.status
+            if canonical.ok and canonical.drive_path is not None:
+                destination_result = Path(canonical.drive_path)
+                sync_status = "verified"
+                for msg in canonical.messages:
+                    self.log(msg)
+            else:
+                error = "; ".join(canonical.errors) or "identity benchmark canonical artifact failed"
+                sync_status = "failed"
+        else:
+            try:
+                destination = resolve_permanent_destination(
+                    self.drive_output_dir,
+                    capability=effective_capability,
+                    source_path=local_path,
+                )
+            except RuntimeError as exc:
+                record = EvidenceRecord(
+                    prompt_id=prompt_id,
+                    schema_version=SCHEMA_VERSION if provenance else 1,
+                    workflow_identifier=workflow_identifier,
+                    workflow_hash=workflow_hash,
+                    output_node_id=output_node_id,
+                    local_path=str(local_path),
+                    source_filename=source_filename,
+                    local_sha256=local_hash,
+                    byte_size=local_path.stat().st_size,
+                    created_timestamp=now,
+                    sync_status="failed",
+                    retry_count=prior_retries,
+                    error_summary=str(exc),
+                    prior_error_summary=prior_error,
+                    candidate_model=candidate_model,
+                    capability=effective_capability,
+                )
+                self._apply_provenance(record, provenance)
+                self.ledger.append(record)
+                self.status.last_verification = "failed"
+                self.status.evidence_status = "failed"
+                self.status.last_error = record.error_summary
+                self.recompute_counters()
+                self.write_status()
+                return record
+
+            destination_result, sync_status, retries, error = copy_with_verification(
+                local_path,
+                destination,
+                max_retries=self.max_copy_retries,
+                sleep_fn=self.sleep_fn,
+                copy_fn=self.copy_fn,
+            )
+
         attempt_retries = prior_retries + retries
         if sync_status == "verified" and destination_result is not None:
             record = EvidenceRecord(
@@ -768,7 +810,11 @@ class OutputAutoSyncService:
                 is_identity_benchmark_provenance,
             )
 
-            is_id_bench = is_identity_benchmark_provenance(provenance, ui_workflow)
+            is_id_bench = is_id_bench_early or is_identity_benchmark_provenance(
+                provenance, ui_workflow
+            )
+            if artifact_status:
+                record.messages.append(f"durable_artifact_status:{artifact_status}")
             if is_id_bench:
                 # Isolation: do NOT create ordinary generation snapshots/index rows.
                 ledger_path = Path(self.drive_root) / "logs" / "identity_benchmark.jsonl"

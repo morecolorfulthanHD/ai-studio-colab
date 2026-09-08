@@ -12,6 +12,7 @@ import sys
 import tempfile
 import urllib.error
 import uuid
+import concurrent.futures
 from pathlib import Path
 from unittest.mock import patch
 import importlib.util
@@ -312,6 +313,30 @@ def _concurrent_append_worker(payload: dict) -> tuple[bool, bool]:
         record,
         idempotence_key=str(payload["idempotence_key"]),
     )
+
+
+def _concurrent_durable_artifact_worker(payload: dict) -> dict:
+    """Picklable worker: ensure durable identity-benchmark Drive artifact."""
+    from core.runtime.identity_benchmark_capture import ensure_durable_benchmark_artifact
+
+    result = ensure_durable_benchmark_artifact(
+        drive_root=Path(payload["drive_root"]),
+        source_path=Path(payload["source_path"]),
+        prompt_id=str(payload["prompt_id"]),
+        output_node_id=str(payload["output_node_id"]),
+        source_sha256=str(payload["source_sha256"]),
+        drive_output_dir=Path(payload["drive_output_dir"]),
+        evidence_path=Path(payload["evidence_path"]),
+        wait_for_autosync_seconds=float(payload.get("wait_for_autosync_seconds") or 0.0),
+        created_by=str(payload.get("created_by") or "benchmark_capture"),
+    )
+    return {
+        "ok": result.ok,
+        "drive_path": str(result.drive_path) if result.drive_path else "",
+        "reused": result.reused_existing,
+        "status": result.status,
+        "errors": list(result.errors),
+    }
 
 
 def _concurrent_evidence_worker(payload: dict) -> str:
@@ -2771,9 +2796,363 @@ def main() -> int:
         _assert_true("idempotence key present", ledger_has_idempotence_key(ledger, key))
         _pass(results, "Watcher captures benchmark once; does not enter ordinary generation ledger")
 
-        # Concurrent idempotence: same key from two processes → exactly one row
-        import concurrent.futures
+        # --- Package 4.12.1: identity benchmark Drive persistence dedup (A–M) ---
+        from core.runtime.identity_benchmark_artifact import (
+            STATUS_CREATED_CANONICAL_FALLBACK,
+            STATUS_REUSED_AUTOSYNC,
+            choose_canonical_drive_path,
+            ensure_canonical_identity_benchmark_artifact,
+            execution_artifact_key,
+            format_historical_duplicate_report,
+        )
+        from core.scripts.report_identity_benchmark_duplicate_artifacts import (
+            scan_historical_duplicates,
+        )
 
+        def _idbench_png_count() -> int:
+            return len(list((paths["drive"] / "outputs").glob("identity_benchmark_*.png")))
+
+        # A: autosync first → capture reuses same Drive path
+        local_a = paths["comfy"] / "output" / "dedup_a.png"
+        local_a.write_bytes(b"\x89PNG\r\n\x1a\n" + b"DEDUP-A")
+        sha_a = file_sha256(local_a)
+        before_a = _idbench_png_count()
+        rec_a = svc.sync_local_output(
+            prompt_id="prompt-dedup-a",
+            output_node_id="9",
+            local_path=local_a,
+            provenance=prov,
+            ui_workflow=prep_wf,
+            capability="identity_benchmark",
+        )
+        _assert_true("A watcher ok", rec_a is not None and rec_a.sync_status == "verified")
+        path_a = Path(str(rec_a.drive_path))
+        after_watch_a = _idbench_png_count()
+        _assert_equal("A one file after watcher", after_watch_a, before_a + 1)
+        durable_a = ensure_durable_benchmark_artifact(
+            drive_root=paths["drive"],
+            source_path=local_a,
+            prompt_id="prompt-dedup-a",
+            output_node_id="9",
+            source_sha256=sha_a,
+            drive_output_dir=paths["drive"] / "outputs",
+            evidence_path=evidence,
+            wait_for_autosync_seconds=0.0,
+        )
+        _assert_true("A durable ok", durable_a.ok)
+        _assert_true("A reused", durable_a.reused_existing)
+        _assert_equal("A same path", str(durable_a.drive_path.resolve()), str(path_a.resolve()))
+        _assert_true(
+            "A REUSED_AUTOSYNC",
+            durable_a.status == STATUS_REUSED_AUTOSYNC
+            or "REUSED_AUTOSYNC" in " ".join(durable_a.messages),
+        )
+        _assert_equal("A still one file", _idbench_png_count(), after_watch_a)
+        _pass(results, "A: autosync persists first -> benchmark capture reuses same Drive path")
+
+        # B: capture waits briefly; watcher evidence appears within coordination window
+        local_b = paths["comfy"] / "output" / "dedup_b.png"
+        local_b.write_bytes(b"\x89PNG\r\n\x1a\n" + b"DEDUP-B")
+        sha_b = file_sha256(local_b)
+        before_b = _idbench_png_count()
+
+        def _delayed_watcher_b():
+            import time as _time
+
+            _time.sleep(0.15)
+            return svc.sync_local_output(
+                prompt_id="prompt-dedup-b",
+                output_node_id="9",
+                local_path=local_b,
+                provenance=prov,
+                ui_workflow=prep_wf,
+                capability="identity_benchmark",
+            )
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            fut_b = pool.submit(_delayed_watcher_b)
+            durable_b = ensure_durable_benchmark_artifact(
+                drive_root=paths["drive"],
+                source_path=local_b,
+                prompt_id="prompt-dedup-b",
+                output_node_id="9",
+                source_sha256=sha_b,
+                drive_output_dir=paths["drive"] / "outputs",
+                evidence_path=evidence,
+                wait_for_autosync_seconds=2.0,
+                created_by="benchmark_capture",
+            )
+            watch_b = fut_b.result(timeout=10)
+        _assert_true("B durable ok", durable_b.ok)
+        _assert_true("B watcher ok", watch_b is not None and watch_b.sync_status == "verified")
+        _assert_equal(
+            "B same canonical path",
+            str(Path(durable_b.drive_path).resolve()),
+            str(Path(watch_b.drive_path).resolve()),
+        )
+        _assert_equal("B one physical file", _idbench_png_count(), before_b + 1)
+        _pass(results, "B: bounded coordination -> watcher+capture converge on one file")
+
+        # C: capture creates fallback first; later watcher reuses same file
+        local_c = paths["comfy"] / "output" / "dedup_c.png"
+        local_c.write_bytes(b"\x89PNG\r\n\x1a\n" + b"DEDUP-C")
+        sha_c = file_sha256(local_c)
+        before_c = _idbench_png_count()
+        durable_c = ensure_durable_benchmark_artifact(
+            drive_root=paths["drive"],
+            source_path=local_c,
+            prompt_id="prompt-dedup-c",
+            output_node_id="9",
+            source_sha256=sha_c,
+            drive_output_dir=paths["drive"] / "outputs",
+            evidence_path=evidence,
+            wait_for_autosync_seconds=0.0,
+            created_by="benchmark_capture",
+        )
+        _assert_true("C created ok", durable_c.ok and not durable_c.reused_existing)
+        _assert_equal("C status fallback", durable_c.status, STATUS_CREATED_CANONICAL_FALLBACK)
+        _assert_true(
+            "C fallback message",
+            any("CREATED_CANONICAL_FALLBACK" in m for m in durable_c.messages),
+        )
+        mid_c = _idbench_png_count()
+        _assert_equal("C one file after capture", mid_c, before_c + 1)
+        watch_c = svc.sync_local_output(
+            prompt_id="prompt-dedup-c",
+            output_node_id="9",
+            local_path=local_c,
+            provenance=prov,
+            ui_workflow=prep_wf,
+            capability="identity_benchmark",
+        )
+        _assert_true("C watcher ok", watch_c is not None and watch_c.sync_status == "verified")
+        _assert_equal(
+            "C watcher reused path",
+            str(Path(watch_c.drive_path).resolve()),
+            str(Path(durable_c.drive_path).resolve()),
+        )
+        _assert_equal("C still one file", _idbench_png_count(), mid_c)
+        _pass(results, "C: capture fallback first -> later watcher reuses same canonical file")
+
+        # D: concurrent autosync + benchmark capture → one physical file
+        local_d = paths["comfy"] / "output" / "dedup_d.png"
+        local_d.write_bytes(b"\x89PNG\r\n\x1a\n" + b"DEDUP-D")
+        sha_d = file_sha256(local_d)
+        before_d = _idbench_png_count()
+        durable_payload_d = {
+            "drive_root": str(paths["drive"]),
+            "source_path": str(local_d),
+            "prompt_id": "prompt-dedup-d",
+            "output_node_id": "9",
+            "source_sha256": sha_d,
+            "drive_output_dir": str(paths["drive"] / "outputs"),
+            "evidence_path": str(evidence),
+            "wait_for_autosync_seconds": 0.0,
+            "created_by": "benchmark_capture",
+        }
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            fut_watch = pool.submit(
+                svc.sync_local_output,
+                prompt_id="prompt-dedup-d",
+                output_node_id="9",
+                local_path=local_d,
+                provenance=prov,
+                ui_workflow=prep_wf,
+                capability="identity_benchmark",
+            )
+            fut_cap = pool.submit(_concurrent_durable_artifact_worker, durable_payload_d)
+            watch_d = fut_watch.result(timeout=30)
+            cap_d = fut_cap.result(timeout=30)
+        _assert_true("D watcher ok", watch_d is not None and watch_d.sync_status == "verified")
+        _assert_true("D capture ok", cap_d.get("ok"))
+        _assert_equal(
+            "D same path",
+            str(Path(watch_d.drive_path).resolve()),
+            str(Path(cap_d["drive_path"]).resolve()),
+        )
+        _assert_equal("D one file", _idbench_png_count(), before_d + 1)
+        _pass(results, "D: concurrent autosync + benchmark capture -> one physical file")
+
+        # E: same prompt/node/SHA twice → one physical file
+        before_e = _idbench_png_count()
+        again_e = ensure_durable_benchmark_artifact(
+            drive_root=paths["drive"],
+            source_path=local_d,
+            prompt_id="prompt-dedup-d",
+            output_node_id="9",
+            source_sha256=sha_d,
+            drive_output_dir=paths["drive"] / "outputs",
+            evidence_path=evidence,
+            wait_for_autosync_seconds=0.0,
+        )
+        _assert_true("E reused", again_e.ok and again_e.reused_existing)
+        _assert_equal("E no new file", _idbench_png_count(), before_e)
+        _pass(results, "E: same prompt/node/SHA processed twice -> one physical file")
+
+        # F: same prompt/node, different SHA → distinct artifact allowed
+        local_f = paths["comfy"] / "output" / "dedup_f.png"
+        local_f.write_bytes(b"\x89PNG\r\n\x1a\n" + b"DEDUP-F-DIFFERENT")
+        sha_f = file_sha256(local_f)
+        before_f = _idbench_png_count()
+        durable_f = ensure_durable_benchmark_artifact(
+            drive_root=paths["drive"],
+            source_path=local_f,
+            prompt_id="prompt-dedup-d",
+            output_node_id="9",
+            source_sha256=sha_f,
+            drive_output_dir=paths["drive"] / "outputs",
+            evidence_path=evidence,
+            wait_for_autosync_seconds=0.0,
+        )
+        _assert_true("F ok", durable_f.ok)
+        _assert_equal("F new file", _idbench_png_count(), before_f + 1)
+        _assert_false(
+            "F different path",
+            str(Path(durable_f.drive_path).resolve()) == str(Path(again_e.drive_path).resolve()),
+        )
+        _pass(results, "F: same prompt/node different SHA -> distinct artifact allowed")
+
+        # G: same SHA different prompt/node → do not conflate
+        local_g = paths["comfy"] / "output" / "dedup_g.png"
+        local_g.write_bytes(local_a.read_bytes())  # identical bytes to A
+        sha_g = file_sha256(local_g)
+        _assert_equal("G same sha as A", sha_g, sha_a)
+        before_g = _idbench_png_count()
+        durable_g = ensure_durable_benchmark_artifact(
+            drive_root=paths["drive"],
+            source_path=local_g,
+            prompt_id="prompt-dedup-g-other",
+            output_node_id="9",
+            source_sha256=sha_g,
+            drive_output_dir=paths["drive"] / "outputs",
+            evidence_path=evidence,
+            wait_for_autosync_seconds=0.0,
+        )
+        _assert_true("G ok", durable_g.ok)
+        _assert_equal("G new file for other execution", _idbench_png_count(), before_g + 1)
+        _assert_false(
+            "G not conflated with A",
+            str(Path(durable_g.drive_path).resolve()) == str(path_a.resolve()),
+        )
+        key_a = execution_artifact_key("prompt-dedup-a", "9", sha_a)
+        key_g = execution_artifact_key("prompt-dedup-g-other", "9", sha_g)
+        _assert_false("G distinct execution keys", key_a == key_g)
+        _pass(results, "G: same SHA different prompt/node -> not incorrectly conflated")
+
+        # H: missed-history recovery → no extra Drive copy (covered above + explicit)
+        before_h = _idbench_png_count()
+        hist_h = {
+            "prompt-dedup-a": {
+                "prompt": hist_entry["prompt"],
+                "outputs": {
+                    "9": {
+                        "images": [
+                            {"filename": "dedup_a.png", "subfolder": "", "type": "output"}
+                        ]
+                    }
+                },
+                "status": {"completed": True},
+            }
+        }
+        ledger_h = paths["drive"] / "logs" / "identity_benchmark_dedup_h.jsonl"
+        rec_h = recover_identity_benchmarks_from_history(
+            drive_root=paths["drive"],
+            ledger_path=ledger_h,
+            comfy_output_dir=paths["comfy"] / "output",
+            base_url="http://127.0.0.1:8188",
+            history=hist_h,
+            drive_output_dir=paths["drive"] / "outputs",
+            evidence_path=evidence,
+        )
+        _assert_true("H recovery ok", rec_h.get("ok"))
+        _assert_equal("H no extra Drive file", _idbench_png_count(), before_h)
+        _pass(results, "H: missed-history recovery -> no extra Drive copy")
+
+        # I: ledger idempotence remains exactly once (re-capture)
+        rows_before_i = len(
+            [r for r in load_identity_benchmark_records(ledger) if r.get("prompt_id") == "prompt-dedup-a"]
+        )
+        cap_i = capture_identity_benchmark_execution(
+            drive_root=paths["drive"],
+            ledger_path=ledger,
+            prompt_id="prompt-dedup-a",
+            output_node_id="9",
+            output_path=path_a,
+            output_sha256=sha_a,
+            provenance=prov,
+            ui_workflow=prep_wf,
+            local_path=str(local_a),
+            evidence_path=evidence,
+        )
+        _assert_true("I capture ok", cap_i.ok)
+        rows_after_i = len(
+            [r for r in load_identity_benchmark_records(ledger) if r.get("prompt_id") == "prompt-dedup-a"]
+        )
+        _assert_equal("I ledger exactly once", rows_after_i, max(1, rows_before_i))
+        if rows_before_i >= 1:
+            _assert_true("I skipped duplicate", cap_i.skipped_duplicate)
+        _pass(results, "I: benchmark ledger idempotence remains exactly once")
+
+        # J: ordinary generation ledger remains free of benchmark output
+        gen_after = gen_index.read_text(encoding="utf-8") if gen_index.is_file() else ""
+        _assert_false("J no dedup-a in gen index", "prompt-dedup-a" in gen_after)
+        _assert_false("J no dedup-c in gen index", "prompt-dedup-c" in gen_after)
+        _pass(results, "J: ordinary generation ledger remains free of benchmark output")
+
+        # Historical duplicate report-only (no delete)
+        orphan = paths["drive"] / "outputs" / "identity_benchmark_20990101_999999.png"
+        orphan.write_bytes(path_a.read_bytes())
+        from core.runtime.generation_evidence_ledger import EvidenceLedger, EvidenceRecord
+
+        EvidenceLedger(evidence).append(
+            EvidenceRecord(
+                prompt_id="prompt-dedup-a",
+                output_node_id="9",
+                local_path=str(local_a),
+                drive_path=str(orphan),
+                local_sha256=sha_a,
+                drive_sha256=sha_a,
+                sync_status="verified",
+                capability="identity_benchmark",
+            )
+        )
+        reports = scan_historical_duplicates(
+            evidence_path=evidence, drive_output_dir=paths["drive"] / "outputs"
+        )
+        _assert_true("historical dup detected", any("prompt-dedup-a" in r["execution_key"] for r in reports))
+        _assert_true("orphan still present", orphan.is_file())
+        canonical_g, dups_g = choose_canonical_drive_path([path_a, orphan])
+        msgs = format_historical_duplicate_report(
+            canonical=canonical_g, duplicates=dups_g, sha=sha_a
+        )
+        _assert_true("report-only action", any("action: none (report-only)" in m for m in msgs))
+        _pass(results, "Historical duplicate artifacts reported without deletion")
+
+        # Concurrent process-level durable ensure → one file
+        local_p = paths["comfy"] / "output" / "dedup_proc.png"
+        local_p.write_bytes(b"\x89PNG\r\n\x1a\n" + b"DEDUP-PROC")
+        sha_p = file_sha256(local_p)
+        before_p = _idbench_png_count()
+        payload_p = {
+            "drive_root": str(paths["drive"]),
+            "source_path": str(local_p),
+            "prompt_id": "prompt-dedup-proc",
+            "output_node_id": "9",
+            "source_sha256": sha_p,
+            "drive_output_dir": str(paths["drive"] / "outputs"),
+            "evidence_path": str(evidence),
+            "wait_for_autosync_seconds": 0.0,
+            "created_by": "benchmark_capture",
+        }
+        with concurrent.futures.ProcessPoolExecutor(max_workers=4) as pool:
+            proc_results = list(pool.map(_concurrent_durable_artifact_worker, [payload_p] * 6))
+        _assert_true("proc all ok", all(r.get("ok") for r in proc_results))
+        paths_p = {str(Path(r["drive_path"]).resolve()) for r in proc_results if r.get("drive_path")}
+        _assert_equal("proc one canonical path", len(paths_p), 1)
+        _assert_equal("proc one file", _idbench_png_count(), before_p + 1)
+        _pass(results, "Concurrent process durable ensure -> one physical Drive file")
+
+        # Concurrent idempotence: same key from two processes → exactly one row
         conc_ledger = paths["drive"] / "logs" / "identity_benchmark_conc.jsonl"
         conc_key = benchmark_idempotence_key("prompt-conc-same", "9", out_sha)
         same_payload = {
@@ -3101,7 +3480,6 @@ def main() -> int:
         _pass(results, "Report shows captured execution with human review pending")
 
         # --- Shared JSONL lock coverage (EvidenceLedger / GenerationIndex / audit) ---
-        import concurrent.futures
         import time
 
         conc_evidence = paths["drive"] / "logs" / "autosync" / "evidence_conc.jsonl"
