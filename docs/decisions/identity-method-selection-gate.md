@@ -31,3 +31,5 @@ Prepare/open/simulation success is **not** sufficient.
 ## Current decision
 
 Deferred. No automatic promotion. No production identity default claimed by Package 4.12.
+
+**Visual selection status:** PENDING / NOT ACCEPTED — FaceID baseline S2/S3/S4 scenario adherence failed; Package 4.12.2 conditioning sweep is method-fitness investigation only (not promotion).

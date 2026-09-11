@@ -808,14 +808,49 @@ class OutputAutoSyncService:
             from .identity_benchmark_capture import (
                 capture_identity_benchmark_execution,
                 is_identity_benchmark_provenance,
+                is_identity_benchmark_tuning_provenance,
             )
 
             is_id_bench = is_id_bench_early or is_identity_benchmark_provenance(
                 provenance, ui_workflow
             )
+            is_tuning = is_identity_benchmark_tuning_provenance(provenance, ui_workflow)
             if artifact_status:
                 record.messages.append(f"durable_artifact_status:{artifact_status}")
-            if is_id_bench:
+            if is_tuning:
+                from .identity_benchmark_tuning import (
+                    capture_faceid_tuning_execution,
+                    default_tuning_ledger_path,
+                )
+
+                record.generation_id = ""
+                record.snapshot_status = "skipped_identity_benchmark_tuning"
+                tuning = capture_faceid_tuning_execution(
+                    drive_root=Path(self.drive_root),
+                    ledger_path=default_tuning_ledger_path(Path(self.drive_root)),
+                    prompt_id=prompt_id,
+                    output_node_id=output_node_id,
+                    output_path=destination_result,
+                    output_sha256=str(record.drive_sha256 or local_hash),
+                    provenance=provenance or ExecutionProvenance(),
+                    ui_workflow=ui_workflow,
+                    local_path=str(local_path),
+                )
+                if tuning.ok and not tuning.skipped_not_tuning:
+                    record.messages.append("identity_benchmark_tuning_ledger_captured")
+                    if tuning.skipped_duplicate:
+                        record.messages.append("identity_benchmark_tuning_ledger_duplicate")
+                    self.log(
+                        "Identity benchmark tuning ledger: "
+                        + ("; ".join(tuning.messages) if tuning.messages else "captured")
+                    )
+                else:
+                    for err in tuning.errors:
+                        record.messages.append(f"identity_benchmark_tuning_capture_error:{err}")
+                        self.log(err)
+                    if tuning.errors:
+                        self.status.last_error = tuning.errors[0]
+            elif is_id_bench:
                 # Isolation: do NOT create ordinary generation snapshots/index rows.
                 ledger_path = Path(self.drive_root) / "logs" / "identity_benchmark.jsonl"
                 bench = capture_identity_benchmark_execution(
@@ -876,7 +911,14 @@ class OutputAutoSyncService:
             self.status.last_drive_copy = str(destination_result)
             self.status.last_verification = "verified"
             self.status.evidence_status = "verified"
-            if not (is_id_bench and any("identity_benchmark_capture_error" in m for m in (record.messages or []))):
+            capture_err = any(
+                (
+                    "identity_benchmark_capture_error" in m
+                    or "identity_benchmark_tuning_capture_error" in m
+                )
+                for m in (record.messages or [])
+            )
+            if not ((is_id_bench or is_tuning) and capture_err):
                 self.status.last_error = ""
             if recovery:
                 self.status.last_recovered_prompt = prompt_id

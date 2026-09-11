@@ -58,6 +58,7 @@ from .workflow_library_preparation import _copy_preparation_tree
 
 PACKAGE_VERSION = "4.12"
 PREPARATION_KIND_IDENTITY_BENCHMARK = "identity_benchmark"
+PREPARATION_KIND_IDENTITY_BENCHMARK_TUNING = "identity_benchmark_tuning"
 BENCHMARK_CAPABILITY = "identity_benchmark"
 
 # Single /object_info request timeout. Do not raise this to hide a hung backend.
@@ -340,8 +341,13 @@ def is_benchmark_generation_metadata(metadata: dict[str, Any] | None) -> bool:
         return False
     if metadata.get("benchmark_run") is True:
         return True
+    if metadata.get("benchmark_tuning") is True:
+        return True
     kind = str(metadata.get("preparation_kind") or "").strip()
-    if kind == PREPARATION_KIND_IDENTITY_BENCHMARK:
+    if kind in {
+        PREPARATION_KIND_IDENTITY_BENCHMARK,
+        PREPARATION_KIND_IDENTITY_BENCHMARK_TUNING,
+    }:
         return True
     capability = str(metadata.get("capability") or "").strip()
     if capability in {BENCHMARK_CAPABILITY, CANDIDATE_REACTOR, CANDIDATE_FACEID}:
@@ -362,6 +368,11 @@ def is_benchmark_generation_metadata(metadata: dict[str, Any] | None) -> bool:
 
 BENCHMARK_PARENT_REFUSAL = (
     "ERROR: Identity-benchmark generations are not eligible as ordinary "
+    "variation or reproduction parents."
+)
+
+TUNING_PARENT_REFUSAL = (
+    "ERROR: Identity-benchmark tuning outputs are not eligible as ordinary "
     "variation or reproduction parents."
 )
 
@@ -2307,7 +2318,11 @@ def restage_identity_benchmark_face(
 ) -> tuple[list[str], list[str]]:
     messages: list[str] = []
     errors: list[str] = []
-    if str(metadata.get("preparation_kind") or "") != PREPARATION_KIND_IDENTITY_BENCHMARK:
+    kind = str(metadata.get("preparation_kind") or "")
+    if kind not in {
+        PREPARATION_KIND_IDENTITY_BENCHMARK,
+        PREPARATION_KIND_IDENTITY_BENCHMARK_TUNING,
+    }:
         return messages, errors
     archived = prepared_dir / "benchmark_source" / "primary_face.png"
     if not archived.is_file():

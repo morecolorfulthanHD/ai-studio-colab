@@ -236,4 +236,19 @@ python core/scripts/report_identity_benchmark.py
 
 Identity-benchmark generations (`benchmark_run` / `preparation_kind=identity_benchmark`) are **refused** as ordinary Package 4.10 reproduction or Package 4.11 variation parents.
 
+### Package 4.12.2 — FaceID conditioning sweep (isolated)
+
+Controlled tuning of FaceID `weight` / `weight_faceidv2` / `start_at` / `end_at` only. First phase: **S2 + S3**. Separate ledger `identity_benchmark_tuning.jsonl`. Does not overwrite frozen baseline prep IDs. Does not auto-promote.
+
+```bash
+python core/scripts/prepare_faceid_tuning_benchmark.py \
+  --scenario S2 \
+  --variant faceid_v2_1p5_full \
+  --character-id char_<uuid> \
+  --allow-benchmark
+python core/scripts/report_identity_benchmark_tuning.py
+```
+
+Operational execution/capture PASS ≠ visual scenario PASS. See dogfooding checklist.
+
 See `docs/decisions/identity-method-selection-gate.md` and `docs/dogfooding/identity-method-benchmark-checklist.md`.

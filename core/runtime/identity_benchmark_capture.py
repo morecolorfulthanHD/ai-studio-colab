@@ -22,6 +22,7 @@ from .identity_benchmark import (
     IdentityBenchmarkRecord,
     PACKAGE_VERSION,
     PREPARATION_KIND_IDENTITY_BENCHMARK,
+    PREPARATION_KIND_IDENTITY_BENCHMARK_TUNING,
     append_identity_benchmark_record_if_absent,
     is_benchmark_generation_metadata,
     load_identity_benchmark_records,
@@ -67,13 +68,20 @@ def is_identity_benchmark_provenance(
     if provenance is not None:
         meta = {
             "benchmark_run": True
-            if str(provenance.preparation_kind or "") == PREPARATION_KIND_IDENTITY_BENCHMARK
+            if str(provenance.preparation_kind or "")
+            in {
+                PREPARATION_KIND_IDENTITY_BENCHMARK,
+                PREPARATION_KIND_IDENTITY_BENCHMARK_TUNING,
+            }
             else None,
             "preparation_kind": provenance.preparation_kind,
             "capability": provenance.capability,
             "workflow_identifier": provenance.workflow_identifier,
         }
-        if str(provenance.preparation_kind or "") == PREPARATION_KIND_IDENTITY_BENCHMARK:
+        if str(provenance.preparation_kind or "") in {
+            PREPARATION_KIND_IDENTITY_BENCHMARK,
+            PREPARATION_KIND_IDENTITY_BENCHMARK_TUNING,
+        }:
             return True
         if str(provenance.capability or "") == BENCHMARK_CAPABILITY:
             return True
@@ -83,6 +91,27 @@ def is_identity_benchmark_provenance(
             return True
         meta.update(ai)
     return is_benchmark_generation_metadata(meta)
+
+
+def is_identity_benchmark_tuning_provenance(
+    provenance: ExecutionProvenance | None,
+    ui_workflow: dict[str, Any] | None = None,
+) -> bool:
+    """True when this execution belongs to the FaceID conditioning-sweep ledger."""
+    if provenance is not None and str(provenance.preparation_kind or "") == (
+        PREPARATION_KIND_IDENTITY_BENCHMARK_TUNING
+    ):
+        return True
+    if ui_workflow is not None:
+        ai = extract_ai_studio_extra(ui_workflow)
+        if isinstance(ai, dict):
+            if ai.get("benchmark_tuning") is True:
+                return True
+            if str(ai.get("preparation_kind") or "") == PREPARATION_KIND_IDENTITY_BENCHMARK_TUNING:
+                return True
+            if str(ai.get("benchmark_subtype") or "") == "faceid_conditioning_sweep":
+                return True
+    return False
 
 
 @dataclass
@@ -284,7 +313,15 @@ def resolve_benchmark_capture_context(
         row = _load_prep_metadata(drive_root, prep_id)
         if row is not None:
             kind = str(row.get("preparation_kind") or "")
-            if kind and kind != PREPARATION_KIND_IDENTITY_BENCHMARK and row.get("benchmark_run") is not True:
+            if (
+                kind
+                and kind
+                not in {
+                    PREPARATION_KIND_IDENTITY_BENCHMARK,
+                    PREPARATION_KIND_IDENTITY_BENCHMARK_TUNING,
+                }
+                and row.get("benchmark_run") is not True
+            ):
                 errors.append(
                     f"ERROR: preparation {prep_id} is not an identity_benchmark preparation."
                 )
@@ -822,6 +859,14 @@ def capture_identity_benchmark_execution(
     Already-ledgered executions perform ZERO artifact writes.
     """
     result = BenchmarkCaptureResult(ok=False)
+    if is_identity_benchmark_tuning_provenance(provenance, ui_workflow):
+        result.skipped_not_benchmark = True
+        result.messages.append(
+            "FaceID tuning execution — refused for baseline identity_benchmark.jsonl; "
+            "use identity_benchmark_tuning ledger."
+        )
+        result.ok = True
+        return result
     if not is_identity_benchmark_provenance(provenance, ui_workflow):
         result.skipped_not_benchmark = True
         result.messages.append("Not an identity-benchmark execution; skipped.")
@@ -1085,9 +1130,15 @@ def recover_identity_benchmarks_from_history(
                 if probe_ctx is None:
                     report["skipped_non_benchmark"] += 1
                     continue
-                provenance.capability = BENCHMARK_CAPABILITY
-                provenance.preparation_kind = PREPARATION_KIND_IDENTITY_BENCHMARK
-                provenance.preparation_id = probe_ctx.preparation_id
+                # Do not force baseline kind onto tuning executions.
+                if is_identity_benchmark_tuning_provenance(provenance, ui_workflow):
+                    provenance.capability = BENCHMARK_CAPABILITY
+                    provenance.preparation_kind = PREPARATION_KIND_IDENTITY_BENCHMARK_TUNING
+                    provenance.preparation_id = probe_ctx.preparation_id
+                else:
+                    provenance.capability = BENCHMARK_CAPABILITY
+                    provenance.preparation_kind = PREPARATION_KIND_IDENTITY_BENCHMARK
+                    provenance.preparation_id = probe_ctx.preparation_id
 
             local_path = resolve(
                 Path(comfy_output_dir),
@@ -1130,27 +1181,51 @@ def recover_identity_benchmarks_from_history(
                     continue
                 sha = next(iter(sha_candidates))
 
-            capture = capture_identity_benchmark_execution(
-                drive_root=drive_root,
-                ledger_path=ledger_path,
-                prompt_id=str(prompt_id),
-                output_node_id=node_id,
-                output_path=local_path,
-                output_sha256=sha,
-                provenance=provenance,
-                ui_workflow=ui_workflow,
-                local_path=str(local_path),
-                ensure_durable=True,
-                drive_output_dir=out_dir,
-                evidence_path=ev_path,
-                reclassify_ordinary=True,
-            )
+            if is_identity_benchmark_tuning_provenance(provenance, ui_workflow):
+                from .identity_benchmark_tuning import (
+                    capture_faceid_tuning_execution,
+                    default_tuning_ledger_path,
+                )
+
+                capture = capture_faceid_tuning_execution(
+                    drive_root=drive_root,
+                    ledger_path=default_tuning_ledger_path(drive_root),
+                    prompt_id=str(prompt_id),
+                    output_node_id=node_id,
+                    output_path=local_path,
+                    output_sha256=sha,
+                    provenance=provenance,
+                    ui_workflow=ui_workflow,
+                    local_path=str(local_path),
+                    ensure_durable=True,
+                    drive_output_dir=out_dir,
+                    evidence_path=ev_path,
+                )
+            else:
+                capture = capture_identity_benchmark_execution(
+                    drive_root=drive_root,
+                    ledger_path=ledger_path,
+                    prompt_id=str(prompt_id),
+                    output_node_id=node_id,
+                    output_path=local_path,
+                    output_sha256=sha,
+                    provenance=provenance,
+                    ui_workflow=ui_workflow,
+                    local_path=str(local_path),
+                    ensure_durable=True,
+                    drive_output_dir=out_dir,
+                    evidence_path=ev_path,
+                    reclassify_ordinary=True,
+                )
             if any("Reclassified" in m for m in capture.messages):
                 report["reclassified"] += 1
             if capture.skipped_duplicate:
                 report["duplicates"] += 1
                 continue
-            if capture.skipped_not_benchmark:
+            skipped_non = bool(getattr(capture, "skipped_not_benchmark", False)) or bool(
+                getattr(capture, "skipped_not_tuning", False)
+            )
+            if skipped_non:
                 report["skipped_non_benchmark"] += 1
                 continue
             if not capture.ok:

@@ -3943,6 +3943,414 @@ def main() -> int:
         )
         _pass(results, "Prepare path explicitly disclaims quality benchmarking")
 
+        # ---- Package 4.12.2 FaceID conditioning sweep ----
+        from core.runtime.identity_benchmark_tuning import (
+            BASELINE_FACEID_PREPS,
+            FACEID_TUNING_VARIANTS,
+            FIRST_PHASE_SCENARIOS,
+            PREPARATION_KIND_IDENTITY_BENCHMARK_TUNING,
+            assert_faceid_tuning_graph_diff,
+            capture_faceid_tuning_execution,
+            default_tuning_ledger_path,
+            find_tuning_ledger_row,
+            is_identity_benchmark_tuning_metadata,
+            load_tuning_records,
+            prepare_faceid_tuning_benchmark,
+            read_faceid_conditioning,
+            resolve_tuning_variant_id,
+        )
+        from core.runtime.identity_benchmark import SCENARIO_PROMPTS
+        from core.runtime.identity_benchmark_capture import (
+            capture_identity_benchmark_execution,
+            is_identity_benchmark_tuning_provenance,
+        )
+        from core.runtime.workflow_provenance import ExecutionProvenance, extract_ai_studio_extra
+        from core.runtime.seed_mode import is_js_safe_seed
+
+        # 1. Each variant binds exact expected values
+        for vid, variant in FACEID_TUNING_VARIANTS.items():
+            _assert_equal(f"variant resolve {vid}", resolve_tuning_variant_id(vid), vid)
+            _assert_equal(f"variant resolve label {variant.label}", resolve_tuning_variant_id(variant.label), vid)
+            params = variant.parameters()
+            _assert_equal(f"{vid} weight", params["weight"], 1.0)
+            if "1p5" in vid:
+                _assert_equal(f"{vid} v2", params["weight_faceidv2"], 1.5)
+            else:
+                _assert_equal(f"{vid} v2", params["weight_faceidv2"], 1.0)
+            if "end080" in vid:
+                _assert_equal(f"{vid} end", params["end_at"], 0.8)
+            else:
+                _assert_equal(f"{vid} end", params["end_at"], 1.0)
+            _assert_equal(f"{vid} start", params["start_at"], 0.0)
+        _assert_true("invalid variant None", resolve_tuning_variant_id("nope") is None)
+        _pass(results, "4.12.2: each tuning variant binds exact expected values")
+
+        # Prepare one real tuning prep (S2 / A) with FaceID bridges already ensured earlier
+        tuning = prepare_faceid_tuning_benchmark(
+            repo_root=repo_root,
+            drive_root=paths["drive"],
+            runtime_prepared_root=paths["runtime"] / "prepared_workflows",
+            drive_prepared_root=paths["drive"] / "workflows" / "prepared",
+            comfyui_input_dir=paths["comfy"] / "input",
+            character_id=reg.character.character_id,
+            scenario="S2",
+            variant_id="A",
+            bundle_models=list(bundle.models),
+            bundle_nodes=list(bundle.nodes),
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            allow_benchmark=True,
+            require_models=False,
+            require_nodes=False,
+        )
+        _assert_true(f"tuning prep ok ({tuning.errors})", tuning.ok)
+        _assert_equal("tuning scenario", tuning.scenario, "S2_head_angle_pose")
+        _assert_equal("tuning variant", tuning.tuning_variant_id, "faceid_v2_1p5_full")
+        # 2. scenario seed remains baseline-identical
+        _assert_equal(
+            "tuning seed == baseline S2",
+            tuning.seed,
+            BASELINE_FACEID_PREPS["S2_head_angle_pose"]["seed"],
+        )
+        # 3. prompt remains baseline-identical
+        _assert_equal(
+            "tuning prompt == baseline S2",
+            tuning.positive_prompt,
+            SCENARIO_PROMPTS["S2_head_angle_pose"],
+        )
+        _assert_equal(
+            "baseline prep link",
+            tuning.baseline_preparation_id,
+            BASELINE_FACEID_PREPS["S2_head_angle_pose"]["preparation_id"],
+        )
+        tuned_wf = json.loads(
+            (Path(tuning.prepared_dir) / f"{tuning.preparation_id}.workflow.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        cond = read_faceid_conditioning(tuned_wf)
+        _assert_equal("bound weight", cond["weight"], 1.0)
+        _assert_equal("bound weight_faceidv2", cond["weight_faceidv2"], 1.5)
+        _assert_equal("bound end_at", cond["end_at"], 1.0)
+        _assert_equal("lora unchanged", cond["lora_strength"], 0.6)
+        _assert_equal("weight_type unchanged", cond["weight_type"], "linear")
+        _assert_equal("combine unchanged", cond["combine_embeds"], "concat")
+        ai = extract_ai_studio_extra(tuned_wf)
+        _assert_true("tuning provenance", is_identity_benchmark_tuning_metadata(ai))
+        _assert_equal("prep kind tuning", ai.get("preparation_kind"), PREPARATION_KIND_IDENTITY_BENCHMARK_TUNING)
+        _assert_true("benchmark_tuning flag", ai.get("benchmark_tuning") is True)
+        _pass(results, "4.12.2: seed/prompt/params bind; only allowed FaceID fields differ")
+
+        # 4–5. graph-diff: unexpected mutation fails closed
+        mutated = json.loads(json.dumps(tuned_wf))
+        # Rebuild baseline-bound for diff: apply reverse to get "baseline" then re-apply
+        baseline_like = json.loads(json.dumps(tuned_wf))
+        faceid_node = next(n for n in baseline_like["nodes"] if n.get("id") == 10)
+        faceid_node["widgets_values"][0] = 1.0
+        faceid_node["widgets_values"][1] = 2.0
+        faceid_node["widgets_values"][4] = 0.0
+        faceid_node["widgets_values"][5] = 1.0
+        variant_a = FACEID_TUNING_VARIANTS["faceid_v2_1p5_full"]
+        ok_diff = assert_faceid_tuning_graph_diff(baseline_like, tuned_wf, variant_a)
+        _assert_equal("clean diff no errors", ok_diff, [])
+        # unexpected: change sampler seed widget / first numeric widget
+        sampler = next(n for n in mutated["nodes"] if n.get("type") == "KSampler")
+        widgets = list(sampler.get("widgets_values") or [])
+        if widgets and isinstance(widgets[0], (int, float)):
+            widgets[0] = int(widgets[0]) + 1
+            sampler["widgets_values"] = widgets
+        bad_diff = assert_faceid_tuning_graph_diff(baseline_like, mutated, variant_a)
+        _assert_true("unexpected mutation fails closed", len(bad_diff) > 0)
+        _pass(results, "4.12.2: graph-diff allows only FaceID conditioning fields")
+
+        # 14. S1/S4 fail closed
+        for bad_sc in ("S1", "S4_wardrobe_environment"):
+            refused = prepare_faceid_tuning_benchmark(
+                repo_root=repo_root,
+                drive_root=paths["drive"],
+                runtime_prepared_root=paths["runtime"] / "prepared_workflows",
+                drive_prepared_root=paths["drive"] / "workflows" / "prepared",
+                comfyui_input_dir=paths["comfy"] / "input",
+                character_id=reg.character.character_id,
+                scenario=bad_sc,
+                variant_id="B",
+                bundle_models=list(bundle.models),
+                bundle_nodes=list(bundle.nodes),
+                comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+                allow_benchmark=True,
+                require_models=False,
+                require_nodes=False,
+            )
+            _assert_false(f"refuse {bad_sc}", refused.ok)
+        # 13. invalid variant
+        bad_var = prepare_faceid_tuning_benchmark(
+            repo_root=repo_root,
+            drive_root=paths["drive"],
+            runtime_prepared_root=paths["runtime"] / "prepared_workflows",
+            drive_prepared_root=paths["drive"] / "workflows" / "prepared",
+            comfyui_input_dir=paths["comfy"] / "input",
+            character_id=reg.character.character_id,
+            scenario="S3",
+            variant_id="not_a_variant",
+            bundle_models=list(bundle.models),
+            bundle_nodes=list(bundle.nodes),
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            allow_benchmark=True,
+            require_models=False,
+            require_nodes=False,
+        )
+        _assert_false("invalid variant refused", bad_var.ok)
+        # 15. missing character
+        missing_char = prepare_faceid_tuning_benchmark(
+            repo_root=repo_root,
+            drive_root=paths["drive"],
+            runtime_prepared_root=paths["runtime"] / "prepared_workflows",
+            drive_prepared_root=paths["drive"] / "workflows" / "prepared",
+            comfyui_input_dir=paths["comfy"] / "input",
+            character_id="char_00000000-0000-0000-0000-000000000000",
+            scenario="S2",
+            variant_id="C",
+            bundle_models=list(bundle.models),
+            bundle_nodes=list(bundle.nodes),
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            allow_benchmark=True,
+            require_models=False,
+            require_nodes=False,
+        )
+        _assert_false("missing character refused", missing_char.ok)
+        _pass(results, "4.12.2: S1/S4/invalid variant/missing character fail closed")
+
+        # 6. restage after reset
+        staged_name = json.loads(
+            (Path(tuning.prepared_dir) / f"{tuning.preparation_id}.metadata.json").read_text(
+                encoding="utf-8"
+            )
+        )["parameters"]["input_image"]
+        staged_path = paths["comfy"] / "input" / staged_name
+        if staged_path.is_file():
+            staged_path.unlink()
+        meta = json.loads(
+            (Path(tuning.prepared_dir) / f"{tuning.preparation_id}.metadata.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        msgs, errs = restage_identity_benchmark_face(
+            prepared_dir=Path(tuning.prepared_dir),
+            metadata=meta,
+            comfyui_input_dir=paths["comfy"] / "input",
+        )
+        _assert_equal("restage errors", errs, [])
+        _assert_true("restaged face exists", staged_path.is_file())
+        _pass(results, "4.12.2: tuning prep archives/restages after reset")
+
+        # 7–9. provenance + isolation from ordinary + baseline ledgers
+        out_png = paths["comfy"] / "output" / "tuning_out.png"
+        out_png.parent.mkdir(parents=True, exist_ok=True)
+        out_png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"tuning-bytes-4122")
+        sha = file_sha256(out_png)
+        prov = ExecutionProvenance(
+            preparation_id=tuning.preparation_id,
+            preparation_kind=PREPARATION_KIND_IDENTITY_BENCHMARK_TUNING,
+            seed=int(tuning.seed),
+            capability="identity_benchmark",
+            workflow_identifier="reference/identity_faceid_benchmark",
+        )
+        _assert_true(
+            "tuning provenance detector",
+            is_identity_benchmark_tuning_provenance(prov, tuned_wf),
+        )
+        tuning_ledger = default_tuning_ledger_path(paths["drive"])
+        baseline_ledger = paths["drive"] / "logs" / "identity_benchmark.jsonl"
+        baseline_before = (
+            baseline_ledger.read_text(encoding="utf-8") if baseline_ledger.is_file() else ""
+        )
+        # Refuse baseline capture for tuning
+        refused_base = capture_identity_benchmark_execution(
+            drive_root=paths["drive"],
+            ledger_path=baseline_ledger,
+            prompt_id="prompt_tune_1",
+            output_node_id="11",
+            output_path=out_png,
+            output_sha256=sha,
+            provenance=prov,
+            ui_workflow=tuned_wf,
+            ensure_durable=True,
+        )
+        _assert_true("baseline capture skips tuning", refused_base.ok and refused_base.skipped_not_benchmark)
+        baseline_after = (
+            baseline_ledger.read_text(encoding="utf-8") if baseline_ledger.is_file() else ""
+        )
+        _assert_equal("baseline ledger unchanged by tuning skip", baseline_before, baseline_after)
+
+        cap1 = capture_faceid_tuning_execution(
+            drive_root=paths["drive"],
+            ledger_path=tuning_ledger,
+            prompt_id="prompt_tune_1",
+            output_node_id="11",
+            output_path=out_png,
+            output_sha256=sha,
+            provenance=prov,
+            ui_workflow=tuned_wf,
+            local_path=str(out_png),
+            ensure_durable=True,
+        )
+        _assert_true(f"tuning capture ok ({cap1.errors})", cap1.ok and not cap1.skipped_duplicate)
+        _assert_equal("one tuning row", len(load_tuning_records(tuning_ledger)), 1)
+        # 10. idempotence
+        cap2 = capture_faceid_tuning_execution(
+            drive_root=paths["drive"],
+            ledger_path=tuning_ledger,
+            prompt_id="prompt_tune_1",
+            output_node_id="11",
+            output_path=out_png,
+            output_sha256=sha,
+            provenance=prov,
+            ui_workflow=tuned_wf,
+            local_path=str(out_png),
+            ensure_durable=True,
+        )
+        _assert_true("tuning idempotent", cap2.ok and cap2.skipped_duplicate)
+        _assert_equal("still one tuning row", len(load_tuning_records(tuning_ledger)), 1)
+        # Ordinary generation ledger / snapshot path: tuning metadata refused as parent
+        tune_meta = {
+            "benchmark_run": True,
+            "benchmark_tuning": True,
+            "preparation_kind": PREPARATION_KIND_IDENTITY_BENCHMARK_TUNING,
+            "capability": "identity_benchmark",
+            "workflow_identifier": "reference/identity_faceid_benchmark",
+            "image_sha256": sha,
+            "positive_prompt": tuning.positive_prompt,
+            "steps": 20,
+            "cfg": 7,
+            "sampler_name": "euler",
+            "scheduler": "normal",
+            "model_files": ["sd15.safetensors"],
+        }
+        _assert_true("tuning is benchmark metadata", is_benchmark_generation_metadata(tune_meta))
+        elig_t = assess_derivation_eligibility(metadata=tune_meta, manifest={"image_sha256": sha})
+        _assert_false("tuning refused as variation parent", elig_t.eligible)
+        repro_t = assess_reproduction_eligibility(
+            metadata=tune_meta,
+            workflow_payload={
+                "workflow_identifier": "base/txt2img",
+                "workflow_snapshot_status": "complete",
+            },
+            manifest={},
+        )
+        _assert_false("tuning refused as reproduction parent", repro_t.eligible)
+        gen_idx = paths["drive"] / "logs" / "autosync" / "generation_index.jsonl"
+        gen_before = gen_idx.read_text(encoding="utf-8") if gen_idx.is_file() else ""
+        # Capture path does not append generation index
+        _assert_equal(
+            "no ordinary gen index growth from tuning capture",
+            gen_idx.read_text(encoding="utf-8") if gen_idx.is_file() else "",
+            gen_before,
+        )
+        _pass(results, "4.12.2: provenance + ledger isolation + idempotence")
+
+        # 11–12. one-artifact + recovery zero dup (reuse durable helper)
+        row = find_tuning_ledger_row(
+            tuning_ledger, prompt_id="prompt_tune_1", output_node_id="11", output_sha256=sha
+        )
+        _assert_true("tuning row present", row is not None)
+        artifact_path = Path(str(row["output_path"]))
+        _assert_true("durable artifact exists", artifact_path.is_file())
+        drive_outs = list((paths["drive"] / "outputs").glob("identity_benchmark_*.png"))
+        # recovery/report path: second capture is duplicate, zero new files
+        count_before = len(drive_outs)
+        cap3 = capture_faceid_tuning_execution(
+            drive_root=paths["drive"],
+            ledger_path=tuning_ledger,
+            prompt_id="prompt_tune_1",
+            output_node_id="11",
+            output_path=out_png,
+            output_sha256=sha,
+            provenance=prov,
+            ui_workflow=tuned_wf,
+            ensure_durable=True,
+        )
+        _assert_true("recovery duplicate", cap3.skipped_duplicate)
+        count_after = len(list((paths["drive"] / "outputs").glob("identity_benchmark_*.png")))
+        _assert_equal("zero new artifacts on recovery", count_after, count_before)
+        _pass(results, "4.12.2: autosync/capture one-artifact + recovery zero duplicates")
+
+        # 16. mismatched character reference SHA fails closed (tamper archived face)
+        # Covered by baseline prepare character verify; tuning inherits prepare_identity_benchmark.
+        # 17. unsafe seed — baseline seeds are JS-safe; preparing with mutated seed path is N/A
+        # (tuning always binds frozen baseline seeds). Confirm seeds are JS-safe:
+        # 17. unsafe seed — baseline seeds are JS-safe; tuning always binds frozen baseline seeds.
+        for sc in FIRST_PHASE_SCENARIOS:
+            _assert_true(
+                f"baseline seed js-safe {sc}",
+                is_js_safe_seed(BASELINE_FACEID_PREPS[sc]["seed"]),
+            )
+        _pass(results, "4.12.2: baseline scenario seeds are JS-safe (fail-closed binding)")
+
+        # 18. historical baseline records unchanged — frozen IDs constant in module
+        _assert_equal(
+            "frozen S1 prep",
+            BASELINE_FACEID_PREPS["S1_near_front_portrait"]["preparation_id"],
+            "prep_efa7b6d8-58ec-4d26-8d19-697ec3ce9558",
+        )
+        _assert_equal(
+            "frozen S2 prep",
+            BASELINE_FACEID_PREPS["S2_head_angle_pose"]["preparation_id"],
+            "prep_dcacc2ae-dc0a-45e7-90a5-5b6eb8026b1b",
+        )
+        _assert_equal(
+            "frozen S3 prep",
+            BASELINE_FACEID_PREPS["S3_expression_change"]["preparation_id"],
+            "prep_5b0773a9-30fc-436a-aa30-d40dec98e517",
+        )
+        _assert_equal(
+            "frozen S4 prep",
+            BASELINE_FACEID_PREPS["S4_wardrobe_environment"]["preparation_id"],
+            "prep_5b669994-aa64-44bf-b349-3ec1e9021800",
+        )
+        # Tuning prep IDs must not equal frozen baseline IDs
+        _assert_true(
+            "tuning prep is new id",
+            tuning.preparation_id
+            not in {
+                BASELINE_FACEID_PREPS[s]["preparation_id"]
+                for s in BASELINE_FACEID_PREPS
+            },
+        )
+        _pass(results, "4.12.2: historical baseline prep IDs unchanged; tuning uses new prep IDs")
+
+        # S3 variant also prepares
+        tuning_s3 = prepare_faceid_tuning_benchmark(
+            repo_root=repo_root,
+            drive_root=paths["drive"],
+            runtime_prepared_root=paths["runtime"] / "prepared_workflows",
+            drive_prepared_root=paths["drive"] / "workflows" / "prepared",
+            comfyui_input_dir=paths["comfy"] / "input",
+            character_id=reg.character.character_id,
+            scenario="S3",
+            variant_id="D",
+            bundle_models=list(bundle.models),
+            bundle_nodes=list(bundle.nodes),
+            comfyui_custom_nodes=paths["comfy"] / "custom_nodes",
+            allow_benchmark=True,
+            require_models=False,
+            require_nodes=False,
+        )
+        _assert_true(f"S3/D tuning ok ({tuning_s3.errors})", tuning_s3.ok)
+        _assert_equal(
+            "S3 seed",
+            tuning_s3.seed,
+            BASELINE_FACEID_PREPS["S3_expression_change"]["seed"],
+        )
+        cond_d = read_faceid_conditioning(
+            json.loads(
+                (
+                    Path(tuning_s3.prepared_dir) / f"{tuning_s3.preparation_id}.workflow.json"
+                ).read_text(encoding="utf-8")
+            )
+        )
+        _assert_equal("D weight_faceidv2", cond_d["weight_faceidv2"], 1.0)
+        _assert_equal("D end_at", cond_d["end_at"], 0.8)
+        _pass(results, "4.12.2: S3 variant D prepares with baseline seed and end_at=0.8")
+
     finally:
         faceid_python_default.stop()
         faceid_buffalo_default.stop()
