@@ -216,6 +216,8 @@ class IdentityArchitectureRecord:
     promotion_status: str = "pending"
     license_gate: dict[str, Any] = field(default_factory=dict)
     asset_verification: dict[str, Any] = field(default_factory=dict)
+    asset_verification_override: bool = False
+    capture_idempotence_key: str = ""
     benchmark_run: bool = True
     notes: list[str] = field(default_factory=list)
     project_id: str = ""
@@ -224,6 +226,39 @@ class IdentityArchitectureRecord:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+def architecture_idempotence_key(prompt_id: str, output_node_id: str, output_sha256: str) -> str:
+    return "|".join(
+        [
+            str(prompt_id or ""),
+            str(output_node_id or ""),
+            str(output_sha256 or "").strip().lower(),
+        ]
+    )
+
+
+def find_architecture_ledger_row(
+    ledger_path: Path,
+    *,
+    prompt_id: str,
+    output_node_id: str,
+    output_sha256: str,
+) -> dict[str, Any] | None:
+    key = architecture_idempotence_key(prompt_id, output_node_id, output_sha256)
+    if not key or key == "||":
+        return None
+    for row in load_architecture_benchmark_records(ledger_path):
+        if str(row.get("capture_idempotence_key") or "") == key:
+            return row
+        legacy = architecture_idempotence_key(
+            str(row.get("prompt_id") or ""),
+            str(row.get("output_node_id") or ""),
+            str(row.get("output_sha256") or ""),
+        )
+        if legacy == key:
+            return row
+    return None
 
 
 def load_architecture_benchmark_records(ledger_path: Path) -> list[dict[str, Any]]:
@@ -242,9 +277,122 @@ def append_architecture_benchmark_record(ledger_path: Path, record: IdentityArch
 
     if not record.created_at:
         record.created_at = utc_now()
+    if not record.capture_idempotence_key:
+        record.capture_idempotence_key = architecture_idempotence_key(
+            record.prompt_id, record.output_node_id, record.output_sha256
+        )
     payload = json.dumps(record.to_dict(), ensure_ascii=False)
     with exclusive_jsonl_lock(ledger_path):
         append_jsonl_line_unlocked(ledger_path, payload)
+
+
+def append_architecture_benchmark_record_if_absent(
+    ledger_path: Path,
+    record: IdentityArchitectureRecord,
+    *,
+    idempotence_key: str,
+) -> tuple[bool, bool]:
+    """Atomically check idempotence key then append. Returns (ok, skipped_duplicate)."""
+    from .jsonl_file_lock import append_jsonl_line_unlocked, exclusive_jsonl_lock
+
+    key = str(idempotence_key or record.capture_idempotence_key or "").strip()
+    if not key or key == "||":
+        return False, False
+    if not record.capture_idempotence_key:
+        record.capture_idempotence_key = key
+    if not record.created_at:
+        record.created_at = utc_now()
+    path = Path(ledger_path)
+    with exclusive_jsonl_lock(path):
+        for row in load_architecture_benchmark_records(path):
+            if str(row.get("capture_idempotence_key") or "") == key:
+                return True, True
+            legacy = architecture_idempotence_key(
+                str(row.get("prompt_id") or ""),
+                str(row.get("output_node_id") or ""),
+                str(row.get("output_sha256") or ""),
+            )
+            if legacy == key:
+                return True, True
+        append_jsonl_line_unlocked(path, json.dumps(record.to_dict(), ensure_ascii=False))
+        return True, False
+
+
+def update_architecture_ledger_qa(
+    ledger_path: Path,
+    *,
+    idempotence_key: str,
+    automated_qa: dict[str, Any],
+    human_review: dict[str, Any] | None = None,
+) -> tuple[bool, bool, list[str]]:
+    """Idempotent QA enrichment: update existing row in place. No second append.
+
+    Returns (ok, updated, messages).
+    """
+    from .jsonl_file_lock import exclusive_jsonl_lock
+
+    key = str(idempotence_key or "").strip()
+    if not key:
+        return False, False, ["ERROR: idempotence key required for QA enrichment."]
+    path = Path(ledger_path)
+    messages: list[str] = []
+    with exclusive_jsonl_lock(path):
+        if not path.is_file():
+            return False, False, ["ERROR: Architecture ledger missing for QA enrichment."]
+        lines = path.read_text(encoding="utf-8").splitlines()
+        rewritten: list[str] = []
+        updated = False
+        found = False
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                rewritten.append(line)
+                continue
+            row_key = str(row.get("capture_idempotence_key") or "")
+            if not row_key:
+                row_key = architecture_idempotence_key(
+                    str(row.get("prompt_id") or ""),
+                    str(row.get("output_node_id") or ""),
+                    str(row.get("output_sha256") or ""),
+                )
+            if row_key != key:
+                rewritten.append(json.dumps(row, ensure_ascii=False))
+                continue
+            found = True
+            existing_qa = row.get("automated_qa") if isinstance(row.get("automated_qa"), dict) else {}
+            # Enrich only when missing/empty; never overwrite a scored QA with empty.
+            if existing_qa and existing_qa.get("automated_quality_status") and not automated_qa:
+                rewritten.append(json.dumps(row, ensure_ascii=False))
+                messages.append("QA already present; enrichment skipped.")
+                continue
+            if existing_qa == automated_qa:
+                rewritten.append(json.dumps(row, ensure_ascii=False))
+                messages.append("QA identical; enrichment no-op.")
+                continue
+            row["automated_qa"] = automated_qa
+            if human_review is not None:
+                row["human_review"] = human_review
+                row["human_review_status"] = str(
+                    (human_review or {}).get("status")
+                    or automated_qa.get("human_review_status")
+                    or row.get("human_review_status")
+                    or "pending"
+                )
+            else:
+                row["human_review_status"] = str(
+                    automated_qa.get("human_review_status") or row.get("human_review_status") or "pending"
+                )
+            rewritten.append(json.dumps(row, ensure_ascii=False))
+            updated = True
+            messages.append(f"Enriched architecture ledger QA for key={key}")
+        if not found:
+            return False, False, [f"ERROR: No architecture ledger row for key={key}"]
+        if updated:
+            path.write_text("\n".join(rewritten) + ("\n" if rewritten else ""), encoding="utf-8")
+        return True, updated, messages
 
 
 def format_architecture_benchmark_report(records: list[dict[str, Any]]) -> str:

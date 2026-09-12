@@ -64,20 +64,20 @@ def is_identity_benchmark_provenance(
     provenance: ExecutionProvenance | None,
     ui_workflow: dict[str, Any] | None = None,
 ) -> bool:
-    meta: dict[str, Any] = {}
+    """True for FaceID/ReActor identity_benchmark (not InstantID architecture)."""
+    from .identity_benchmark import (
+        BENCHMARK_CAPABILITY_ARCHITECTURE,
+        PREPARATION_KIND_IDENTITY_ARCHITECTURE_BENCHMARK,
+    )
+
+    def _arch(kind: str, capability: str) -> bool:
+        return kind == PREPARATION_KIND_IDENTITY_ARCHITECTURE_BENCHMARK or (
+            capability == BENCHMARK_CAPABILITY_ARCHITECTURE
+        )
+
     if provenance is not None:
-        meta = {
-            "benchmark_run": True
-            if str(provenance.preparation_kind or "")
-            in {
-                PREPARATION_KIND_IDENTITY_BENCHMARK,
-                PREPARATION_KIND_IDENTITY_BENCHMARK_TUNING,
-            }
-            else None,
-            "preparation_kind": provenance.preparation_kind,
-            "capability": provenance.capability,
-            "workflow_identifier": provenance.workflow_identifier,
-        }
+        if _arch(str(provenance.preparation_kind or ""), str(provenance.capability or "")):
+            return False
         if str(provenance.preparation_kind or "") in {
             PREPARATION_KIND_IDENTITY_BENCHMARK,
             PREPARATION_KIND_IDENTITY_BENCHMARK_TUNING,
@@ -85,12 +85,36 @@ def is_identity_benchmark_provenance(
             return True
         if str(provenance.capability or "") == BENCHMARK_CAPABILITY:
             return True
+    meta: dict[str, Any] = {}
     if ui_workflow is not None:
         ai = extract_ai_studio_extra(ui_workflow)
-        if is_benchmark_generation_metadata(ai):
-            return True
-        meta.update(ai)
-    return is_benchmark_generation_metadata(meta)
+        if isinstance(ai, dict):
+            if _arch(str(ai.get("preparation_kind") or ""), str(ai.get("capability") or "")):
+                return False
+            # FaceID baseline / tuning only — not InstantID architecture fields alone.
+            kind = str(ai.get("preparation_kind") or "")
+            if kind in {
+                PREPARATION_KIND_IDENTITY_BENCHMARK,
+                PREPARATION_KIND_IDENTITY_BENCHMARK_TUNING,
+            }:
+                return True
+            if str(ai.get("capability") or "") == BENCHMARK_CAPABILITY:
+                return True
+            meta.update(ai)
+    if provenance is not None:
+        meta.setdefault("preparation_kind", provenance.preparation_kind)
+        meta.setdefault("capability", provenance.capability)
+        meta.setdefault("workflow_identifier", provenance.workflow_identifier)
+    if _arch(str(meta.get("preparation_kind") or ""), str(meta.get("capability") or "")):
+        return False
+    # Broad helper still covers reactor/faceid identifiers without architecture kinds.
+    if is_benchmark_generation_metadata(meta):
+        if str(meta.get("architecture") or "") == "instantid_sdxl":
+            return False
+        if str(meta.get("candidate") or "") == "instantid_sdxl_benchmark":
+            return False
+        return True
+    return False
 
 
 def is_identity_benchmark_tuning_provenance(

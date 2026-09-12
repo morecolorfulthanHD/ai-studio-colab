@@ -222,6 +222,7 @@ def _append_verified_evidence(
     drive_sha: str,
     messages: list[str],
     capability: str = BENCHMARK_CAPABILITY,
+    snapshot_status: str = "skipped_identity_benchmark",
 ) -> None:
     from .generation_evidence_ledger import EvidenceLedger, EvidenceRecord
 
@@ -241,7 +242,7 @@ def _append_verified_evidence(
             synchronized_timestamp=utc_now(),
             sync_status="verified",
             capability=capability,
-            snapshot_status="skipped_identity_benchmark",
+            snapshot_status=snapshot_status,
             messages=list(messages),
             generation_id="",
         )
@@ -262,12 +263,17 @@ def ensure_canonical_identity_benchmark_artifact(
     autosync_poll_seconds: float = DEFAULT_AUTOSYNC_POLL_SECONDS,
     allow_create_fallback: bool = True,
     created_by: str = "benchmark_capture",
+    capability: str = BENCHMARK_CAPABILITY,
+    snapshot_status: str = "skipped_identity_benchmark",
 ) -> CanonicalArtifactResult:
     """Ensure exactly one verified Drive artifact for this execution identity.
 
     ``created_by`` is recorded in evidence messages when this path creates the file:
       - autosync → preferred owner
       - benchmark_capture / recovery → canonical fallback
+
+    Shared by identity_benchmark and identity_architecture_benchmark (Package 4.12.3);
+    pass capability/snapshot_status for architecture isolation.
     """
     from .output_autosync import copy_with_verification
     from .permanent_output_naming import resolve_permanent_destination
@@ -328,6 +334,8 @@ def ensure_canonical_identity_benchmark_artifact(
                 autosync_poll_seconds=autosync_poll_seconds,
                 allow_create_fallback=allow_create_fallback,
                 created_by=created_by,
+                capability=str(capability or BENCHMARK_CAPABILITY),
+                snapshot_status=str(snapshot_status or "skipped_identity_benchmark"),
                 copy_with_verification=copy_with_verification,
                 resolve_permanent_destination=resolve_permanent_destination,
             )
@@ -351,6 +359,8 @@ def _ensure_canonical_locked(
     autosync_poll_seconds: float,
     allow_create_fallback: bool,
     created_by: str,
+    capability: str = BENCHMARK_CAPABILITY,
+    snapshot_status: str = "skipped_identity_benchmark",
     copy_with_verification: Any,
     resolve_permanent_destination: Any,
 ) -> CanonicalArtifactResult:
@@ -423,7 +433,7 @@ def _ensure_canonical_locked(
     try:
         destination = resolve_permanent_destination(
             out_dir,
-            capability=BENCHMARK_CAPABILITY,
+            capability=capability or BENCHMARK_CAPABILITY,
             source_path=source,
         )
     except RuntimeError as exc:
@@ -452,11 +462,20 @@ def _ensure_canonical_locked(
         )
         return result
 
-    msg_tag = (
-        "identity_benchmark_autosync_canonical"
-        if created_by == "autosync"
-        else "identity_benchmark_recovery_durable_copy"
-    )
+    cap = str(capability or BENCHMARK_CAPABILITY)
+    snap = str(snapshot_status or "skipped_identity_benchmark")
+    if "architecture" in cap:
+        msg_tag = (
+            "identity_architecture_autosync_canonical"
+            if created_by == "autosync"
+            else "identity_architecture_recovery_durable_copy"
+        )
+    else:
+        msg_tag = (
+            "identity_benchmark_autosync_canonical"
+            if created_by == "autosync"
+            else "identity_benchmark_recovery_durable_copy"
+        )
     _append_verified_evidence(
         evidence_path=ev_path,
         prompt_id=prompt_id,
@@ -466,6 +485,8 @@ def _ensure_canonical_locked(
         sha=sha,
         drive_sha=drive_sha,
         messages=[msg_tag, f"created_by={created_by}"],
+        capability=cap,
+        snapshot_status=snap,
     )
 
     result.ok = True

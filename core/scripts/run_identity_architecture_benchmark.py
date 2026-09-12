@@ -202,7 +202,14 @@ def main() -> int:
             require_models=not args.allow_missing_models,
             require_nodes=not args.allow_missing_nodes,
             require_verified_assets=not args.allow_unverified_assets,
+            asset_verification_override=bool(args.allow_unverified_assets),
         )
+        if args.allow_unverified_assets:
+            print(
+                "INVESTIGATION OVERRIDE: --allow-unverified-assets "
+                "(promotion remains blocked; ledger records asset_verification_override=true)",
+                file=sys.stderr,
+            )
         row = exec_result.to_dict()
         scenario_results.append(row)
         for message in exec_result.messages:

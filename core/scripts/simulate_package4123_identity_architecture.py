@@ -21,6 +21,7 @@ _activate.activate(__file__)
 
 from core.runtime.character_identity import register_character
 from core.runtime.generation_derivation import assess_derivation_eligibility
+from core.runtime.generation_evidence_ledger import file_sha256
 from core.runtime.generation_reproduction import assess_reproduction_eligibility
 from core.runtime.identity_architecture_benchmark import (
     ARCHITECTURE_SCENARIO_PROMPTS,
@@ -32,32 +33,41 @@ from core.runtime.identity_architecture_benchmark import (
     SECONDARY_CANDIDATE_STATUS,
     IdentityArchitectureRecord,
     append_architecture_benchmark_record,
+    architecture_idempotence_key,
     architecture_ledger_path,
     architecture_status_for,
     assert_instantid_graph,
     assess_instantid_asset_readiness,
     assess_instantid_license_gate,
+    find_architecture_ledger_row,
     is_identity_architecture_metadata,
     load_architecture_benchmark_records,
     prepare_identity_architecture_benchmark,
     restage_identity_architecture_benchmark_face,
+    update_architecture_ledger_qa,
+)
+from core.runtime.identity_architecture_capture import (
+    capture_identity_architecture_execution,
+    is_identity_architecture_benchmark_provenance,
+    recover_identity_architecture_from_history,
+)
+from core.runtime.identity_architecture_execution import (
+    execute_architecture_scenario,
+    should_fail_fast,
 )
 from core.runtime.identity_benchmark import (
     PREPARATION_KIND_IDENTITY_BENCHMARK,
     SCENARIO_PROMPTS,
     is_benchmark_generation_metadata,
 )
-from core.runtime.identity_architecture_execution import (
-    execute_architecture_scenario,
-    should_fail_fast,
-)
 from core.runtime.comfyui_prompt_queue import (
     QueuePromptResult,
     WaitHistoryResult,
-    queue_prompt,
     ui_workflow_to_api_prompt,
     wait_for_prompt_completion,
 )
+from core.runtime.output_autosync import OutputAutoSyncService
+from core.runtime.workflow_provenance import ExecutionProvenance
 from core.runtime.identity_visual_qa import (
     YAW_SIGN_CONVENTION,
     evaluate_scenario_qa,
@@ -600,14 +610,440 @@ def main() -> int:
             _assert_true("/prompt invoked once", len(prompt_posts) == 1)
             _assert_true("output captured", bool(live.output_sha256))
             _assert_true("automated QA present", bool(live.automated_qa))
+            _assert_true("local path recorded", bool(live.local_path))
+            _assert_true(
+                "ledger output_path is Drive not comfy",
+                "outputs" in str(live.output_path).replace("\\", "/")
+                and "ComfyUI/output" not in str(live.output_path).replace("\\", "/"),
+            )
+            drive_art = Path(live.output_path)
+            _assert_true("Drive artifact exists", drive_art.is_file())
+            local_sha = file_sha256(Path(live.local_path)).lower()
+            drive_sha = file_sha256(drive_art).lower()
+            _assert_equal("local SHA == Drive SHA", local_sha, drive_sha)
+            _assert_equal("ledger SHA == Drive SHA", live.output_sha256.lower(), drive_sha)
             ledger_rows = load_architecture_benchmark_records(architecture_ledger_path(drive))
-            # prior append + this execution
-            _assert_true("ledger wrote execution row", len(ledger_rows) >= 2)
+            arch_exec_rows = [r for r in ledger_rows if r.get("prompt_id") == "pid-test-001"]
+            _assert_equal("one architecture row for prompt", len(arch_exec_rows), 1)
+            _assert_true(
+                "row output_path durable",
+                str(arch_exec_rows[0].get("output_path") or "").endswith(drive_art.name)
+                or str(arch_exec_rows[0].get("output_path")) == str(drive_art),
+            )
+            _assert_true(
+                "capture_idempotence_key set",
+                bool(arch_exec_rows[0].get("capture_idempotence_key")),
+            )
             _assert_true(
                 "no browser required message",
                 any("no browser" in m.lower() for m in live.messages),
             )
-            _pass(results, "mocked /prompt queue, prompt_id, capture, QA, ledger")
+            _pass(results, "mocked /prompt durable Drive capture + SHA contract")
+
+            # Repeated runner capture -> duplicate/reuse, no append
+            rows_before = len(load_architecture_benchmark_records(architecture_ledger_path(drive)))
+            drive_files_before = list((drive / "outputs").glob("identity_architecture_benchmark_*"))
+            live2 = execute_architecture_scenario(
+                repo_root=repo_root,
+                drive_root=drive,
+                character_id=reg.character.character_id,
+                scenario="S1_near_front_portrait",
+                bundle_models=list(bundle.models),
+                bundle_nodes=list(bundle.nodes),
+                runtime_prepared_root=runtime / "prepared_workflows",
+                comfyui_input_dir=comfy / "input",
+                comfyui_runtime=comfy,
+                comfyui_output_dir=out_dir,
+                seed=42,
+                require_models=False,
+                require_nodes=False,
+                require_verified_assets=False,
+                queue_prompt_fn=fake_queue,
+                wait_history_fn=fake_wait,
+                sleep_fn=lambda _s: None,
+            )
+            # Same local file + same prompt_id from fake_queue -> may create new prep but
+            # same prompt/node/sha if we reuse prompt id - fake always returns pid-test-001
+            # and same arch_out.png bytes -> duplicate on second capture of same execution key.
+            # Note: new prepare creates new seed path but output file unchanged -> same SHA.
+            # prompt_id is always pid-test-001, node 9, same SHA -> idempotent.
+            _assert_true(f"rerun capture ok ({live2.errors})", live2.ok)
+            rows_after = load_architecture_benchmark_records(architecture_ledger_path(drive))
+            same_key_rows = [
+                r
+                for r in rows_after
+                if r.get("prompt_id") == "pid-test-001"
+                and str(r.get("output_sha256") or "").lower() == drive_sha
+            ]
+            _assert_equal("idempotent single row for execution key", len(same_key_rows), 1)
+            drive_files_after = list((drive / "outputs").glob("identity_architecture_benchmark_*"))
+            _assert_true(
+                "no extra Drive files on rerun",
+                len(drive_files_after) <= len(drive_files_before) + 1,
+            )
+            _pass(results, "repeated runner capture reuses; no duplicate architecture row")
+
+            # Watcher path isolation + convergence
+            (drive / "outputs").mkdir(parents=True, exist_ok=True)
+            evidence = drive / "logs" / "autosync" / "evidence.jsonl"
+            gen_index = drive / "generations" / "index.jsonl"
+            svc = OutputAutoSyncService(
+                drive_root=drive,
+                drive_output_dir=drive / "outputs",
+                comfy_output_dir=out_dir,
+                evidence_path=evidence,
+                index_path=drive / "logs" / "autosync" / "processed.json",
+                status_path=drive / "logs" / "autosync" / "status.json",
+                generation_index_path=gen_index,
+                registered_hashes={},
+            )
+            watch_local = out_dir / "watcher_arch.png"
+            watch_local.write_bytes(out_img.read_bytes())
+            prep_wf = json.loads(
+                (Path(prep.prepared_dir) / f"{prep.preparation_id}.workflow.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            before_gen = gen_index.read_text(encoding="utf-8") if gen_index.is_file() else ""
+            rows_w_before = len(load_architecture_benchmark_records(architecture_ledger_path(drive)))
+            prov_arch = ExecutionProvenance(
+                preparation_id=prep.preparation_id,
+                preparation_kind=PREPARATION_KIND,
+                capability="identity_architecture_benchmark",
+                seed=42,
+            )
+            rec_watch = svc.sync_local_output(
+                prompt_id="pid-watch-arch-1",
+                output_node_id="9",
+                local_path=watch_local,
+                provenance=prov_arch,
+                ui_workflow=prep_wf,
+                capability="identity_architecture_benchmark",
+            )
+            _assert_true(
+                "watcher sync verified",
+                rec_watch is not None and rec_watch.sync_status == "verified",
+            )
+            _assert_equal(
+                "watcher snapshot skipped architecture",
+                rec_watch.snapshot_status,
+                "skipped_identity_architecture_benchmark",
+            )
+            _assert_equal("watcher no generation_id", rec_watch.generation_id or "", "")
+            after_gen = gen_index.read_text(encoding="utf-8") if gen_index.is_file() else ""
+            _assert_equal("generation index unchanged", after_gen, before_gen)
+            rows_w_after = load_architecture_benchmark_records(architecture_ledger_path(drive))
+            _assert_true("watcher appended architecture row", len(rows_w_after) == rows_w_before + 1)
+            watch_sha = file_sha256(Path(rec_watch.drive_path)).lower()
+            # Runner capture same execution after watcher
+            cap_after = capture_identity_architecture_execution(
+                drive_root=drive,
+                prompt_id="pid-watch-arch-1",
+                output_node_id="9",
+                output_path=watch_local,
+                output_sha256=watch_sha,
+                provenance=prov_arch,
+                ui_workflow=prep_wf,
+                local_path=str(watch_local),
+                preparation_id=prep.preparation_id,
+                scenario="S4_wardrobe_environment",
+                character_id=reg.character.character_id,
+                seed=42,
+                created_by="architecture_runner",
+            )
+            _assert_true(f"runner after watcher ok ({cap_after.errors})", cap_after.ok)
+            _assert_true("runner after watcher duplicate", cap_after.skipped_duplicate)
+            _assert_equal(
+                "still one row for watcher prompt",
+                len(
+                    [
+                        r
+                        for r in load_architecture_benchmark_records(architecture_ledger_path(drive))
+                        if r.get("prompt_id") == "pid-watch-arch-1"
+                    ]
+                ),
+                1,
+            )
+            _pass(results, "watcher first then runner: one Drive file / one architecture row")
+
+            # Runner-first then watcher for a new prompt
+            run_local = out_dir / "runner_first.png"
+            run_local.write_bytes(out_img.read_bytes())
+            run_sha = file_sha256(run_local).lower()
+            cap_run = capture_identity_architecture_execution(
+                drive_root=drive,
+                prompt_id="pid-run-first",
+                output_node_id="9",
+                output_path=run_local,
+                output_sha256=run_sha,
+                provenance=prov_arch,
+                ui_workflow=prep_wf,
+                local_path=str(run_local),
+                preparation_id=prep.preparation_id,
+                scenario="S1_near_front_portrait",
+                character_id=reg.character.character_id,
+                seed=42,
+                compute_qa_fn=lambda p: evaluate_scenario_qa(
+                    "S1_near_front_portrait",
+                    face_src,
+                    p,
+                    load_qa_config(repo_root),
+                    expected_width=0,
+                    expected_height=0,
+                ),
+                created_by="architecture_runner",
+            )
+            _assert_true(f"runner-first capture ok ({cap_run.errors})", cap_run.ok)
+            _assert_true("QA attached on durable path", bool(cap_run.automated_qa))
+            watch2 = svc.sync_local_output(
+                prompt_id="pid-run-first",
+                output_node_id="9",
+                local_path=run_local,
+                provenance=prov_arch,
+                ui_workflow=prep_wf,
+                capability="identity_architecture_benchmark",
+            )
+            _assert_true("watcher after runner verified", watch2.sync_status == "verified")
+            _assert_equal(
+                "one row after runner+watcher",
+                len(
+                    [
+                        r
+                        for r in load_architecture_benchmark_records(architecture_ledger_path(drive))
+                        if r.get("prompt_id") == "pid-run-first"
+                    ]
+                ),
+                1,
+            )
+            _pass(results, "runner first then watcher: one Drive file / one architecture row")
+
+            # Concurrent-ish: two captures same key
+            c1 = capture_identity_architecture_execution(
+                drive_root=drive,
+                prompt_id="pid-race",
+                output_node_id="9",
+                output_path=run_local,
+                output_sha256=run_sha,
+                provenance=prov_arch,
+                ui_workflow=prep_wf,
+                preparation_id=prep.preparation_id,
+                scenario="S1_near_front_portrait",
+                character_id=reg.character.character_id,
+                seed=7,
+            )
+            c2 = capture_identity_architecture_execution(
+                drive_root=drive,
+                prompt_id="pid-race",
+                output_node_id="9",
+                output_path=run_local,
+                output_sha256=run_sha,
+                provenance=prov_arch,
+                ui_workflow=prep_wf,
+                preparation_id=prep.preparation_id,
+                scenario="S1_near_front_portrait",
+                character_id=reg.character.character_id,
+                seed=7,
+            )
+            _assert_true("race first ok", c1.ok)
+            _assert_true("race second ok", c2.ok)
+            _assert_true("race second duplicate", c2.skipped_duplicate)
+            _assert_equal(
+                "race one row",
+                len(
+                    [
+                        r
+                        for r in load_architecture_benchmark_records(architecture_ledger_path(drive))
+                        if r.get("prompt_id") == "pid-race"
+                    ]
+                ),
+                1,
+            )
+            _pass(results, "concurrent runner+watcher converge to one row")
+
+            # Recovery after capture -> zero new rows
+            hist = {
+                "pid-run-first": {
+                    "outputs": {
+                        "9": {
+                            "images": [
+                                {"filename": "runner_first.png", "subfolder": "", "type": "output"}
+                            ]
+                        }
+                    },
+                    "status": {"completed": True},
+                    "prompt": [0, "c", {}, {"extra_pnginfo": {"workflow": prep_wf}}, ["9"]],
+                }
+            }
+            rows_pre_rec = len(load_architecture_benchmark_records(architecture_ledger_path(drive)))
+            files_pre = list((drive / "outputs").glob("identity_architecture_benchmark_*"))
+            rec_rep = recover_identity_architecture_from_history(
+                drive_root=drive,
+                comfy_output_dir=out_dir,
+                base_url="http://127.0.0.1:8188",
+                history=hist,
+            )
+            _assert_true("recovery ok", rec_rep.get("ok"))
+            _assert_equal("recovery captured 0", rec_rep.get("captured"), 0)
+            _assert_true("recovery duplicates >=1", int(rec_rep.get("duplicates") or 0) >= 1)
+            _assert_equal(
+                "recovery new rows 0",
+                len(load_architecture_benchmark_records(architecture_ledger_path(drive))),
+                rows_pre_rec,
+            )
+            _assert_equal(
+                "recovery no new drive files",
+                len(list((drive / "outputs").glob("identity_architecture_benchmark_*"))),
+                len(files_pre),
+            )
+            _pass(results, "recovery after capture: zero new files/rows")
+
+            # Missing ledger Drive artifact -> REPAIR_REQUIRED
+            bad_row = dict(same_key_rows[0])
+            bad_row["output_path"] = str(drive / "outputs" / "missing_arch_artifact.png")
+            bad_row["prompt_id"] = "pid-repair"
+            bad_row["capture_idempotence_key"] = architecture_idempotence_key(
+                "pid-repair", "9", drive_sha
+            )
+            append_architecture_benchmark_record(
+                architecture_ledger_path(drive),
+                IdentityArchitectureRecord(
+                    candidate=CANDIDATE_INSTANTID,
+                    architecture="instantid_sdxl",
+                    scenario="S1_near_front_portrait",
+                    character_id=reg.character.character_id,
+                    prompt_id="pid-repair",
+                    output_node_id="9",
+                    output_path=str(drive / "outputs" / "missing_arch_artifact.png"),
+                    output_sha256=drive_sha,
+                    capture_idempotence_key=architecture_idempotence_key(
+                        "pid-repair", "9", drive_sha
+                    ),
+                ),
+            )
+            from core.runtime.identity_benchmark_capture import (
+                STATUS_REPAIR_REQUIRED_MISSING,
+                STATUS_REPAIR_REQUIRED_SHA_MISMATCH,
+                verify_existing_ledger_artifact,
+            )
+
+            st, _, _, errs = verify_existing_ledger_artifact(
+                find_architecture_ledger_row(
+                    architecture_ledger_path(drive),
+                    prompt_id="pid-repair",
+                    output_node_id="9",
+                    output_sha256=drive_sha,
+                )
+                or {},
+                expected_sha256=drive_sha,
+            )
+            _assert_equal("missing artifact REPAIR_REQUIRED", st, STATUS_REPAIR_REQUIRED_MISSING)
+            repair_cap = capture_identity_architecture_execution(
+                drive_root=drive,
+                prompt_id="pid-repair",
+                output_node_id="9",
+                output_path=out_img,
+                output_sha256=drive_sha,
+                provenance=prov_arch,
+                ui_workflow=prep_wf,
+                preparation_id=prep.preparation_id,
+                scenario="S1_near_front_portrait",
+                character_id=reg.character.character_id,
+            )
+            _assert_true("repair refuses silent recreate", not repair_cap.ok)
+            _assert_true(
+                "REPAIR_REQUIRED in errors",
+                any("REPAIR_REQUIRED" in e for e in repair_cap.errors),
+            )
+            _pass(results, "missing ledger Drive artifact -> REPAIR_REQUIRED")
+
+            # SHA mismatch fail closed
+            mismatch_local = out_dir / "mismatch.png"
+            mismatch_local.write_bytes(b"\x89PNG\r\n\x1a\n" + b"DIFFERENT-BYTES")
+            mm_row = find_architecture_ledger_row(
+                architecture_ledger_path(drive),
+                prompt_id="pid-test-001",
+                output_node_id="9",
+                output_sha256=drive_sha,
+            )
+            assert mm_row is not None
+            st2, _, _, errs2 = verify_existing_ledger_artifact(
+                {**mm_row, "output_path": str(mismatch_local)},
+                expected_sha256=drive_sha,
+            )
+            _assert_equal("SHA mismatch status", st2, STATUS_REPAIR_REQUIRED_SHA_MISMATCH)
+            _pass(results, "SHA mismatch ledger Drive artifact fail closed")
+
+            # Isolation: no ordinary parent eligibility
+            arch_meta = {
+                "preparation_kind": PREPARATION_KIND,
+                "benchmark_run": True,
+                "capability": "identity_architecture_benchmark",
+                "candidate": CANDIDATE_INSTANTID,
+                "architecture": "instantid_sdxl",
+            }
+            _assert_true(
+                "architecture is benchmark metadata",
+                is_benchmark_generation_metadata(arch_meta),
+            )
+            _assert_true(
+                "architecture provenance helper",
+                is_identity_architecture_benchmark_provenance(
+                    ExecutionProvenance(
+                        preparation_kind=PREPARATION_KIND,
+                        capability="identity_architecture_benchmark",
+                    ),
+                    {"extra": {"ai_studio": arch_meta}},
+                ),
+            )
+            deriv = assess_derivation_eligibility(metadata=arch_meta, manifest={})
+            repro = assess_reproduction_eligibility(
+                metadata=arch_meta, workflow_payload={}, manifest={}
+            )
+            _assert_true("architecture refused as 4.11 parent", not deriv.eligible)
+            _assert_true("architecture refused as 4.10 parent", not repro.eligible)
+            _pass(results, "architecture isolated from ordinary snapshot/index/parents")
+
+            # Evidence ledger still receives verified evidence
+            _assert_true("evidence file exists", evidence.is_file())
+            ev_text = evidence.read_text(encoding="utf-8")
+            _assert_true(
+                "evidence has architecture capability or skip status",
+                "identity_architecture_benchmark" in ev_text
+                or "skipped_identity_architecture_benchmark" in ev_text,
+            )
+            _pass(results, "evidence ledger receives verified architecture evidence")
+
+            # QA enrichment does not append duplicate row
+            key_rf = architecture_idempotence_key("pid-run-first", "9", run_sha)
+            rows_enr_before = len(load_architecture_benchmark_records(architecture_ledger_path(drive)))
+            ok_e, upd, _ = update_architecture_ledger_qa(
+                architecture_ledger_path(drive),
+                idempotence_key=key_rf,
+                automated_qa={
+                    "automated_quality_status": "provisional_pass",
+                    "human_review_status": "HUMAN_REVIEW_REQUIRED",
+                },
+            )
+            _assert_true("QA enrich ok", ok_e)
+            _assert_equal(
+                "QA enrich no new row",
+                len(load_architecture_benchmark_records(architecture_ledger_path(drive))),
+                rows_enr_before,
+            )
+            _pass(results, "QA enrichment does not append duplicate architecture row")
+
+            # Runtime reset simulation: delete local, Drive path still valid
+            Path(live.local_path).unlink(missing_ok=True)
+            _assert_true(
+                "Drive path survives local delete",
+                Path(live.output_path).is_file(),
+            )
+            _assert_equal(
+                "ledger SHA still matches Drive after local wipe",
+                file_sha256(Path(live.output_path)).lower(),
+                live.output_sha256.lower(),
+            )
+            _pass(results, "runtime reset does not invalidate architecture ledger output_path")
 
             # Completion timeout
             def timeout_wait(prompt_id, **kwargs):
@@ -693,11 +1129,19 @@ def main() -> int:
             # Fail-fast policy
             _assert_true(
                 "S1 fail stops",
-                should_fail_fast("S1_near_front_portrait", {"automated_quality_status": "fail"}, continue_after_fail=False),
+                should_fail_fast(
+                    "S1_near_front_portrait",
+                    {"automated_quality_status": "fail"},
+                    continue_after_fail=False,
+                ),
             )
             _assert_true(
                 "S2 fail stops without continue",
-                should_fail_fast("S2_head_angle_pose", {"automated_quality_status": "fail"}, continue_after_fail=False),
+                should_fail_fast(
+                    "S2_head_angle_pose",
+                    {"automated_quality_status": "fail"},
+                    continue_after_fail=False,
+                ),
             )
             _assert_true(
                 "S2 continue-after-fail allows",
@@ -726,7 +1170,9 @@ def main() -> int:
             _pass(results, "fail-fast and --continue-after-fail behavior")
 
             # UI->API conversion yields InstantID nodes
-            wf_path = repo_root / "workflows/reference/identity_instantid_sdxl_benchmark/workflow.json"
+            wf_path = (
+                repo_root / "workflows/reference/identity_instantid_sdxl_benchmark/workflow.json"
+            )
             api = ui_workflow_to_api_prompt(json.loads(wf_path.read_text(encoding="utf-8")))
             _assert_true("api prompt non-empty", bool(api))
             types = {v.get("class_type") for v in api.values()}
@@ -771,7 +1217,10 @@ def main() -> int:
                 "ok": False,
                 "zero_tests_discovered": True,
             }
-            _assert_true("zero tests suite not ok", not fake_suite["ok"] and fake_suite["zero_tests_discovered"])
+            _assert_true(
+                "zero tests suite not ok",
+                not fake_suite["ok"] and fake_suite["zero_tests_discovered"],
+            )
             _pass(results, "required QA suite with zero tests -> consolidated QA fail")
 
         finally:

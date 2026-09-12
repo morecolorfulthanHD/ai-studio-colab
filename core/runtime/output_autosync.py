@@ -685,10 +685,15 @@ class OutputAutoSyncService:
         self.recompute_counters()
         self.write_status()
 
+        from .identity_architecture_capture import is_identity_architecture_benchmark_provenance
         from .identity_benchmark_capture import is_identity_benchmark_provenance
 
-        is_id_bench_early = is_identity_benchmark_provenance(provenance, ui_workflow) or (
-            str(effective_capability or "") == "identity_benchmark"
+        is_arch_early = is_identity_architecture_benchmark_provenance(
+            provenance, ui_workflow
+        ) or (str(effective_capability or "") == "identity_architecture_benchmark")
+        is_id_bench_early = (not is_arch_early) and (
+            is_identity_benchmark_provenance(provenance, ui_workflow)
+            or str(effective_capability or "") == "identity_benchmark"
         )
 
         destination_result: Path | None = None
@@ -697,13 +702,15 @@ class OutputAutoSyncService:
         error = ""
         artifact_status = ""
 
-        if is_id_bench_early:
+        if is_arch_early or is_id_bench_early:
             # Preferred owner: autosync creates/reuses ONE Drive file for this
             # prompt|node|sha via the shared identity-benchmark artifact lock.
             from .identity_benchmark_artifact import (
                 ensure_canonical_identity_benchmark_artifact,
             )
 
+            arch_cap = "identity_architecture_benchmark"
+            bench_cap = "identity_benchmark"
             canonical = ensure_canonical_identity_benchmark_artifact(
                 drive_root=Path(self.drive_root),
                 source_path=local_path,
@@ -715,6 +722,12 @@ class OutputAutoSyncService:
                 wait_for_autosync_seconds=0.0,
                 allow_create_fallback=True,
                 created_by="autosync",
+                capability=arch_cap if is_arch_early else bench_cap,
+                snapshot_status=(
+                    "skipped_identity_architecture_benchmark"
+                    if is_arch_early
+                    else "skipped_identity_benchmark"
+                ),
             )
             artifact_status = canonical.status
             if canonical.ok and canonical.drive_path is not None:
@@ -805,16 +818,25 @@ class OutputAutoSyncService:
                 else:
                     record.messages.append("project_mirror_unavailable_or_collision")
 
+            from .identity_architecture_capture import (
+                capture_identity_architecture_execution,
+                is_identity_architecture_benchmark_provenance,
+            )
             from .identity_benchmark_capture import (
                 capture_identity_benchmark_execution,
                 is_identity_benchmark_provenance,
                 is_identity_benchmark_tuning_provenance,
             )
 
-            is_id_bench = is_id_bench_early or is_identity_benchmark_provenance(
+            is_arch = is_arch_early or is_identity_architecture_benchmark_provenance(
                 provenance, ui_workflow
             )
-            is_tuning = is_identity_benchmark_tuning_provenance(provenance, ui_workflow)
+            is_id_bench = (not is_arch) and (
+                is_id_bench_early or is_identity_benchmark_provenance(provenance, ui_workflow)
+            )
+            is_tuning = (not is_arch) and is_identity_benchmark_tuning_provenance(
+                provenance, ui_workflow
+            )
             if artifact_status:
                 record.messages.append(f"durable_artifact_status:{artifact_status}")
             if is_tuning:
@@ -850,6 +872,43 @@ class OutputAutoSyncService:
                         self.log(err)
                     if tuning.errors:
                         self.status.last_error = tuning.errors[0]
+            elif is_arch:
+                # Isolation: architecture InstantID — no ordinary generation snapshot/index.
+                arch_ledger = (
+                    Path(self.drive_root) / "logs" / "identity_architecture_benchmark.jsonl"
+                )
+                arch = capture_identity_architecture_execution(
+                    drive_root=Path(self.drive_root),
+                    ledger_path=arch_ledger,
+                    prompt_id=prompt_id,
+                    output_node_id=output_node_id,
+                    output_path=destination_result,
+                    output_sha256=str(record.drive_sha256 or local_hash),
+                    provenance=provenance or ExecutionProvenance(),
+                    ui_workflow=ui_workflow,
+                    local_path=str(local_path),
+                    project_id=record.project_id,
+                    ensure_durable=True,
+                    drive_output_dir=self.drive_output_dir,
+                    evidence_path=self.ledger.path,
+                    created_by="autosync",
+                )
+                if arch.ok and not arch.skipped_not_architecture:
+                    record.messages.append("identity_architecture_ledger_captured")
+                    if arch.skipped_duplicate:
+                        record.messages.append("identity_architecture_ledger_duplicate")
+                    self.log(
+                        "Identity architecture ledger: "
+                        + ("; ".join(arch.messages) if arch.messages else "captured")
+                    )
+                else:
+                    for err in arch.errors:
+                        record.messages.append(f"identity_architecture_capture_error:{err}")
+                        self.log(err)
+                    if arch.errors:
+                        self.status.last_error = arch.errors[0]
+                record.generation_id = ""
+                record.snapshot_status = "skipped_identity_architecture_benchmark"
             elif is_id_bench:
                 # Isolation: do NOT create ordinary generation snapshots/index rows.
                 ledger_path = Path(self.drive_root) / "logs" / "identity_benchmark.jsonl"
@@ -915,10 +974,11 @@ class OutputAutoSyncService:
                 (
                     "identity_benchmark_capture_error" in m
                     or "identity_benchmark_tuning_capture_error" in m
+                    or "identity_architecture_capture_error" in m
                 )
                 for m in (record.messages or [])
             )
-            if not ((is_id_bench or is_tuning) and capture_err):
+            if not ((is_id_bench or is_tuning or is_arch) and capture_err):
                 self.status.last_error = ""
             if recovery:
                 self.status.last_recovered_prompt = prompt_id
