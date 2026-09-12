@@ -195,6 +195,7 @@ class IdentityArchitectureRecord:
     scenario: str
     character_id: str
     seed: Any = None
+    executed_seed: Any = None
     preparation_id: str = ""
     preparation_kind: str = PREPARATION_KIND
     workflow_identifier: str = ""
@@ -206,11 +207,15 @@ class IdentityArchitectureRecord:
     output_path: str = ""
     output_sha256: str = ""
     local_path: str = ""
+    width: int | None = None
+    height: int | None = None
     execution_status: str = "pending"
     automated_qa: dict[str, Any] = field(default_factory=dict)
     human_review: dict[str, Any] = field(default_factory=dict)
     human_review_status: str = "pending"
     promotion_status: str = "pending"
+    license_gate: dict[str, Any] = field(default_factory=dict)
+    asset_verification: dict[str, Any] = field(default_factory=dict)
     benchmark_run: bool = True
     notes: list[str] = field(default_factory=list)
     project_id: str = ""
@@ -458,6 +463,156 @@ def assess_instantid_structural_readiness(
         "quality_claim": "none — structural registry/filesystem readiness only",
         "manual_instructions": format_manual_asset_instructions(bundle_models, missing_models),
     }
+
+
+def assess_instantid_asset_readiness(
+    *,
+    drive_root: Path,
+    bundle_models: list[dict[str, Any]],
+    comfyui_runtime: Path | None = None,
+) -> dict[str, Any]:
+    """Fail closed unless each InstantID asset has verified SHA/size or explicit UNVERIFIED blocks readiness."""
+    from .identity_benchmark import (
+        INTEGRITY_VERIFIED,
+        verify_model_asset_integrity,
+    )
+
+    del drive_root, comfyui_runtime  # reserved for future path remapping
+    errors: list[str] = []
+    assets: list[dict[str, Any]] = []
+    by_name = {str(m.get("name") or ""): m for m in bundle_models if isinstance(m, dict)}
+    for name in INSTANTID_REQUIRED_MODEL_NAMES:
+        row = dict(by_name.get(name) or {})
+        row.setdefault("name", name)
+        expected_sha = str(row.get("expected_sha256") or "").strip()
+        expected_size = row.get("expected_size_bytes")
+        runtime_path = str(row.get("runtime_path") or "").strip()
+        verification_state = str(row.get("verification_state") or "").strip()
+        entry: dict[str, Any] = {
+            "name": name,
+            "runtime_path": runtime_path,
+            "filename": row.get("filename"),
+            "verification_state": verification_state
+            or ("HASH_DEFINED" if expected_sha and expected_size is not None else "UNVERIFIED_MANUAL_ASSET"),
+            "integrity": None,
+        }
+        if verification_state == "UNVERIFIED_MANUAL_ASSET" or not expected_sha or expected_size is None:
+            entry["verification_state"] = "UNVERIFIED_MANUAL_ASSET"
+            errors.append(
+                f"ERROR: Asset {name} lacks expected_sha256/expected_size_bytes "
+                "(UNVERIFIED_MANUAL_ASSET) — live readiness fail closed."
+            )
+            assets.append(entry)
+            continue
+        path = Path(runtime_path) if runtime_path else None
+        # Directory packs (e.g. antelopev2): require directory presence + optional file list hashes.
+        if path is not None and path.is_dir():
+            required_files = row.get("required_files") or []
+            if not required_files:
+                entry["verification_state"] = "UNVERIFIED_MANUAL_ASSET"
+                errors.append(
+                    f"ERROR: Directory asset {name} has no required_files hashes "
+                    "(UNVERIFIED_MANUAL_ASSET)."
+                )
+                assets.append(entry)
+                continue
+            file_results = []
+            for rf in required_files:
+                if not isinstance(rf, dict):
+                    continue
+                fname = str(rf.get("filename") or "")
+                fpath = path / fname
+                sub = verify_model_asset_integrity(
+                    {
+                        "name": f"{name}/{fname}",
+                        "runtime_path": str(fpath),
+                        "filename": fname,
+                        "expected_sha256": rf.get("expected_sha256"),
+                        "expected_size_bytes": rf.get("expected_size_bytes"),
+                    }
+                )
+                file_results.append(sub)
+                if not sub.get("verified"):
+                    errors.append(
+                        f"ERROR: InstantID asset integrity {sub.get('status')} for {name}/{fname}"
+                    )
+            entry["integrity"] = file_results
+            entry["verification_state"] = (
+                "VERIFIED" if all(r.get("verified") for r in file_results) else "FAILED"
+            )
+            assets.append(entry)
+            continue
+        integrity = verify_model_asset_integrity(row)
+        entry["integrity"] = integrity
+        if integrity.get("status") != INTEGRITY_VERIFIED:
+            errors.append(
+                f"ERROR: InstantID asset integrity {integrity.get('status')} for {name}"
+            )
+        else:
+            entry["verification_state"] = "VERIFIED"
+        assets.append(entry)
+    ready = not errors
+    return {
+        "ready": ready,
+        "assets": assets,
+        "errors": errors,
+        "quality_claim": "none — hash/size verification only",
+    }
+
+
+def assess_instantid_license_gate(repo_root: Path) -> dict[str, Any]:
+    """Structured license statuses. Promotion requires all ACCEPTABLE."""
+    path = Path(repo_root) / "configs" / "benchmarks" / "identity_architecture_licenses.json"
+    default = {
+        "components": {
+            "ComfyUI_InstantID_node": {
+                "status": "REVIEW_REQUIRED",
+                "notes": "cubiq/ComfyUI_InstantID Apache-2.0-like node code; confirm LICENSE file.",
+            },
+            "InstantID_model_weights": {
+                "status": "REVIEW_REQUIRED",
+                "notes": "InstantX InstantID weights — review InstantX/Apache and research terms.",
+            },
+            "insightface_antelopev2": {
+                "status": "BLOCKED_FOR_COMMERCIAL",
+                "notes": "InsightFace models typically research/non-commercial — blocks production promotion.",
+            },
+            "sdxl_base": {
+                "status": "RESTRICTED",
+                "notes": "CreativeML Open RAIL++-M — use restrictions apply; not unconditional ACCEPTABLE.",
+            },
+        },
+        "overall_status": "BLOCKED_FOR_COMMERCIAL",
+        "promotion_allowed": False,
+    }
+    if path.is_file():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and data.get("components"):
+                components = data["components"]
+                statuses = [
+                    str((v or {}).get("status") or "REVIEW_REQUIRED")
+                    for v in components.values()
+                    if isinstance(v, dict)
+                ]
+                promotion_allowed = bool(statuses) and all(s == "ACCEPTABLE" for s in statuses)
+                if any(s == "BLOCKED_FOR_COMMERCIAL" for s in statuses):
+                    overall = "BLOCKED_FOR_COMMERCIAL"
+                elif any(s in {"REVIEW_REQUIRED", "RESTRICTED"} for s in statuses):
+                    overall = "REVIEW_REQUIRED"
+                elif promotion_allowed:
+                    overall = "ACCEPTABLE"
+                else:
+                    overall = "REVIEW_REQUIRED"
+                return {
+                    "components": components,
+                    "overall_status": overall,
+                    "promotion_allowed": promotion_allowed,
+                    "source": str(path),
+                }
+        except (OSError, json.JSONDecodeError):
+            pass
+    return {**default, "source": "defaults"}
 
 
 def prepare_identity_architecture_benchmark(

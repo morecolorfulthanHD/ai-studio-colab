@@ -36,7 +36,12 @@
         "identity_architecture_benchmark"
       ],
       "status": "planned",
-      "notes": "SDXL base checkpoint for Package 4.12.3 InstantID architecture benchmark. CreativeML Open RAIL++-M — review before production."
+      "filename": "sd_xl_base_1.0.safetensors",
+      "install_policy": "manual_only",
+      "verification_state": "UNVERIFIED_MANUAL_ASSET",
+      "source_url": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0",
+      "license_notes": "CreativeML Open RAIL++-M — restricted; not unconditional commercial ACCEPTABLE.",
+      "notes": "SDXL base for InstantID architecture benchmark. Hash/size not pinned in-repo yet → UNVERIFIED_MANUAL_ASSET (live readiness fail closed until hashes recorded)."
     },
     {
       "name": "sdxl_refiner",
@@ -321,10 +326,12 @@
         "identity_architecture_benchmark"
       ],
       "status": "planned",
-      "notes": "InstantID IP-Adapter weight (InstantX). Manual placement only; no auto-download. Review InstantX license before production.",
-      "source_url": "InstantX/InstantID ip-adapter.bin (operator-obtained)",
+      "notes": "InstantID IP-Adapter weight (InstantX). Manual only. Hash/size not pinned → UNVERIFIED_MANUAL_ASSET until operator records verified SHA256/size.",
+      "source_url": "https://huggingface.co/InstantX/InstantID",
       "filename": "ip-adapter.bin",
-      "install_policy": "manual_only"
+      "install_policy": "manual_only",
+      "verification_state": "UNVERIFIED_MANUAL_ASSET",
+      "license_notes": "InstantX InstantID weights — REVIEW_REQUIRED / potentially restricted."
     },
     {
       "name": "instantid_controlnet",
@@ -336,10 +343,12 @@
         "identity_architecture_benchmark"
       ],
       "status": "planned",
-      "notes": "InstantID ControlNet diffusion weight. Manual placement only; no auto-download.",
-      "source_url": "InstantX/InstantID ControlNet (operator-obtained)",
+      "notes": "InstantID ControlNet. Manual only. Hash/size not pinned → UNVERIFIED_MANUAL_ASSET.",
+      "source_url": "https://huggingface.co/InstantX/InstantID",
       "filename": "diffusion_pytorch_model.safetensors",
-      "install_policy": "manual_only"
+      "install_policy": "manual_only",
+      "verification_state": "UNVERIFIED_MANUAL_ASSET",
+      "license_notes": "InstantX InstantID ControlNet — REVIEW_REQUIRED."
     },
     {
       "name": "insightface_antelopev2",
@@ -351,9 +360,18 @@
         "identity_architecture_benchmark"
       ],
       "status": "planned",
-      "notes": "InsightFace antelopev2 pack for InstantID face analysis. Directory must contain detection + recognition ONNX files. Manual only; no auto-download.",
-      "source_url": "InsightFace antelopev2 (operator-obtained; review license)",
-      "install_policy": "manual_only"
+      "notes": "InsightFace antelopev2 ONNX pack. Manual only. Per-file hashes not pinned → UNVERIFIED_MANUAL_ASSET. Typical InsightFace terms block commercial promotion.",
+      "source_url": "https://github.com/deepinsight/insightface",
+      "install_policy": "manual_only",
+      "verification_state": "UNVERIFIED_MANUAL_ASSET",
+      "required_files": [
+        {"filename": "1k3d68.onnx", "expected_sha256": null, "expected_size_bytes": null},
+        {"filename": "2d106det.onnx", "expected_sha256": null, "expected_size_bytes": null},
+        {"filename": "genderage.onnx", "expected_sha256": null, "expected_size_bytes": null},
+        {"filename": "glintr100.onnx", "expected_sha256": null, "expected_size_bytes": null},
+        {"filename": "scrfd_10g_bnkps.onnx", "expected_sha256": null, "expected_size_bytes": null}
+      ],
+      "license_notes": "InsightFace research/non-commercial typical terms — BLOCKED_FOR_COMMERCIAL until counsel ACCEPTABLE."
     }
   ]
 }

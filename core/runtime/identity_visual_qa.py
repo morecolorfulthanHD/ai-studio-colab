@@ -1,16 +1,28 @@
 #!/usr/bin/env python3
 """Automated visual QA gates for identity architecture benchmark (Package 4.12.3).
 
-Deterministic local checks only. Does not replace final human review.
-Thresholds are initially uncalibrated — fail closed on missing detectors.
+Landmark/PnP yaw with documented sign convention.
+Face-local smile/teeth.
+No network CLIP downloads.
+Uncalibrated metrics never produce plain automated PASS.
 """
 
 from __future__ import annotations
 
 import json
 import math
+import os
 from pathlib import Path
 from typing import Any, Callable
+
+# Sign convention (documented):
+#   positive yaw_degrees = subject turns toward THEIR right (three-quarter right).
+#   negative yaw_degrees = subject turns toward THEIR left.
+# Estimator maps OpenCV solvePnP yaw so that rightward head turn is positive.
+YAW_SIGN_CONVENTION = (
+    "positive = subject turns to subject's right; "
+    "negative = subject turns to subject's left"
+)
 
 _DEFAULT_QA_CONFIG: dict[str, Any] = {
     "calibration_status": "uncalibrated",
@@ -18,30 +30,35 @@ _DEFAULT_QA_CONFIG: dict[str, Any] = {
     "yaw_frontal_abs_max": 12,
     "yaw_s2_abs_min": 25,
     "yaw_s2_abs_max": 55,
+    "yaw_requested_direction": "right",
     "smile_min_s3": 0.45,
+    "mouth_open_min_s3": 0.20,
     "visible_teeth_min_s3": 0.25,
     "clip_adherence_min_s4": 0.20,
     "notes": [
         "Thresholds are placeholders until live GPU calibration.",
-        "Automated gates eliminate obvious failures; human review still required on pass.",
+        "Clear objective failures still FAIL. Uncalibrated success is provisional_pass only.",
     ],
 }
 
 _inject_embeddings: Callable[[str], list[float] | None] | None = None
 _inject_yaw: Callable[[str], float | None] | None = None
-_inject_smile: Callable[[str], tuple[float, float] | None] | None = None
+_inject_smile: Callable[[str], tuple[float, float, float] | None] | None = None
+_inject_landmarks: Callable[[str], Any] | None = None
 
 
 def set_qa_test_hooks(
     *,
     inject_embeddings: Callable[[str], list[float] | None] | None = None,
     inject_yaw: Callable[[str], float | None] | None = None,
-    inject_smile: Callable[[str], tuple[float, float] | None] | None = None,
+    inject_smile: Callable[[str], tuple[float, float, float] | None] | None = None,
+    inject_landmarks: Callable[[str], Any] | None = None,
 ) -> None:
-    global _inject_embeddings, _inject_yaw, _inject_smile
+    global _inject_embeddings, _inject_yaw, _inject_smile, _inject_landmarks
     _inject_embeddings = inject_embeddings
     _inject_yaw = inject_yaw
     _inject_smile = inject_smile
+    _inject_landmarks = inject_landmarks
 
 
 def reset_qa_test_hooks() -> None:
@@ -49,7 +66,6 @@ def reset_qa_test_hooks() -> None:
 
 
 def load_qa_config(repo_root: Path | None = None) -> dict[str, Any]:
-    """Load QA thresholds; fall back to in-code defaults if config missing."""
     if repo_root is not None:
         config_path = Path(repo_root) / "configs/benchmarks/identity_architecture_qa.json"
         if config_path.is_file():
@@ -93,7 +109,6 @@ def compute_identity_cosine_similarity(
     *,
     inject_embeddings: Callable[[str], list[float] | None] | None = None,
 ) -> dict[str, Any]:
-    """Compare face embeddings. Fail closed when insightface available but no face detected."""
     ref = Path(ref_path)
     gen = Path(gen_path)
     result: dict[str, Any] = {
@@ -124,7 +139,6 @@ def compute_identity_cosine_similarity(
         return result
 
     try:
-        import insightface  # noqa: F401
         from insightface.app import FaceAnalysis
     except ImportError:
         result["notes"] = "insightface not importable; identity cosine unavailable."
@@ -143,8 +157,7 @@ def compute_identity_cosine_similarity(
             return None, False
         import numpy as np
 
-        arr = np.array(img)
-        faces = app.get(arr)
+        faces = app.get(np.array(img))
         if not faces:
             return None, False
         emb = getattr(faces[0], "embedding", None)
@@ -160,11 +173,97 @@ def compute_identity_cosine_similarity(
         result["status"] = "fail"
         result["notes"] = "Face detection failed (fail closed when insightface available)."
         return result
-    score = _cosine(ref_emb or [], gen_emb or [])
     result["status"] = "ok"
-    result["identity_cosine_similarity"] = score
+    result["identity_cosine_similarity"] = _cosine(ref_emb or [], gen_emb or [])
     result["notes"] = "Computed via insightface buffalo_l embeddings."
     return result
+
+
+def _generic_3d_face_model() -> Any:
+    """Canonical 3D face points (mm-ish) for solvePnP: nose, chin, L/R eye, L/R mouth."""
+    import numpy as np
+
+    return np.array(
+        [
+            (0.0, 0.0, 0.0),  # nose tip
+            (0.0, -63.6, -12.5),  # chin
+            (-43.3, 32.7, -26.0),  # left eye outer
+            (43.3, 32.7, -26.0),  # right eye outer
+            (-28.9, -28.9, -24.1),  # left mouth
+            (28.9, -28.9, -24.1),  # right mouth
+        ],
+        dtype=np.float64,
+    )
+
+
+def _extract_face_landmarks(image_path: Path) -> dict[str, Any]:
+    """Return 2D landmarks + confidence using InsightFace when available."""
+    out: dict[str, Any] = {
+        "status": "unavailable",
+        "points": None,
+        "kps": None,
+        "det_score": None,
+        "notes": "",
+    }
+    if _inject_landmarks is not None:
+        hooked = _inject_landmarks(str(image_path))
+        if hooked is None:
+            out["status"] = "unavailable"
+            out["notes"] = "Test hook: landmarks unavailable."
+            return out
+        out.update(hooked if isinstance(hooked, dict) else {"status": "ok", "points": hooked})
+        return out
+
+    img = _load_image_rgb(image_path)
+    if img is None:
+        out["notes"] = "Image unreadable."
+        return out
+    try:
+        import numpy as np
+        from insightface.app import FaceAnalysis
+    except ImportError:
+        out["notes"] = "insightface unavailable for landmarks; yaw/smile inconclusive."
+        return out
+
+    try:
+        app = FaceAnalysis(name="buffalo_l", providers=["CPUExecutionProvider"])
+        app.prepare(ctx_id=0, det_size=(640, 640))
+        faces = app.get(np.array(img))
+    except Exception as exc:  # noqa: BLE001
+        out["notes"] = f"insightface landmark init/get failed: {exc}"
+        return out
+    if not faces:
+        out["status"] = "fail"
+        out["notes"] = "No face detected for landmarks."
+        return out
+    face = max(faces, key=lambda f: float(getattr(f, "det_score", 0) or 0))
+    kps = getattr(face, "kps", None)
+    if kps is None:
+        out["status"] = "unavailable"
+        out["notes"] = "Face detected but no landmarks."
+        return out
+    # InsightFace 5-point: left_eye, right_eye, nose, left_mouth, right_mouth
+    pts = np.asarray(kps, dtype=np.float64)
+    if pts.shape[0] < 5:
+        out["status"] = "unavailable"
+        out["notes"] = "Insufficient landmark points."
+        return out
+    # Map to solvePnP order: nose, chin(approx), L eye, R eye, L mouth, R mouth
+    # Chin approx: extend nose→mid-mouth downward.
+    left_eye, right_eye, nose, left_mouth, right_mouth = pts[:5]
+    mouth_mid = (left_mouth + right_mouth) / 2.0
+    chin = mouth_mid + (mouth_mid - nose) * 0.85
+    ordered = np.array([nose, chin, left_eye, right_eye, left_mouth, right_mouth], dtype=np.float64)
+    out.update(
+        {
+            "status": "ok",
+            "points": ordered,
+            "kps": pts,
+            "det_score": float(getattr(face, "det_score", 0) or 0),
+            "notes": "InsightFace 5-point landmarks (+chin approx).",
+        }
+    )
+    return out
 
 
 def estimate_yaw_degrees(
@@ -172,21 +271,25 @@ def estimate_yaw_degrees(
     *,
     inject_yaw: Callable[[str], float | None] | None = None,
 ) -> dict[str, Any]:
-    """Estimate head yaw using OpenCV Haar eye geometry when available."""
+    """Estimate yaw via landmark solvePnP. No brightness-asymmetry production fallback."""
     path = Path(image_path)
     result: dict[str, Any] = {
         "status": "unavailable",
         "estimated_yaw_degrees": None,
+        "estimated_pitch_degrees": None,
+        "estimated_roll_degrees": None,
         "pose_detection_status": "unavailable",
+        "detector_confidence": None,
         "is_near_front": None,
+        "yaw_sign_convention": YAW_SIGN_CONVENTION,
         "notes": "",
     }
     hook = inject_yaw or _inject_yaw
     if hook is not None:
         yaw = hook(str(path))
         if yaw is None:
-            result["status"] = "fail"
-            result["pose_detection_status"] = "no_face"
+            result["status"] = "unavailable"
+            result["pose_detection_status"] = "unavailable"
             result["notes"] = "Test hook: yaw unavailable."
             return result
         result.update(
@@ -200,137 +303,220 @@ def estimate_yaw_degrees(
         )
         return result
 
-    img = _load_image_rgb(path)
-    if img is None:
-        result["notes"] = "Image unreadable."
+    lm = _extract_face_landmarks(path)
+    if lm.get("status") == "fail":
+        result["status"] = "fail"
+        result["pose_detection_status"] = "no_face"
+        result["notes"] = lm.get("notes") or "No face."
+        return result
+    if lm.get("status") != "ok" or lm.get("points") is None:
+        result["status"] = "unavailable"
+        result["pose_detection_status"] = "unavailable"
+        result["notes"] = lm.get("notes") or "Landmarks unavailable; yaw inconclusive."
         return result
 
     try:
         import cv2
         import numpy as np
     except ImportError:
-        result["notes"] = "OpenCV unavailable for yaw estimation."
+        result["notes"] = "OpenCV unavailable for solvePnP."
         return result
 
-    gray = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2GRAY)
-    cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-    eye_path = cv2.data.haarcascades + "haarcascade_eye.xml"
-    face_cascade = cv2.CascadeClassifier(cascade_path)
-    eye_cascade = cv2.CascadeClassifier(eye_path)
-    faces = face_cascade.detectMultiScale(gray, 1.1, 5, minSize=(48, 48))
-    if len(faces) == 0:
-        result["status"] = "fail"
-        result["pose_detection_status"] = "no_face"
-        result["notes"] = "No face detected for yaw estimation."
+    img = _load_image_rgb(path)
+    if img is None:
+        result["notes"] = "Image unreadable."
         return result
-    x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
-    roi = gray[y : y + h, x : x + w]
-    eyes = eye_cascade.detectMultiScale(roi, 1.1, 5, minSize=(16, 16))
-    if len(eyes) < 2:
-        # Heuristic fallback: horizontal brightness asymmetry in face ROI
-        left = roi[:, : w // 2]
-        right = roi[:, w // 2 :]
-        asym = float(left.mean() - right.mean())
-        yaw = max(-60.0, min(60.0, asym * 0.35))
-    else:
-        eyes = sorted(eyes, key=lambda e: e[0])[:2]
-        (ex1, _, ew1, _), (ex2, _, ew2, _) = eyes
-        cx1 = ex1 + ew1 / 2
-        cx2 = ex2 + ew2 / 2
-        eye_span = max(abs(cx2 - cx1), 1.0)
-        face_cx = w / 2
-        eye_mid = (cx1 + cx2) / 2
-        offset = (eye_mid - face_cx) / eye_span
-        yaw = max(-60.0, min(60.0, offset * 45.0))
-
-    result["status"] = "ok"
-    result["estimated_yaw_degrees"] = float(yaw)
-    result["pose_detection_status"] = "ok"
-    result["is_near_front"] = abs(float(yaw)) < 12
-    result["notes"] = "Haar eye-geometry heuristic (uncalibrated)."
+    w, h = img.size
+    image_points = np.asarray(lm["points"], dtype=np.float64)
+    model_points = _generic_3d_face_model()
+    focal = float(w)
+    center = (w / 2.0, h / 2.0)
+    camera_matrix = np.array(
+        [[focal, 0, center[0]], [0, focal, center[1]], [0, 0, 1]],
+        dtype=np.float64,
+    )
+    dist = np.zeros((4, 1), dtype=np.float64)
+    ok, rvec, tvec = cv2.solvePnP(
+        model_points,
+        image_points,
+        camera_matrix,
+        dist,
+        flags=cv2.SOLVEPNP_ITERATIVE,
+    )
+    if not ok:
+        result["status"] = "unavailable"
+        result["pose_detection_status"] = "unavailable"
+        result["notes"] = "solvePnP failed."
+        return result
+    rot, _ = cv2.Rodrigues(rvec)
+    # yaw from rotation matrix (Y-axis); flip sign so subject's right is positive
+    sy = math.sqrt(rot[0, 0] ** 2 + rot[1, 0] ** 2)
+    yaw = math.degrees(math.atan2(-rot[2, 0], sy))
+    pitch = math.degrees(math.atan2(rot[2, 1], rot[2, 2]))
+    roll = math.degrees(math.atan2(rot[1, 0], rot[0, 0]))
+    # InsightFace/OpenCV camera convention often yields inverted left/right vs subject-right.
+    # Documented flip: multiply by -1 so positive = subject turns right.
+    yaw = -float(yaw)
+    result.update(
+        {
+            "status": "ok",
+            "estimated_yaw_degrees": yaw,
+            "estimated_pitch_degrees": float(pitch),
+            "estimated_roll_degrees": float(roll),
+            "pose_detection_status": "ok",
+            "detector_confidence": lm.get("det_score"),
+            "is_near_front": abs(yaw) < 12,
+            "notes": "Landmark solvePnP yaw; sign flipped to subject-right positive.",
+        }
+    )
     return result
 
 
 def smile_and_teeth_signals(
     image_path: str | Path,
     *,
-    inject_smile: Callable[[str], tuple[float, float] | None] | None = None,
+    inject_smile: Callable[[str], tuple[float, float, float] | None] | None = None,
 ) -> dict[str, Any]:
-    """Mouth-region aspect + bright teeth heuristic."""
+    """Face-local mouth geometry + teeth region inside mouth landmarks."""
     path = Path(image_path)
     result: dict[str, Any] = {
         "status": "unavailable",
         "smile_score": None,
+        "mouth_open_score": None,
         "visible_teeth_signal": None,
         "expression_gate_status": "unavailable",
+        "landmark_status": "unavailable",
         "notes": "",
     }
     hook = inject_smile or _inject_smile
     if hook is not None:
         row = hook(str(path))
         if row is None:
-            result["status"] = "fail"
-            result["expression_gate_status"] = "no_face"
+            result["status"] = "unavailable"
+            result["expression_gate_status"] = "unavailable"
+            result["landmark_status"] = "unavailable"
             return result
-        smile, teeth = row
+        if len(row) == 2:
+            smile, teeth = row
+            mouth_open = smile
+        else:
+            smile, mouth_open, teeth = row
         result.update(
             {
                 "status": "ok",
                 "smile_score": float(smile),
+                "mouth_open_score": float(mouth_open),
                 "visible_teeth_signal": float(teeth),
                 "expression_gate_status": "ok",
+                "landmark_status": "ok",
                 "notes": "Computed via inject_smile hook.",
             }
         )
+        return result
+
+    lm = _extract_face_landmarks(path)
+    result["landmark_status"] = lm.get("status") or "unavailable"
+    if lm.get("status") == "fail":
+        result["status"] = "fail"
+        result["expression_gate_status"] = "no_face"
+        result["notes"] = lm.get("notes") or "No face."
+        return result
+    if lm.get("status") != "ok" or lm.get("kps") is None:
+        result["status"] = "unavailable"
+        result["expression_gate_status"] = "unavailable"
+        result["notes"] = lm.get("notes") or "Mouth landmarks unavailable; expression inconclusive."
         return result
 
     img = _load_image_rgb(path)
     if img is None:
         result["notes"] = "Image unreadable."
         return result
-
     try:
-        import cv2
         import numpy as np
     except ImportError:
-        result["notes"] = "OpenCV unavailable for expression heuristic."
+        result["notes"] = "numpy unavailable."
         return result
 
+    kps = np.asarray(lm["kps"], dtype=np.float64)
+    left_eye, right_eye, nose, left_mouth, right_mouth = kps[:5]
+    mouth_width = float(np.linalg.norm(right_mouth - left_mouth))
+    eye_span = float(np.linalg.norm(right_eye - left_eye)) or 1.0
+    mouth_mid = (left_mouth + right_mouth) / 2.0
+    # Vertical separation nose→mouth relative to eye span approximates openness/smile stretch.
+    vertical = float(np.linalg.norm(mouth_mid - nose))
+    smile_score = min(1.0, max(0.0, (mouth_width / eye_span - 0.55) / 0.55))
+    mouth_open_score = min(1.0, max(0.0, (vertical / eye_span - 0.45) / 0.55))
+
+    # Teeth region: small band between mouth corners, interior of lower face.
     arr = np.array(img)
-    gray = cv2.cvtColor(arr, cv2.COLOR_RGB2GRAY)
-    h, w = gray.shape
-    mouth_roi = gray[int(h * 0.55) : int(h * 0.85), int(w * 0.25) : int(w * 0.75)]
-    if mouth_roi.size == 0:
-        result["status"] = "fail"
-        result["expression_gate_status"] = "no_face"
-        return result
-    mouth_h = mouth_roi.shape[0]
-    mouth_w = mouth_roi.shape[1]
-    aspect = mouth_w / max(mouth_h, 1)
-    smile_score = min(1.0, max(0.0, (aspect - 1.2) / 1.5))
-    bright = mouth_roi > 200
-    teeth_signal = float(bright.mean())
-    result["status"] = "ok"
-    result["smile_score"] = smile_score
-    result["visible_teeth_signal"] = teeth_signal
-    result["expression_gate_status"] = "ok"
-    result["notes"] = "Lower-face aspect + bright-region heuristic (uncalibrated)."
+    x0 = int(min(left_mouth[0], right_mouth[0]))
+    x1 = int(max(left_mouth[0], right_mouth[0]))
+    y_mid = int(mouth_mid[1])
+    band = max(2, int(0.12 * mouth_width))
+    y0 = max(0, y_mid - band // 2)
+    y1 = min(arr.shape[0], y_mid + band)
+    x0 = max(0, x0)
+    x1 = min(arr.shape[1], max(x0 + 1, x1))
+    roi = arr[y0:y1, x0:x1]
+    if roi.size == 0:
+        teeth = 0.0
+    else:
+        # Bright + low-saturation-ish proxy in RGB: high min channel
+        bright = (roi.min(axis=2) > 170) & (roi.max(axis=2) > 200)
+        teeth = float(bright.mean())
+
+    result.update(
+        {
+            "status": "ok",
+            "smile_score": smile_score,
+            "mouth_open_score": mouth_open_score,
+            "visible_teeth_signal": teeth,
+            "expression_gate_status": "ok",
+            "landmark_status": "ok",
+            "notes": "Face-local mouth width/openness + mouth-band teeth heuristic (uncalibrated).",
+        }
+    )
     return result
+
+
+def _local_clip_model_dir(repo_root: Path | None = None) -> Path | None:
+    env = str(os.environ.get("AI_STUDIO_CLIP_MODEL_DIR") or "").strip()
+    if env:
+        p = Path(env)
+        return p if p.is_dir() else None
+    if repo_root is not None:
+        candidate = Path(repo_root) / "assets" / "clip" / "openai-clip-vit-base-patch32"
+        if candidate.is_dir():
+            return candidate
+    drive = Path("/content/drive/MyDrive/AI_Studio/models/shared/clip/openai-clip-vit-base-patch32")
+    if drive.is_dir():
+        return drive
+    return None
 
 
 def prompt_adherence_scores(
     image_path: str | Path,
     concepts: list[str],
+    *,
+    repo_root: Path | None = None,
 ) -> dict[str, Any]:
-    """Optional CLIP text-image scores; stub unavailable when CLIP not present."""
+    """Local CLIP only. Never downloads from Hugging Face."""
     path = Path(image_path)
     result: dict[str, Any] = {
         "status": "unavailable",
         "scores": {},
         "notes": "",
+        "network_attempted": False,
     }
     if not concepts:
         result["notes"] = "No concepts supplied."
+        return result
+    model_dir = _local_clip_model_dir(repo_root)
+    if model_dir is None:
+        result["notes"] = (
+            "Local CLIP model not present; S4 prompt adherence UNAVAILABLE "
+            "(no Hugging Face download)."
+        )
         return result
     try:
         import torch
@@ -346,8 +532,8 @@ def prompt_adherence_scores(
         return result
 
     try:
-        processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
-        model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+        processor = CLIPProcessor.from_pretrained(str(model_dir), local_files_only=True)
+        model = CLIPModel.from_pretrained(str(model_dir), local_files_only=True)
         model.eval()
         inputs = processor(text=concepts, images=img, return_tensors="pt", padding=True)
         with torch.no_grad():
@@ -356,9 +542,10 @@ def prompt_adherence_scores(
         probs = logits.softmax(dim=0)
         result["scores"] = {c: float(probs[i]) for i, c in enumerate(concepts)}
         result["status"] = "ok"
-        result["notes"] = "CLIP ViT-B/32 similarities (advisory)."
+        result["notes"] = f"Local CLIP only ({model_dir}); local_files_only=True."
     except Exception as exc:  # noqa: BLE001
-        result["notes"] = f"CLIP scoring failed: {exc}"
+        result["notes"] = f"Local CLIP scoring failed (no network fallback): {exc}"
+        result["status"] = "unavailable"
     return result
 
 
@@ -368,7 +555,6 @@ def image_integrity_gate(
     expected_width: int | None = None,
     expected_height: int | None = None,
 ) -> dict[str, Any]:
-    """Decode image, verify non-zero bytes and optional dimensions."""
     p = Path(path)
     result: dict[str, Any] = {
         "status": "fail",
@@ -399,12 +585,36 @@ def image_integrity_gate(
     return result
 
 
-def _gate_status(passed: bool | None) -> str:
-    if passed is True:
-        return "pass"
-    if passed is False:
-        return "fail"
-    return "unavailable"
+def _direction_match(yaw: float, requested: str) -> bool:
+    req = str(requested or "right").strip().lower()
+    if req == "right":
+        return yaw > 0
+    if req == "left":
+        return yaw < 0
+    return False
+
+
+def _finalize_automated_status(
+    *,
+    calibration_status: str,
+    identity_gate: str,
+    scenario_adherence_gate: str,
+    integrity_gate: str,
+) -> tuple[str, str]:
+    """Return (automated_quality_status, human_review_status).
+
+    Uncalibrated metrics never yield plain 'pass'.
+    """
+    gates = [identity_gate, scenario_adherence_gate, integrity_gate]
+    if "fail" in gates:
+        return "fail", "not_required_yet"
+    if any(g in {"unavailable", "inconclusive"} for g in gates):
+        return "inconclusive", "HUMAN_REVIEW_REQUIRED"
+    if all(g == "pass" for g in gates):
+        if str(calibration_status) != "calibrated":
+            return "provisional_pass", "HUMAN_REVIEW_REQUIRED"
+        return "pass", "HUMAN_REVIEW_REQUIRED"
+    return "inconclusive", "HUMAN_REVIEW_REQUIRED"
 
 
 def evaluate_scenario_qa(
@@ -413,20 +623,28 @@ def evaluate_scenario_qa(
     output_path: str | Path,
     config: dict[str, Any] | None = None,
     *,
+    requested_yaw_direction: str = "right",
+    repo_root: Path | None = None,
+    expected_width: int | None = None,
+    expected_height: int | None = None,
     inject_embeddings: Callable[[str], list[float] | None] | None = None,
     inject_yaw: Callable[[str], float | None] | None = None,
-    inject_smile: Callable[[str], tuple[float, float] | None] | None = None,
+    inject_smile: Callable[[str], tuple[float, float, float] | None] | None = None,
 ) -> dict[str, Any]:
-    """Run scenario-specific automated gates and return consolidated QA dict."""
-    cfg = config or load_qa_config()
+    cfg = config or load_qa_config(repo_root)
     scenario_id = str(scenario or "").strip()
     from .identity_architecture_benchmark import SCENARIO_DIMENSIONS
 
-    expected_w, expected_h = SCENARIO_DIMENSIONS.get(scenario_id, (None, None))
+    dims = SCENARIO_DIMENSIONS.get(scenario_id, (None, None))
+    exp_w = expected_width if expected_width is not None else dims[0]
+    exp_h = expected_height if expected_height is not None else dims[1]
+    # Test hooks: when inject_* are active and caller passes 0, skip dimension binding.
+    if expected_width == 0 and expected_height == 0:
+        exp_w, exp_h = None, None
     integrity = image_integrity_gate(
         output_path,
-        expected_width=expected_w,
-        expected_height=expected_h,
+        expected_width=exp_w,
+        expected_height=exp_h,
     )
     identity = compute_identity_cosine_similarity(
         ref_face,
@@ -437,7 +655,6 @@ def evaluate_scenario_qa(
     smile = smile_and_teeth_signals(output_path, inject_smile=inject_smile)
 
     identity_min = float(cfg.get("identity_cosine_min") or 0.35)
-    identity_gate: str
     if identity["status"] == "fail":
         identity_gate = "fail"
     elif identity["status"] == "ok" and identity.get("identity_cosine_similarity") is not None:
@@ -449,30 +666,44 @@ def evaluate_scenario_qa(
 
     scenario_adherence_gate = "unavailable"
     prompt_scores: dict[str, Any] = {"status": "unavailable", "scores": {}}
+    direction_match = None
+    req_dir = str(cfg.get("yaw_requested_direction") or requested_yaw_direction or "right")
 
     if scenario_id == "S2_head_angle_pose":
         if yaw["status"] == "fail":
             scenario_adherence_gate = "fail"
-        elif yaw["status"] == "ok" and yaw.get("estimated_yaw_degrees") is not None:
-            yaw_val = abs(float(yaw["estimated_yaw_degrees"]))
+        elif yaw["status"] != "ok" or yaw.get("estimated_yaw_degrees") is None:
+            scenario_adherence_gate = "unavailable"
+        else:
+            yaw_val = float(yaw["estimated_yaw_degrees"])
+            abs_yaw = abs(yaw_val)
             frontal_max = float(cfg.get("yaw_frontal_abs_max") or 12)
             s2_min = float(cfg.get("yaw_s2_abs_min") or 25)
             s2_max = float(cfg.get("yaw_s2_abs_max") or 55)
-            if yaw_val < frontal_max:
+            direction_match = _direction_match(yaw_val, req_dir)
+            if abs_yaw < frontal_max:
                 scenario_adherence_gate = "fail"
-            elif s2_min <= yaw_val <= s2_max:
+            elif abs_yaw > s2_max:
+                scenario_adherence_gate = "fail"  # excessive profile
+            elif not direction_match:
+                scenario_adherence_gate = "fail"
+            elif s2_min <= abs_yaw <= s2_max and direction_match:
                 scenario_adherence_gate = "pass"
             else:
                 scenario_adherence_gate = "fail"
     elif scenario_id == "S3_expression_change":
         if smile["status"] == "fail":
             scenario_adherence_gate = "fail"
-        elif smile["status"] == "ok":
+        elif smile["status"] != "ok":
+            scenario_adherence_gate = "unavailable"
+        else:
             smile_min = float(cfg.get("smile_min_s3") or 0.45)
             teeth_min = float(cfg.get("visible_teeth_min_s3") or 0.25)
+            mouth_min = float(cfg.get("mouth_open_min_s3") or 0.20)
             if (
                 float(smile.get("smile_score") or 0) >= smile_min
                 and float(smile.get("visible_teeth_signal") or 0) >= teeth_min
+                and float(smile.get("mouth_open_score") or 0) >= mouth_min
             ):
                 scenario_adherence_gate = "pass"
             else:
@@ -484,12 +715,14 @@ def evaluate_scenario_qa(
             "full body environmental photograph",
             "studio portrait close-up",
         ]
-        prompt_scores = prompt_adherence_scores(output_path, concepts)
+        prompt_scores = prompt_adherence_scores(output_path, concepts, repo_root=repo_root)
         if prompt_scores.get("status") == "ok":
             red = float((prompt_scores.get("scores") or {}).get(concepts[0], 0))
             env = float((prompt_scores.get("scores") or {}).get(concepts[1], 0))
             clip_min = float(cfg.get("clip_adherence_min_s4") or 0.20)
             scenario_adherence_gate = "pass" if red >= clip_min and env >= clip_min else "fail"
+        else:
+            scenario_adherence_gate = "unavailable"
     elif scenario_id == "S1_near_front_portrait":
         if yaw["status"] == "ok" and yaw.get("is_near_front") is True:
             scenario_adherence_gate = "pass"
@@ -499,18 +732,12 @@ def evaluate_scenario_qa(
             scenario_adherence_gate = "unavailable"
 
     integrity_gate = integrity.get("image_integrity_gate") or integrity.get("status")
-    gates = [identity_gate, scenario_adherence_gate, integrity_gate]
-    if "fail" in gates:
-        automated_quality_status = "fail"
-    elif all(g == "pass" for g in gates):
-        automated_quality_status = "pass"
-    else:
-        automated_quality_status = "inconclusive"
-
-    human_review_status = (
-        "not_required_yet" if automated_quality_status == "fail" else "required_if_automated_pass"
+    automated_quality_status, human_review_status = _finalize_automated_status(
+        calibration_status=str(cfg.get("calibration_status") or "uncalibrated"),
+        identity_gate=identity_gate,
+        scenario_adherence_gate=scenario_adherence_gate,
+        integrity_gate=str(integrity_gate),
     )
-    final_status = automated_quality_status
 
     return {
         "scenario": scenario_id,
@@ -520,14 +747,19 @@ def evaluate_scenario_qa(
         "image_integrity_gate": integrity_gate,
         "automated_quality_status": automated_quality_status,
         "human_review_status": human_review_status,
-        "final_status": final_status,
+        "final_status": automated_quality_status,
         "calibration_status": cfg.get("calibration_status"),
         "identity_cosine_similarity": identity.get("identity_cosine_similarity"),
         "estimated_yaw_degrees": yaw.get("estimated_yaw_degrees"),
+        "requested_yaw_direction": req_dir,
+        "direction_match": direction_match,
+        "yaw_sign_convention": YAW_SIGN_CONVENTION,
         "pose_detection_status": yaw.get("pose_detection_status"),
         "smile_score": smile.get("smile_score"),
+        "mouth_open_score": smile.get("mouth_open_score"),
         "visible_teeth_signal": smile.get("visible_teeth_signal"),
         "expression_gate_status": smile.get("expression_gate_status"),
+        "landmark_status": smile.get("landmark_status"),
         "prompt_adherence_scores": prompt_scores.get("scores") or {},
         "prompt_adherence_status": prompt_scores.get("status"),
         "details": {

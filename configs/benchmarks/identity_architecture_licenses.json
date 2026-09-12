@@ -1,0 +1,33 @@
+{
+  "package": "4.12.3",
+  "notes": [
+    "Production promotion requires every component status == ACCEPTABLE.",
+    "Technical benchmark success alone must not promote InstantID.",
+    "Statuses: ACCEPTABLE | RESTRICTED | REVIEW_REQUIRED | BLOCKED_FOR_COMMERCIAL"
+  ],
+  "components": {
+    "ComfyUI_InstantID_node": {
+      "status": "REVIEW_REQUIRED",
+      "source": "https://github.com/cubiq/ComfyUI_InstantID",
+      "pinned_commit": "72495e806bc2ab9c41581e15ccaa1bcf83c477e8",
+      "notes": "Confirm LICENSE (commonly Apache-2.0-like) in the pinned checkout before ACCEPTABLE."
+    },
+    "InstantID_model_weights": {
+      "status": "REVIEW_REQUIRED",
+      "source": "https://huggingface.co/InstantX/InstantID",
+      "notes": "InstantX InstantID IP-Adapter + ControlNet weights — review InstantX / research terms; not ACCEPTABLE yet."
+    },
+    "insightface_antelopev2": {
+      "status": "BLOCKED_FOR_COMMERCIAL",
+      "source": "https://github.com/deepinsight/insightface",
+      "notes": "InsightFace model packs are typically research/non-commercial. Blocks production promotion until replaced or counsel ACCEPTABLE."
+    },
+    "sdxl_base": {
+      "status": "RESTRICTED",
+      "source": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0",
+      "notes": "CreativeML Open RAIL++-M — use restrictions apply; not unconditional ACCEPTABLE."
+    }
+  },
+  "overall_status": "BLOCKED_FOR_COMMERCIAL",
+  "promotion_allowed": false
+}

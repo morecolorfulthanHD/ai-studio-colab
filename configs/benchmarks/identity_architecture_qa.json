@@ -4,14 +4,18 @@
   "yaw_frontal_abs_max": 12,
   "yaw_s2_abs_min": 25,
   "yaw_s2_abs_max": 55,
+  "yaw_requested_direction": "right",
+  "yaw_sign_convention": "positive = subject turns to subject's right; negative = subject's left",
   "smile_min_s3": 0.45,
+  "mouth_open_min_s3": 0.20,
   "visible_teeth_min_s3": 0.25,
   "clip_adherence_min_s4": 0.20,
   "notes": [
-    "All thresholds are initial placeholders pending live GPU calibration.",
-    "identity_cosine_min: placeholder until InsightFace antelopev2 calibration on SDXL outputs.",
-    "yaw_s2 range 25-55 degrees: near-front (abs yaw < 12) must FAIL S2 automatically.",
-    "smile_min / visible_teeth_min: neutral expression must FAIL S3 when below thresholds.",
-    "Automated FAIL does not require human review; automated PASS requires human review before 4.13."
+    "All thresholds are placeholders pending live GPU calibration.",
+    "While calibration_status=uncalibrated, automated_quality_status must never be plain pass.",
+    "Clear objective failures still FAIL. Apparently-good uncalibrated results are provisional_pass or inconclusive.",
+    "S2 requires magnitude in [yaw_s2_abs_min, yaw_s2_abs_max] AND correct yaw direction (direction_match).",
+    "S3 uses face-local mouth landmarks; unavailable landmarks → inconclusive, not pass.",
+    "S4 CLIP is local_files_only only; missing local CLIP → unavailable/inconclusive (zero network)."
   ]
 }
