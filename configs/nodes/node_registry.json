@@ -82,6 +82,19 @@
       "install_mode": "planned",
       "pinned_commit": "a0f451a5113cf9becb0847b92884cb10cbdec0ef",
       "notes": "Package 4.12 approved IPAdapter FaceID pin (FACEID PLUS V2 SD1.5). Confirm live ComfyUI import at Case C; do not auto-download FaceID/InsightFace weights. Not a production identity default."
+    },
+    {
+      "name": "ComfyUI_InstantID",
+      "repo_url": "https://github.com/cubiq/ComfyUI_InstantID",
+      "folder_name": "ComfyUI_InstantID",
+      "category": "face",
+      "required_for": [
+        "instantid_sdxl_benchmark",
+        "identity_architecture_benchmark"
+      ],
+      "install_mode": "planned",
+      "pinned_commit": "72495e806bc2ab9c41581e15ccaa1bcf83c477e8",
+      "notes": "Package 4.12.3 InstantID SDXL pin (maintenance-mode tag 2025-04-14). SDXL-only native InstantID. Verify live ComfyUI import; do not auto-download InstantID/InsightFace antelopev2 weights. Not a production identity default."
     }
   ]
 }

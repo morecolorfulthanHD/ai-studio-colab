@@ -1,0 +1,58 @@
+{
+  "version": "1.0.0",
+  "label": "identity_architecture_benchmark_manifest",
+  "package": "4.12.3",
+  "notes": [
+    "Package 4.12.3 production identity architecture investigation (InstantID SDXL only).",
+    "ReActor and SD1.5 FaceID are REJECTED_FOR_PRODUCTION_IDENTITY — do not retune.",
+    "faceid_conditioning_sweep: FAILED_FIRST_SWEEP — preserved in identity_benchmark_tuning.jsonl.",
+    "Prepare/open is plumbing only; live GPU QA + automated visual gates required.",
+    "No automatic promotion to Package 4.13.",
+    "No auto-download of restricted weights."
+  ],
+  "architecture_status": {
+    "reactor_faceswap_benchmark": "REJECTED_FOR_PRODUCTION_IDENTITY",
+    "ipadapter_faceid_sd15_benchmark": "REJECTED_FOR_PRODUCTION_IDENTITY",
+    "faceid_conditioning_sweep": "FAILED_FIRST_SWEEP",
+    "instantid_sdxl_benchmark": "INVESTIGATION"
+  },
+  "live_candidate": "instantid_sdxl_benchmark",
+  "architecture": "instantid_sdxl",
+  "secondary_candidates": {
+    "pulid_sdxl": {
+      "status": "investigated_not_selected",
+      "reason": "PuLID SDXL investigated; not added as fragile second live candidate for 4.12.3."
+    }
+  },
+  "scenarios": [
+    {"id": "S1_near_front_portrait", "role": "identity_baseline", "width": 1024, "height": 1024},
+    {"id": "S2_head_angle_pose", "role": "pose_tolerance", "width": 1024, "height": 1024},
+    {"id": "S3_expression_change", "role": "expression_tolerance", "width": 1024, "height": 1024},
+    {"id": "S4_wardrobe_environment", "role": "scene_composition_decisive", "width": 1024, "height": 768}
+  ],
+  "s4_resolution_choice": "1024x768",
+  "required_models": [
+    "sdxl_base",
+    "instantid_ip_adapter",
+    "instantid_controlnet",
+    "insightface_antelopev2"
+  ],
+  "required_nodes": [
+    {
+      "name": "ComfyUI_InstantID",
+      "repo_url": "https://github.com/cubiq/ComfyUI_InstantID",
+      "pinned_commit": "72495e806bc2ab9c41581e15ccaa1bcf83c477e8"
+    }
+  ],
+  "workflow": {
+    "identifier": "reference/identity_instantid_sdxl_benchmark",
+    "path": "workflows/reference/identity_instantid_sdxl_benchmark/workflow.json",
+    "hash": "29189cb885fda501a2a0c56d159a76498f8b2428c09626f78236cf1d15ff7d51"
+  },
+  "ledger": "logs/identity_architecture_benchmark.jsonl",
+  "live_character_reuse": {
+    "character_id": "char_7471a702-55cf-4c7b-adb2-e17404d28c91",
+    "display_name": "Benchmark Persona",
+    "note": "Reuse for architecture benchmark; do not re-register."
+  }
+}

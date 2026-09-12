@@ -59,7 +59,9 @@ from .workflow_library_preparation import _copy_preparation_tree
 PACKAGE_VERSION = "4.12"
 PREPARATION_KIND_IDENTITY_BENCHMARK = "identity_benchmark"
 PREPARATION_KIND_IDENTITY_BENCHMARK_TUNING = "identity_benchmark_tuning"
+PREPARATION_KIND_IDENTITY_ARCHITECTURE_BENCHMARK = "identity_architecture_benchmark"
 BENCHMARK_CAPABILITY = "identity_benchmark"
+BENCHMARK_CAPABILITY_ARCHITECTURE = "identity_architecture_benchmark"
 
 # Single /object_info request timeout. Do not raise this to hide a hung backend.
 OBJECT_INFO_REQUEST_TIMEOUT_SECONDS = 8.0
@@ -347,10 +349,20 @@ def is_benchmark_generation_metadata(metadata: dict[str, Any] | None) -> bool:
     if kind in {
         PREPARATION_KIND_IDENTITY_BENCHMARK,
         PREPARATION_KIND_IDENTITY_BENCHMARK_TUNING,
+        PREPARATION_KIND_IDENTITY_ARCHITECTURE_BENCHMARK,
     }:
         return True
     capability = str(metadata.get("capability") or "").strip()
-    if capability in {BENCHMARK_CAPABILITY, CANDIDATE_REACTOR, CANDIDATE_FACEID}:
+    if capability in {
+        BENCHMARK_CAPABILITY,
+        BENCHMARK_CAPABILITY_ARCHITECTURE,
+        CANDIDATE_REACTOR,
+        CANDIDATE_FACEID,
+    }:
+        return True
+    if str(metadata.get("candidate") or "") == "instantid_sdxl_benchmark":
+        return True
+    if str(metadata.get("architecture") or "") == "instantid_sdxl":
         return True
     if capability.endswith("_benchmark") and "identity" in capability:
         return True
@@ -2319,6 +2331,14 @@ def restage_identity_benchmark_face(
     messages: list[str] = []
     errors: list[str] = []
     kind = str(metadata.get("preparation_kind") or "")
+    if kind == PREPARATION_KIND_IDENTITY_ARCHITECTURE_BENCHMARK:
+        from .identity_architecture_benchmark import restage_identity_architecture_benchmark_face
+
+        return restage_identity_architecture_benchmark_face(
+            prepared_dir=prepared_dir,
+            metadata=metadata,
+            comfyui_input_dir=comfyui_input_dir,
+        )
     if kind not in {
         PREPARATION_KIND_IDENTITY_BENCHMARK,
         PREPARATION_KIND_IDENTITY_BENCHMARK_TUNING,

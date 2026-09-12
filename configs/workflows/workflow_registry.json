@@ -247,7 +247,23 @@
       "required_nodes": [
         "ComfyUI_IPAdapter_plus"
       ],
-      "notes": "Package 4.12 executable IPAdapter FaceID Plus v2 SD1.5 identity-method benchmark only. Not production default. InstantID/SDXL deferred."
+      "notes": "Package 4.12 executable IPAdapter FaceID Plus v2 SD1.5 identity-method benchmark only. Not production default. REJECTED_FOR_PRODUCTION_IDENTITY as of 4.12.3."
+    },
+    {
+      "id": "identity_instantid_sdxl_benchmark",
+      "category": "identity_architecture_benchmark",
+      "path": "workflows/reference/identity_instantid_sdxl_benchmark/workflow.json",
+      "status": "benchmark",
+      "required_models": [
+        "sdxl_base",
+        "instantid_ip_adapter",
+        "instantid_controlnet",
+        "insightface_antelopev2"
+      ],
+      "required_nodes": [
+        "ComfyUI_InstantID"
+      ],
+      "notes": "Package 4.12.3 InstantID SDXL production identity architecture investigation. S4 default 1024x768. Not Package 4.13."
     }
   ]
 }

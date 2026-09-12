@@ -31,9 +31,12 @@
       "category": "checkpoint",
       "intended_path": "assets/checkpoints/sd_xl_base_1.0.safetensors",
       "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/checkpoints/sd_xl_base_1.0.safetensors",
-      "required_for": [],
+      "required_for": [
+        "instantid_sdxl_benchmark",
+        "identity_architecture_benchmark"
+      ],
       "status": "planned",
-      "notes": "SDXL base model for future high-resolution workflows."
+      "notes": "SDXL base checkpoint for Package 4.12.3 InstantID architecture benchmark. CreativeML Open RAIL++-M — review before production."
     },
     {
       "name": "sdxl_refiner",
@@ -307,6 +310,50 @@
       "install_policy": "manual_only",
       "expected_sha256": "6ca9667da1ca9e0b0f75e46bb030f7e011f44f86cbfb8d5a36590fcd7507b030",
       "expected_size_bytes": 2528373448
+    },
+    {
+      "name": "instantid_ip_adapter",
+      "category": "instantid",
+      "intended_path": "assets/instantid/ip-adapter.bin",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/instantid/ip-adapter.bin",
+      "required_for": [
+        "instantid_sdxl_benchmark",
+        "identity_architecture_benchmark"
+      ],
+      "status": "planned",
+      "notes": "InstantID IP-Adapter weight (InstantX). Manual placement only; no auto-download. Review InstantX license before production.",
+      "source_url": "InstantX/InstantID ip-adapter.bin (operator-obtained)",
+      "filename": "ip-adapter.bin",
+      "install_policy": "manual_only"
+    },
+    {
+      "name": "instantid_controlnet",
+      "category": "controlnet",
+      "intended_path": "assets/controlnet/instantid/diffusion_pytorch_model.safetensors",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/controlnet/instantid/diffusion_pytorch_model.safetensors",
+      "required_for": [
+        "instantid_sdxl_benchmark",
+        "identity_architecture_benchmark"
+      ],
+      "status": "planned",
+      "notes": "InstantID ControlNet diffusion weight. Manual placement only; no auto-download.",
+      "source_url": "InstantX/InstantID ControlNet (operator-obtained)",
+      "filename": "diffusion_pytorch_model.safetensors",
+      "install_policy": "manual_only"
+    },
+    {
+      "name": "insightface_antelopev2",
+      "category": "face",
+      "intended_path": "assets/insightface/models/antelopev2/",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/insightface/models/antelopev2/",
+      "required_for": [
+        "instantid_sdxl_benchmark",
+        "identity_architecture_benchmark"
+      ],
+      "status": "planned",
+      "notes": "InsightFace antelopev2 pack for InstantID face analysis. Directory must contain detection + recognition ONNX files. Manual only; no auto-download.",
+      "source_url": "InsightFace antelopev2 (operator-obtained; review license)",
+      "install_policy": "manual_only"
     }
   ]
 }

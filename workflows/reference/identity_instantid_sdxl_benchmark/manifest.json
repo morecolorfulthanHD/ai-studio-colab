@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "workflow_identifier": "reference/identity_instantid_sdxl_benchmark",
+  "display_name": "Identity Architecture Benchmark — InstantID SDXL",
+  "description": "Package 4.12.3 production identity architecture investigation (instantid_sdxl_benchmark). Not a production default. Not Package 4.13.",
+  "category": "identity_architecture_benchmark",
+  "capability": "identity_architecture_benchmark",
+  "implementation_status": "benchmark",
+  "runtime_status": "partial",
+  "quality_status": "untested",
+  "production_status": "benchmark_only",
+  "status_reason": "Structural InstantID SDXL graph for architecture investigation. Prepare/open is not a quality claim. Live GPU QA required.",
+  "model_family": "sdxl",
+  "required_model_files": [
+    "sdxl_base",
+    "instantid_ip_adapter",
+    "instantid_controlnet",
+    "insightface_antelopev2"
+  ],
+  "optional_model_files": [],
+  "required_nodes": [
+    "ComfyUI_InstantID"
+  ],
+  "optional_nodes": [],
+  "canonical_workflow_path": "workflows/reference/identity_instantid_sdxl_benchmark/workflow.json",
+  "workflow_hash": "29189cb885fda501a2a0c56d159a76498f8b2428c09626f78236cf1d15ff7d51",
+  "workflow_hash_type": "ui_workflow_v1",
+  "parameter_schema": {
+    "input_image": {
+      "type": "string",
+      "required": true,
+      "default": "",
+      "target_node_id": 13,
+      "target_field": "widgets_values[0]"
+    },
+    "positive_prompt": {
+      "type": "string",
+      "required": true,
+      "default": "portrait",
+      "target_node_id": 39,
+      "target_field": "widgets_values[0]"
+    },
+    "seed": {
+      "type": "integer",
+      "required": true,
+      "default": 42,
+      "min": 0,
+      "max": 9007199254740991,
+      "target_node_id": 3,
+      "target_field": "widgets_values[0]"
+    },
+    "seed_mode": {
+      "type": "string",
+      "required": false,
+      "default": "fixed",
+      "allowed_values": ["fixed", "randomize"],
+      "target_node_id": 3,
+      "target_field": "widgets_values[1]"
+    },
+    "width": {
+      "type": "integer",
+      "required": false,
+      "default": 1024,
+      "target_node_id": 5,
+      "target_field": "widgets_values[0]"
+    },
+    "height": {
+      "type": "integer",
+      "required": false,
+      "default": 1024,
+      "target_node_id": 5,
+      "target_field": "widgets_values[1]"
+    },
+    "save_prefix": {
+      "type": "string",
+      "required": true,
+      "default": "ai_studio_idarch_instantid",
+      "target_node_id": 15,
+      "target_field": "widgets_values[0]"
+    }
+  },
+  "default_parameters": {
+    "input_image": "",
+    "positive_prompt": "portrait",
+    "seed": 42,
+    "seed_mode": "fixed",
+    "width": 1024,
+    "height": 1024,
+    "save_prefix": "ai_studio_idarch_instantid"
+  },
+  "scenario_dimensions": {
+    "S1_near_front_portrait": {"width": 1024, "height": 1024},
+    "S2_head_angle_pose": {"width": 1024, "height": 1024},
+    "S3_expression_change": {"width": 1024, "height": 1024},
+    "S4_wardrobe_environment": {"width": 1024, "height": 768}
+  },
+  "output_prefix": "ai_studio_idarch_instantid",
+  "supported_environments": ["colab"],
+  "license_notes": [
+    "InstantID (InstantX) model weights: review InstantX/Apache and research terms before commercial promotion.",
+    "InsightFace antelopev2: typically research / non-commercial — fail closed for production without license review.",
+    "SDXL base CreativeML Open RAIL++-M: review use restrictions.",
+    "ComfyUI_InstantID node (cubiq) is maintenance-only as of 2025-04-14; pin exact commit; verify live ComfyUI import.",
+    "No auto-download of restricted weights."
+  ],
+  "tags": ["benchmark", "identity", "package4123", "instantid", "sdxl"],
+  "documentation_path": "workflows/reference/identity_instantid_sdxl_benchmark/README.md",
+  "launchable": false,
+  "requires_experimental": false,
+  "requires_benchmark": true
+}

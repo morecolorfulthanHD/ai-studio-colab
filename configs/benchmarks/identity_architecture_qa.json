@@ -1,0 +1,17 @@
+{
+  "calibration_status": "uncalibrated",
+  "identity_cosine_min": 0.35,
+  "yaw_frontal_abs_max": 12,
+  "yaw_s2_abs_min": 25,
+  "yaw_s2_abs_max": 55,
+  "smile_min_s3": 0.45,
+  "visible_teeth_min_s3": 0.25,
+  "clip_adherence_min_s4": 0.20,
+  "notes": [
+    "All thresholds are initial placeholders pending live GPU calibration.",
+    "identity_cosine_min: placeholder until InsightFace antelopev2 calibration on SDXL outputs.",
+    "yaw_s2 range 25-55 degrees: near-front (abs yaw < 12) must FAIL S2 automatically.",
+    "smile_min / visible_teeth_min: neutral expression must FAIL S3 when below thresholds.",
+    "Automated FAIL does not require human review; automated PASS requires human review before 4.13."
+  ]
+}

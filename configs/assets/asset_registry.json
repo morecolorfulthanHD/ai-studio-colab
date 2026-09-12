@@ -48,12 +48,15 @@
       "engine": "shared",
       "intended_path": "assets/checkpoints/sd_xl_base_1.0.safetensors",
       "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/checkpoints/sd_xl_base_1.0.safetensors",
-      "required_for": [],
+      "required_for": [
+        "instantid_sdxl_benchmark",
+        "identity_architecture_benchmark"
+      ],
       "status": "planned",
       "source_type": "huggingface",
       "source_url": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0",
       "license_notes": "Open RAIL++-M",
-      "notes": "Future SDXL workflows."
+      "notes": "SDXL base for Package 4.12.3 InstantID architecture benchmark."
     },
     {
       "id": "controlnet_depth",
@@ -593,6 +596,63 @@
       "source_url": "https://huggingface.co/h94/IP-Adapter-FaceID",
       "license_notes": "Must match FaceID Plus v2 SD1.5 adapter. Manual download only.",
       "notes": "Package 4.12 matching FaceID LoRA."
+    },
+    {
+      "id": "instantid_ip_adapter",
+      "name": "InstantID IP-Adapter",
+      "asset_type": "instantid",
+      "category": "identity",
+      "scope": "core",
+      "engine": "comfyui",
+      "intended_path": "assets/instantid/ip-adapter.bin",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/instantid/ip-adapter.bin",
+      "required_for": [
+        "instantid_sdxl_benchmark",
+        "identity_architecture_benchmark"
+      ],
+      "status": "planned",
+      "source_type": "external",
+      "source_url": "InstantX/InstantID",
+      "license_notes": "Review InstantX model card and Apache/research terms before commercial use. Manual download only.",
+      "notes": "Package 4.12.3 InstantID ip-adapter.bin."
+    },
+    {
+      "id": "instantid_controlnet",
+      "name": "InstantID ControlNet",
+      "asset_type": "controlnet",
+      "category": "identity",
+      "scope": "core",
+      "engine": "comfyui",
+      "intended_path": "assets/controlnet/instantid/diffusion_pytorch_model.safetensors",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/controlnet/instantid/diffusion_pytorch_model.safetensors",
+      "required_for": [
+        "instantid_sdxl_benchmark",
+        "identity_architecture_benchmark"
+      ],
+      "status": "planned",
+      "source_type": "external",
+      "source_url": "InstantX/InstantID",
+      "license_notes": "Review InstantX license before production. Manual download only.",
+      "notes": "InstantID identity ControlNet weight."
+    },
+    {
+      "id": "insightface_antelopev2",
+      "name": "InsightFace Antelopev2",
+      "asset_type": "insightface",
+      "category": "face",
+      "scope": "core",
+      "engine": "comfyui",
+      "intended_path": "assets/insightface/models/antelopev2/",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/insightface/models/antelopev2/",
+      "required_for": [
+        "instantid_sdxl_benchmark",
+        "identity_architecture_benchmark"
+      ],
+      "status": "planned",
+      "source_type": "external",
+      "source_url": "",
+      "license_notes": "InsightFace antelopev2 typically research-restricted — fail closed for production without license review.",
+      "notes": "InstantID face analysis pack (detection + recognition ONNX in directory)."
     }
   ]
 }

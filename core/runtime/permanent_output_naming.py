@@ -12,15 +12,19 @@ Examples:
   txt2img_20260715_000001.png
   img2img_20260715_000002.png
 
-Sequence is capability-specific, zero-padded to 6 digits, resets each UTC day,
-and is allocated by scanning existing Drive files so it survives watcher restart.
+Sequence is capability-specific, zero-padded to 6 digits, resets each studio-local day
+(default America/Los_Angeles), and is allocated by scanning existing Drive files so it
+survives watcher restart. Machine ledger timestamps remain UTC. Historical filenames
+are never rewritten (Package 4.12.3).
 """
 
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
+
+from .studio_timezone import studio_date_stamp
 
 PERMANENT_NAME_PATTERN = re.compile(
     r"^(?P<capability>[a-z][a-z0-9_]*)_(?P<date>[0-9]{8})_(?P<seq>[0-9]{6})"
@@ -37,13 +41,17 @@ CAPABILITY_SLUGS = frozenset(
         "qwen_image_edit_benchmark",
         "flux_fill_benchmark",
         "identity_benchmark",
+        "identity_architecture_benchmark",
     }
 )
 
 
 def utc_date_stamp(when: datetime | None = None) -> str:
-    moment = when or datetime.now(timezone.utc)
-    return moment.astimezone(timezone.utc).strftime("%Y%m%d")
+    """Human-facing filename date stamp (studio timezone as of Package 4.12.3).
+
+    Name retained for compatibility; prefer ``studio_date_stamp``.
+    """
+    return studio_date_stamp(when)
 
 
 def normalize_capability_slug(capability: str | None) -> str:

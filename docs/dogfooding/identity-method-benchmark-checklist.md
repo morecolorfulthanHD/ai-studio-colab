@@ -3,6 +3,21 @@
 CODE/SIM readiness proves character foundation + **executable** benchmark graphs.  
 **Operational acceptance requires live Runs** — prepare/open alone is not a quality claim.
 
+## Package 4.12.3 — Production identity architecture (InstantID SDXL)
+
+| Architecture | Status |
+|--------------|--------|
+| ReActor | **REJECTED_FOR_PRODUCTION_IDENTITY** |
+| SD1.5 FaceID | **REJECTED_FOR_PRODUCTION_IDENTITY** |
+| FaceID 4.12.2 sweep | **FAILED_FIRST_SWEEP** |
+| InstantID SDXL | **INVESTIGATION** |
+
+- Ledger: `AI_Studio/logs/identity_architecture_benchmark.jsonl` (separate from `identity_benchmark.jsonl` and tuning ledger)
+- Automated QA config: `configs/benchmarks/identity_architecture_qa.json` (`calibration_status: uncalibrated`)
+- Consolidated QA: `python core/scripts/qa_package4123.py`
+- S4 resolution: **1024×768** landscape (not 512×768 portrait)
+- Do **not** retune rejected SD1.5 FaceID graphs
+
 ## OPERATIONAL PASS vs VISUAL SCENARIO PASS
 
 Never use “benchmark passed” when only execution/capture succeeded.

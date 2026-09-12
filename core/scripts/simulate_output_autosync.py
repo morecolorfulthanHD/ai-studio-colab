@@ -262,8 +262,10 @@ def _run_concurrency_simulations(results: list[tuple[str, str]]) -> None:
 
         from datetime import datetime, timezone
 
-        day_a = datetime(2026, 7, 15, tzinfo=timezone.utc)
-        day_b = datetime(2026, 7, 16, tzinfo=timezone.utc)
+        from core.runtime.studio_timezone import studio_date_stamp
+
+        day_a = datetime(2026, 7, 15, 12, 0, tzinfo=timezone.utc)
+        day_b = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
         day_dir = conc_dir / "day_seq"
         day_dir.mkdir()
         n_a = allocate_permanent_drive_filename(
@@ -273,7 +275,11 @@ def _run_concurrency_simulations(results: list[tuple[str, str]]) -> None:
         n_b = allocate_permanent_drive_filename(
             day_dir, capability="txt2img", extension=".png", when=day_b
         )
-        _assert_true("next-day resets to 000001", n_b.endswith("_000001.png") and "20260716" in n_b)
+        expected_b_date = studio_date_stamp(day_b)
+        _assert_true(
+            "next-day resets to 000001",
+            n_b.endswith("_000001.png") and expected_b_date in n_b,
+        )
         results.append(("Next-day sequence reset", "PASS"))
 
         # Reused local ComfyUI filename + identical SaveImage prefix → distinct Drive assets
