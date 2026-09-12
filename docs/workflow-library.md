@@ -222,7 +222,7 @@ python core/scripts/show_character.py --character-id char_<uuid>
 - `reactor_faceswap_benchmark`
 - `ipadapter_faceid_sd15_benchmark`
 
-InstantID/SDXL is deferred. Explicit `--allow-benchmark` is required. Prepare/open is **plumbing only** — not a quality claim. Operational acceptance requires candidate × S1–S4 Runs plus the eight-key human rubric. No automatic Package 4.13 promotion.
+InstantID/SDXL was deferred in 4.12; Package **4.12.3** investigates `instantid_sdxl_benchmark` as the production identity architecture candidate. ReActor and SD1.5 FaceID are **REJECTED_FOR_PRODUCTION_IDENTITY**; the 4.12.2 FaceID sweep is **FAILED_FIRST_SWEEP** — do not retune. Explicit `--allow-benchmark` is required. Prepare/open is **plumbing only** — not a quality claim. Automated QA: `python core/scripts/qa_package4123.py`. No automatic Package 4.13 promotion.
 
 ```bash
 python core/scripts/prepare_identity_benchmark.py \
