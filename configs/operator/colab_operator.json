@@ -1,11 +1,12 @@
 {
   "package": "colab_operator",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "notes": [
     "Orchestration metadata for Cursor Agent browser workflows only.",
     "Does not change Package 4.12.3 benchmark semantics.",
     "Does not start Package 4.13.",
-    "Canonical notebook is GitHub-backed — never a stale Drive copy."
+    "Canonical notebook is GitHub-backed — never a stale Drive copy.",
+    "Characters is nested: Main 9 Workspace/Projects → 13 Characters (not top-level 13)."
   ],
   "canonical_notebook": {
     "repo": "morecolorfulthanHD/ai-studio-colab",
@@ -36,15 +37,43 @@
     "run_all": ["Runtime", "Run all"],
     "disconnect_indicators": ["Connect", "Disconnected", "No connected runtime"]
   },
+  "menu_titles": {
+    "control_panel": "=== AI Studio Control Panel ===",
+    "workspace_projects": "=== Workspace / Projects ===",
+    "characters": "=== Characters (Package 4.12 / 4.12.3) ==="
+  },
   "control_panel_menu": {
-    "launch": {"select": "1", "label": "Launch (Safe / Minimal / Full)"},
+    "launch": {
+      "select": "1",
+      "label": "Launch (Safe / Minimal / Full)"
+    },
     "launch_modes": {
       "safe": "safe",
       "minimal": "minimal",
       "full": "full"
     },
-    "characters": {"select": "13", "label": "Characters (identity foundation / identity benchmark)"},
+    "output_watcher_status": {
+      "select": "8",
+      "label": "Output Watcher Status"
+    },
+    "workspace_projects": {
+      "select": "9",
+      "label": "Workspace / Projects",
+      "expected_next_title": "=== Workspace / Projects ==="
+    },
+    "workflow_library": {
+      "select": "10",
+      "label": "Workflow Library"
+    },
     "exit": {"select": "0", "label": "Exit"}
+  },
+  "workspace_projects_menu": {
+    "characters": {
+      "select": "13",
+      "label": "Characters (identity foundation / identity benchmark)",
+      "expected_next_title": "=== Characters (Package 4.12 / 4.12.3) ==="
+    },
+    "back": {"select": "0", "label": "Back"}
   },
   "characters_menu": {
     "list": {"select": "1", "label": "List characters"},
@@ -75,6 +104,65 @@
       "status": "REJECTED_FOR_PRODUCTION_IDENTITY — do not re-run for production validation"
     },
     "back": {"select": "0", "label": "Back"}
+  },
+  "navigation_sequences": {
+    "run_production_identity_benchmark": [
+      {
+        "menu": "control_panel",
+        "select": "9",
+        "label": "Workspace / Projects",
+        "verify_title": "=== Workspace / Projects ==="
+      },
+      {
+        "menu": "workspace_projects",
+        "select": "13",
+        "label": "Characters (identity foundation / identity benchmark)",
+        "verify_title": "=== Characters (Package 4.12 / 4.12.3) ==="
+      },
+      {
+        "menu": "characters",
+        "select": "12",
+        "label": "Run production identity benchmark (EXECUTE + automated QA)"
+      }
+    ],
+    "prepare_production_identity_benchmark": [
+      {
+        "menu": "control_panel",
+        "select": "9",
+        "label": "Workspace / Projects",
+        "verify_title": "=== Workspace / Projects ==="
+      },
+      {
+        "menu": "workspace_projects",
+        "select": "13",
+        "label": "Characters (identity foundation / identity benchmark)",
+        "verify_title": "=== Characters (Package 4.12 / 4.12.3) ==="
+      },
+      {
+        "menu": "characters",
+        "select": "11",
+        "label": "Prepare production identity benchmark (InstantID SDXL)"
+      }
+    ],
+    "architecture_report": [
+      {
+        "menu": "control_panel",
+        "select": "9",
+        "label": "Workspace / Projects",
+        "verify_title": "=== Workspace / Projects ==="
+      },
+      {
+        "menu": "workspace_projects",
+        "select": "13",
+        "label": "Characters (identity foundation / identity benchmark)",
+        "verify_title": "=== Characters (Package 4.12 / 4.12.3) ==="
+      },
+      {
+        "menu": "characters",
+        "select": "13",
+        "label": "Production identity QA / architecture report"
+      }
+    ]
   },
   "package_qa": {
     "consolidated_4123": {
@@ -111,7 +199,8 @@
     "browser security confirmation",
     "HUMAN_REVIEW_REQUIRED from automated QA",
     "FULL_LAUNCH hard failure",
-    "uncertain destructive action"
+    "uncertain destructive action",
+    "expected submenu title missing after menu selection"
   ],
   "auto_allowed": [
     "reconnect disconnected runtime",

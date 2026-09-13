@@ -59,7 +59,7 @@ _TRANSITIONS: dict[tuple[OperatorState, OperatorEvent], OperatorState] = {
     (OperatorState.COLAB_OPEN, OperatorEvent.RUNTIME_DISCONNECTED): OperatorState.DISCONNECTED,
     (OperatorState.COLAB_OPEN, OperatorEvent.RUNTIME_CONNECTED): OperatorState.CONNECTED,
     (OperatorState.AUTH_REQUIRED, OperatorEvent.AUTH_RESOLVED): OperatorState.COLAB_OPEN,
-    (OperatorState.DISCONNECTED, OperatorEvent.CONNECT_CLICKED): OperatorState.CONNECTED,
+    (OperatorState.DISCONNECTED, OperatorEvent.CONNECT_CLICKED): OperatorState.DISCONNECTED,
     (OperatorState.DISCONNECTED, OperatorEvent.AUTH_BLOCKER_SEEN): OperatorState.AUTH_REQUIRED,
     (OperatorState.DISCONNECTED, OperatorEvent.RUNTIME_CONNECTED): OperatorState.CONNECTED,
     (OperatorState.CONNECTED, OperatorEvent.REPO_SYNC_OK): OperatorState.REPO_SYNCED,
@@ -238,7 +238,17 @@ class ColabOperatorSession:
             messages.append("Full Launch warnings only — proceed (not a hard fail).")
         if prev == OperatorState.DISCONNECTED and ev == OperatorEvent.CONNECT_CLICKED:
             if may_auto_reconnect(self.config or None):
-                messages.append("Auto reconnect allowed by restart policy.")
+                messages.append(
+                    "Connect requested; wait for runtime-connected evidence "
+                    "(CONNECT_CLICKED does not imply CONNECTED)."
+                )
+            else:
+                messages.append("Connect requested; wait for runtime-connected evidence.")
+            # Stay DISCONNECTED until RUNTIME_CONNECTED.
+            stopped = False
+            human = False
+        if prev == OperatorState.DISCONNECTED and ev == OperatorEvent.RUNTIME_CONNECTED:
+            messages.append("Runtime-connected evidence observed → CONNECTED.")
         return TransitionResult(
             ok=True,
             from_state=prev.value,
@@ -267,15 +277,62 @@ def recommend_next_action(state: OperatorState | str, config: dict[str, Any] | N
         OperatorState.NOT_OPEN: f"Open canonical notebook: {url}",
         OperatorState.COLAB_OPEN: "Detect runtime; Connect if disconnected; stop if auth.",
         OperatorState.AUTH_REQUIRED: "STOP — ask user to complete Google/Drive/GPU consent.",
-        OperatorState.DISCONNECTED: "Click Connect (auto-allowed); wait for Connected.",
+        OperatorState.DISCONNECTED: (
+            "Click Connect if needed, then wait for connected UI evidence "
+            "(RAM/Disk/Connected) before treating runtime as CONNECTED."
+        ),
         OperatorState.CONNECTED: "Run Repository Sync; verify HEAD on origin/main.",
         OperatorState.REPO_SYNCED: "Runtime → Run all; wait for control_panel ready.",
         OperatorState.AI_STUDIO_READY: "control_panel → 1 Launch → full; wait for ComfyUI + watcher.",
         OperatorState.FULL_LAUNCH_RUNNING: "Observe launch output; proceed on warnings; stop on fail.",
-        OperatorState.FULL_LAUNCH_READY: "Navigate Characters menu; invoke requested live QA.",
+        OperatorState.FULL_LAUNCH_READY: (
+            "Navigate Main 9 Workspace/Projects → verify title → 13 Characters → "
+            "verify Characters title → requested action (e.g. 12 execute)."
+        ),
         OperatorState.LIVE_QA_RUNNING: "Collect logs/QA reports; wait for completion.",
         OperatorState.HUMAN_REVIEW_REQUIRED: "STOP — human visual/license review required.",
         OperatorState.FAILED: "STOP — report failure; do not invent recovery beyond policy.",
         OperatorState.COMPLETE: "Report outcome; stop.",
     }
     return mapping.get(st, "Unknown state — ask user.")
+
+
+def navigation_sequence(
+    intent: str,
+    config: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Return nested menu navigation steps for a named live-QA intent.
+
+    After every select, Cursor must verify ``verify_title`` (when present) in the
+    visible UI before continuing. Never blindly replay numbers on the wrong screen.
+    """
+    cfg = config if config is not None else load_operator_config()
+    sequences = cfg.get("navigation_sequences") or {}
+    key = str(intent or "").strip()
+    steps = sequences.get(key)
+    if not isinstance(steps, list) or not steps:
+        raise KeyError(
+            f"Unknown navigation intent {key!r}. "
+            f"Known: {', '.join(sorted(sequences)) or '(none)'}"
+        )
+    out: list[dict[str, Any]] = []
+    for step in steps:
+        if not isinstance(step, dict):
+            raise ValueError(f"Invalid navigation step for {key!r}: {step!r}")
+        row = {
+            "menu": str(step.get("menu") or ""),
+            "select": str(step.get("select") or ""),
+        }
+        if step.get("label"):
+            row["label"] = str(step.get("label"))
+        if step.get("verify_title"):
+            row["verify_title"] = str(step.get("verify_title"))
+        out.append(row)
+    return out
+
+
+def assert_expected_menu_title(visible_text: str, expected_title: str) -> bool:
+    """True when expected submenu title appears in visible browser/notebook text."""
+    needle = str(expected_title or "").strip()
+    hay = str(visible_text or "")
+    return bool(needle) and needle in hay

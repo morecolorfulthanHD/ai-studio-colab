@@ -58,8 +58,11 @@ Reason from **visible labels/text**, not fixed pixel coordinates.
 ### B. CONNECT
 
 1. If UI shows Connect / Disconnected → click **Connect**.
-2. Wait until Connected (RAM/Disk indicators).
-3. State → `CONNECTED` (or `DISCONNECTED` → Connect).
+2. State remains `DISCONNECTED` until connected evidence appears.
+3. Wait until Connected (RAM/Disk / “Connected” indicators).
+4. Only then: state → `CONNECTED`.
+
+**Do not** treat Connect-click as connected.
 
 ### C. ENVIRONMENT
 
@@ -75,7 +78,7 @@ Reason from **visible labels/text**, not fixed pixel coordinates.
 ### E. RUN NOTEBOOK
 
 1. **Runtime → Run all** (or required startup cells).
-2. Wait until `control_panel()` menu is available.
+2. Wait until `control_panel()` menu is available (`=== AI Studio Control Panel ===`).
 3. State → `AI_STUDIO_READY`.
 
 ### F. FULL LAUNCH
@@ -87,9 +90,18 @@ Reason from **visible labels/text**, not fixed pixel coordinates.
 5. Hard fail → `FAILED` and stop.
 6. Verify ComfyUI URL printed and OutputWatcher not in FAIL/unhealthy state.
 
-### G. LIVE QA
+### G. LIVE QA (nested menus)
 
-Navigate: control panel → **`13` Characters**.
+**Semantic rule:** after every selection, verify the next menu title before continuing.
+If the expected title is missing → **STOP / reassess** (never blindly type the next number).
+
+Path:
+
+1. Main control panel → select **`9`** (Workspace / Projects)  
+   → verify `=== Workspace / Projects ===`
+2. Workspace / Projects → select **`13`** (Characters …)  
+   → verify `=== Characters (Package 4.12 / 4.12.3) ===`
+3. Characters → requested action:
 
 | Need | Select | Notes |
 |------|--------|-------|
@@ -98,6 +110,10 @@ Navigate: control panel → **`13` Characters**.
 | Architecture / production identity report | `13` | Report only |
 | Package 4.12.3 consolidated QA | run `python core/scripts/qa_package4123.py` in repo | Offline/sim QA |
 | Rejected FaceID/ReActor | **Do not re-run for production** | Status remains rejected |
+
+Live execute sequence is **`9` → `13` → `12`**, not top-level `13` → `12`.
+
+Helper: `navigation_sequence("run_production_identity_benchmark")` in `core/runtime/colab_operator.py`.
 
 Default character when needed: `char_7471a702-55cf-4c7b-adb2-e17404d28c91` (do not re-register casually).
 

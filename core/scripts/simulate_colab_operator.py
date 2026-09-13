@@ -18,10 +18,12 @@ from core.runtime.colab_operator import (
     ColabOperatorSession,
     OperatorEvent,
     OperatorState,
+    assert_expected_menu_title,
     is_never_auto,
     load_operator_config,
     may_auto_reconnect,
     may_change_gpu_without_asking,
+    navigation_sequence,
     recommend_next_action,
 )
 from core.runtime.registry_loader import find_repo_root
@@ -72,14 +74,21 @@ def main() -> int:
     _assert_equal("1 notebook opens", s.state, OperatorState.COLAB_OPEN)
     _pass(results, "1. notebook opens -> COLAB_OPEN")
 
-    # 2. disconnected -> connect
+    # 2. disconnected -> connect click does NOT imply connected
     s2 = ColabOperatorSession(config=cfg)
     _run(s2, OperatorEvent.NOTEBOOK_OPENED)
     _run(s2, OperatorEvent.RUNTIME_DISCONNECTED)
     _assert_equal("disconnected", s2.state, OperatorState.DISCONNECTED)
-    _run(s2, OperatorEvent.CONNECT_CLICKED)
-    _assert_equal("2 connected", s2.state, OperatorState.CONNECTED)
-    _pass(results, "2. disconnected -> connect -> CONNECTED")
+    r_click = s2.apply(OperatorEvent.CONNECT_CLICKED)
+    _assert_true("2 connect click ok", r_click.ok)
+    _assert_equal("2 still DISCONNECTED after click", s2.state, OperatorState.DISCONNECTED)
+    _assert_true(
+        "2 wait-for-evidence message",
+        any("wait for runtime-connected" in m.lower() for m in r_click.messages),
+    )
+    _run(s2, OperatorEvent.RUNTIME_CONNECTED)
+    _assert_equal("2 connected after evidence", s2.state, OperatorState.CONNECTED)
+    _pass(results, "2. disconnected -> CONNECT_CLICKED stays; RUNTIME_CONNECTED -> CONNECTED")
 
     # 3. connected -> repo sync
     _run(s2, OperatorEvent.REPO_SYNC_OK)
@@ -142,6 +151,8 @@ def main() -> int:
     _run(s9, OperatorEvent.RUNTIME_DIED)
     _assert_equal("9 disconnected after death", s9.state, OperatorState.DISCONNECTED)
     _run(s9, OperatorEvent.CONNECT_CLICKED)
+    _assert_equal("9 still disconnected after click", s9.state, OperatorState.DISCONNECTED)
+    _run(s9, OperatorEvent.RUNTIME_CONNECTED)
     _run(s9, OperatorEvent.REPO_SYNC_OK)
     _run(s9, OperatorEvent.RUN_ALL_DONE)
     _run(s9, OperatorEvent.FULL_LAUNCH_STARTED)
@@ -196,6 +207,48 @@ def main() -> int:
     _assert_true("FaceID re-run blocked in policy", "FaceID" in never or "ReActor" in never)
     _assert_true("4.13 blocked in policy", "4.13" in never)
     _pass(results, "policy blocks FaceID reruns and Package 4.13")
+
+    # Live-navigation hierarchy: main 9 -> workspace 13 -> characters 12
+    cp = cfg.get("control_panel_menu") or {}
+    ws = cfg.get("workspace_projects_menu") or {}
+    ch = cfg.get("characters_menu") or {}
+    _assert_equal("main option 9 workspace", (cp.get("workspace_projects") or {}).get("select"), "9")
+    _assert_true(
+        "main has no top-level characters",
+        "characters" not in cp or (cp.get("characters") or {}).get("select") in (None, ""),
+    )
+    _assert_equal("workspace option 13 characters", (ws.get("characters") or {}).get("select"), "13")
+    _assert_equal("characters option 12 execute", (ch.get("run_instantid") or {}).get("select"), "12")
+    seq = navigation_sequence("run_production_identity_benchmark", cfg)
+    _assert_equal("nav len 3", len(seq), 3)
+    _assert_equal("nav step0 menu", seq[0].get("menu"), "control_panel")
+    _assert_equal("nav step0 select 9", seq[0].get("select"), "9")
+    _assert_equal("nav step1 menu", seq[1].get("menu"), "workspace_projects")
+    _assert_equal("nav step1 select 13", seq[1].get("select"), "13")
+    _assert_equal("nav step2 menu", seq[2].get("menu"), "characters")
+    _assert_equal("nav step2 select 12", seq[2].get("select"), "12")
+    selects = [s.get("select") for s in seq]
+    _assert_equal("nav selects 9-13-12", selects, ["9", "13", "12"])
+    _assert_true("nav is not flat 13-12", selects != ["13", "12"])
+    _assert_true(
+        "verify workspace title helper",
+        assert_expected_menu_title(
+            "noise\n=== Workspace / Projects ===\n1. List",
+            "=== Workspace / Projects ===",
+        ),
+    )
+    _assert_true(
+        "verify characters title helper",
+        assert_expected_menu_title(
+            "=== Characters (Package 4.12 / 4.12.3) ===",
+            (seq[1].get("verify_title") or ""),
+        ),
+    )
+    _assert_true(
+        "missing title fails closed",
+        not assert_expected_menu_title("=== AI Studio Control Panel ===", "=== Workspace / Projects ==="),
+    )
+    _pass(results, "live nav hierarchy 9 -> 13 -> 12 with submenu title checks")
 
     print()
     passed = sum(1 for status, _ in results if status == "PASS")
