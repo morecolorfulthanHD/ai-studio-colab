@@ -32,14 +32,19 @@ from core.runtime.production_identity_benchmark import (
     STATUS_COMPLETE,
     STATUS_FAILED,
     STATUS_HUMAN_REVIEW,
+    apply_consolidated_qa_to_status,
     confirm_gpu_execution,
     derive_workflow_status,
     find_reusable_scenario_row,
     parse_production_scenarios,
     resolve_production_character,
     run_production_identity_benchmark,
+    run_production_runtime_preflight,
 )
 from core.runtime.registry_loader import find_repo_root
+from core.runtime.runtime_health import HealthCheck, HealthStatus
+from core.runtime.colab_operator import load_operator_config, navigation_sequence
+from core.runtime.package4123_qa import DEFAULT_PACKAGE4123_SUITES
 
 
 def _pass(results: list[tuple[str, str]], label: str) -> None:
@@ -272,6 +277,7 @@ def main() -> int:
         )
 
         executed: list[str] = []
+        cqa_calls: list[str] = []
 
         def _exec(**kwargs):
             scenario = kwargs["scenario"]
@@ -288,6 +294,35 @@ def main() -> int:
                 queue_status="ok",
             )
 
+        def _preflight_ok(*_a, **_k):
+            return {
+                "ok": True,
+                "steps": [{"step": "mock", "ok": True}],
+                "errors": [],
+                "messages": ["mock preflight ok"],
+                "warnings": [],
+                "preflight_sequence": [
+                    "comfyui_reachable",
+                    "instantid_live_nodes",
+                    "instantid_structural",
+                    "instantid_assets",
+                    "license_gate",
+                    "output_watcher",
+                ],
+            }
+
+        def _cqa_pass(repo_root_arg, **_kwargs):
+            cqa_calls.append(str(repo_root_arg))
+            return {
+                "ok": True,
+                "all_required_suites_pass": True,
+                "suites": [{"name": "mock_suite", "ok": True, "failed": 0, "exit_code": 0}],
+                "timezone_checks": {"ok": True},
+                "totals": {"passed": 1, "failed": 0, "tests_discovered": 1},
+                "report_path": str(drive / "logs" / "qa" / "package_4_12_3_latest.json"),
+                "report_paths": [str(drive / "logs" / "qa" / "package_4_12_3_latest.json")],
+            }
+
         orig = RegistryLoader.load_all
 
         def _load_all(self):  # noqa: ANN001
@@ -302,6 +337,8 @@ def main() -> int:
                 operator_live_intent=True,
                 interactive=False,
                 execute_fn=_exec,
+                preflight_fn=_preflight_ok,
+                consolidated_qa_fn=_cqa_pass,
             )
         finally:
             RegistryLoader.load_all = orig  # type: ignore[method-assign]
@@ -312,7 +349,265 @@ def main() -> int:
         _assert_equal("executed remaining 3", len(executed), 3)
         _assert_true("report paths", bool(payload.get("report_paths")))
         _assert_true("human instructions", "HUMAN_REVIEW_REQUIRED" in (payload.get("human_review_instructions") or ""))
-    _pass(results, "I/J/K/M. one-action orchestrator reuse + HUMAN_REVIEW + reports")
+        _assert_true("A. consolidated QA invoked", payload.get("consolidated_qa_ran") is True)
+        _assert_equal("A. consolidated QA status PASS", payload.get("consolidated_qa_status"), "PASS")
+        _assert_true("A. consolidated QA call recorded", len(cqa_calls) == 1)
+        _assert_true("G. resume unchanged", SCENARIO_IDS[0] not in executed and len(executed) == 3)
+    _pass(results, "I/J/K/M/A/G. one-action orchestrator reuse + HUMAN_REVIEW + consolidated QA")
+
+    # A/B/C consolidated QA status derivation + invocation
+    st_c, reason = apply_consolidated_qa_to_status(
+        STATUS_COMPLETE, consolidated_ok=False, consolidated_ran=True
+    )
+    _assert_equal("B. consolidated fail overrides COMPLETE", st_c, STATUS_FAILED)
+    _assert_true("B. failure reason set", "consolidated QA" in (reason or ""))
+    st_h, _ = apply_consolidated_qa_to_status(
+        STATUS_HUMAN_REVIEW, consolidated_ok=True, consolidated_ran=True
+    )
+    _assert_equal("C. human review preserved on QA pass", st_h, STATUS_HUMAN_REVIEW)
+    st_ok, _ = apply_consolidated_qa_to_status(
+        STATUS_COMPLETE, consolidated_ok=True, consolidated_ran=True
+    )
+    _assert_equal("C. complete preserved on QA pass", st_ok, STATUS_COMPLETE)
+    _pass(results, "A/B/C. consolidated QA invocation + state derivation")
+
+    # D/E/F preflight: unreachable ComfyUI, unhealthy watcher, healthy runtime
+    class _Bundle:
+        def __init__(self, root: Path):
+            self.repo_root = root
+            self.models = []
+            self.nodes = []
+            self.root = root
+
+        def path(self, key: str) -> Path:
+            mapping = {
+                "drive_root": self.root / "AI_Studio",
+                "comfyui_runtime": self.root / "ComfyUI",
+                "drive_logs": self.root / "AI_Studio" / "logs",
+                "runtime_root": self.root / "runtime",
+            }
+            return mapping.get(key, self.root / key)
+
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        (root / "ComfyUI" / "custom_nodes").mkdir(parents=True)
+        (root / "AI_Studio" / "logs").mkdir(parents=True)
+        bundle = _Bundle(root)
+
+        pf_bad = run_production_runtime_preflight(
+            repo_root,
+            bundle,
+            allow_missing_models=True,
+            allow_missing_nodes=True,
+            allow_unverified_assets=True,
+            comfy_reachable_fn=lambda *_a, **_k: False,
+            watcher_check_fn=lambda _b: HealthCheck(
+                "output_watcher", HealthStatus.OK, "unused", {"ownership_state": "current_runtime"}
+            ),
+        )
+        _assert_true("D. unreachable fails", not pf_bad["ok"])
+        _assert_true(
+            "D. mentions ComfyUI",
+            any("ComfyUI is not reachable" in e for e in pf_bad["errors"]),
+        )
+        _assert_true("D. no silent reset", all("Full Reset" not in e for e in pf_bad["errors"]))
+
+        pf_watch = run_production_runtime_preflight(
+            repo_root,
+            bundle,
+            allow_missing_models=True,
+            allow_missing_nodes=True,
+            allow_unverified_assets=True,
+            comfy_reachable_fn=lambda *_a, **_k: True,
+            object_info_fn=lambda *_a, **_k: (
+                "ok",
+                {
+                    "InstantIDModelLoader": {},
+                    "InstantIDFaceAnalysis": {},
+                    "ApplyInstantIDAdvanced": {},
+                },
+                "ok",
+                [],
+            ),
+            watcher_check_fn=lambda _b: HealthCheck(
+                "output_watcher",
+                HealthStatus.FAIL,
+                "Watcher dead",
+                {"ownership_state": "dead"},
+            ),
+        )
+        _assert_true("E. unhealthy watcher fails", not pf_watch["ok"])
+        _assert_true(
+            "E. surfaces OutputWatcher",
+            any("OutputWatcher" in e for e in pf_watch["errors"]),
+        )
+
+        pf_ok = run_production_runtime_preflight(
+            repo_root,
+            bundle,
+            allow_missing_models=True,
+            allow_missing_nodes=True,
+            allow_unverified_assets=True,
+            comfy_reachable_fn=lambda *_a, **_k: True,
+            object_info_fn=lambda *_a, **_k: (
+                "ok",
+                {
+                    "InstantIDModelLoader": {},
+                    "InstantIDFaceAnalysis": {},
+                    "ApplyInstantIDAdvanced": {},
+                },
+                "ok",
+                [],
+            ),
+            watcher_check_fn=lambda _b: HealthCheck(
+                "output_watcher",
+                HealthStatus.OK,
+                "Watcher OK",
+                {"ownership_state": "current_runtime"},
+            ),
+        )
+        _assert_true("F. healthy preflight passes", pf_ok["ok"])
+        _assert_equal(
+            "F. sequence",
+            pf_ok["preflight_sequence"],
+            [
+                "comfyui_reachable",
+                "instantid_live_nodes",
+                "instantid_structural",
+                "instantid_assets",
+                "license_gate",
+                "output_watcher",
+            ],
+        )
+    _pass(results, "D/E/F. runtime preflight unreachable / watcher / healthy")
+
+    # Orchestrator stops before execute when preflight fails
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        drive = root / "AI_Studio"
+        (root / "ComfyUI" / "input").mkdir(parents=True)
+        (drive / "workflows" / "prepared").mkdir(parents=True)
+        face = drive / "face.png"
+        _face(face)
+        rec = register_character(drive, display_name="Pre", primary_face_image=face)
+        executed2: list[str] = []
+
+        class _FakeBundle2:
+            def __init__(self, root: Path):
+                self.root = root
+                self.models = []
+                self.nodes = []
+
+            def path(self, key: str) -> Path:
+                return {
+                    "drive_root": self.root / "AI_Studio",
+                    "comfyui_runtime": self.root / "ComfyUI",
+                    "runtime_root": self.root / "runtime",
+                    "drive_workflows": self.root / "AI_Studio" / "workflows",
+                }[key]
+
+        orig = RegistryLoader.load_all
+        RegistryLoader.load_all = lambda self: _FakeBundle2(root)  # type: ignore[method-assign]
+        try:
+            bad = run_production_identity_benchmark(
+                repo_root,
+                character_id=rec.character.character_id,
+                scenarios=[SCENARIO_IDS[0]],
+                operator_live_intent=True,
+                interactive=False,
+                execute_fn=lambda **k: executed2.append(k["scenario"]) or ArchitectureExecutionResult(ok=True, scenario=k["scenario"]),
+                preflight_fn=lambda *_a, **_k: {
+                    "ok": False,
+                    "errors": ["ERROR: ComfyUI is not reachable at http://127.0.0.1:8188."],
+                    "messages": [],
+                    "warnings": [],
+                    "steps": [],
+                },
+                consolidated_qa_fn=lambda *_a, **_k: {"ok": True},
+            )
+        finally:
+            RegistryLoader.load_all = orig  # type: ignore[method-assign]
+        _assert_equal("D. status FAILED", bad["status"], STATUS_FAILED)
+        _assert_equal("D. no scenario exec", executed2, [])
+        _assert_true("D. consolidated not required before preflight", bad.get("consolidated_qa_ran") is False)
+    _pass(results, "D. unhealthy ComfyUI fails before scenario execution")
+
+    # H/I/J operator nav + policy unchanged
+    cfg = load_operator_config()
+    seq = navigation_sequence("run_production_identity_benchmark", cfg)
+    _assert_equal("H. nav 9-13-11", [s.get("select") for s in seq], ["9", "13", "11"])
+    never = " ".join(str(x) for x in (cfg.get("never_auto") or []))
+    _assert_true("I. no 4.13", "4.13" in never)
+    _assert_true("J. no FaceID/ReActor production reruns", "FaceID" in never or "ReActor" in never)
+    _assert_true(
+        "consolidated suites include architecture sim",
+        "simulate_package4123_identity_architecture.py" in DEFAULT_PACKAGE4123_SUITES,
+    )
+    _pass(results, "H/I/J. operator nav + Package 4.13/FaceID protections")
+
+    # B. consolidated QA failure => FAILED even if scenarios provisional
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        drive = root / "AI_Studio"
+        (root / "ComfyUI" / "input").mkdir(parents=True)
+        (drive / "workflows" / "prepared").mkdir(parents=True)
+        face = drive / "face.png"
+        _face(face)
+        rec = register_character(drive, display_name="CQA", primary_face_image=face)
+
+        class _FakeBundle3:
+            def __init__(self, root: Path):
+                self.root = root
+                self.models = []
+                self.nodes = []
+
+            def path(self, key: str) -> Path:
+                return {
+                    "drive_root": self.root / "AI_Studio",
+                    "comfyui_runtime": self.root / "ComfyUI",
+                    "runtime_root": self.root / "runtime",
+                    "drive_workflows": self.root / "AI_Studio" / "workflows",
+                }[key]
+
+        def _exec_one(**kwargs):
+            scenario = kwargs["scenario"]
+            path = drive / f"{scenario}.png"
+            path.write_bytes(b"x")
+            return ArchitectureExecutionResult(
+                ok=True,
+                scenario=scenario,
+                prompt_id="p1",
+                output_path=str(path),
+                output_sha256=file_sha256(path),
+                automated_qa={"automated_quality_status": "provisional_pass"},
+            )
+
+        orig = RegistryLoader.load_all
+        RegistryLoader.load_all = lambda self: _FakeBundle3(root)  # type: ignore[method-assign]
+        try:
+            failed_payload = run_production_identity_benchmark(
+                repo_root,
+                character_id=rec.character.character_id,
+                scenarios=[SCENARIO_IDS[0]],
+                operator_live_intent=True,
+                interactive=False,
+                execute_fn=_exec_one,
+                preflight_fn=lambda *_a, **_k: {"ok": True, "errors": [], "messages": [], "warnings": [], "steps": []},
+                consolidated_qa_fn=lambda *_a, **_k: {
+                    "ok": False,
+                    "all_required_suites_pass": False,
+                    "suites": [{"name": "broken", "ok": False, "failed": 1, "exit_code": 1}],
+                    "timezone_checks": {"ok": True},
+                    "report_path": "/tmp/qa.json",
+                },
+            )
+        finally:
+            RegistryLoader.load_all = orig  # type: ignore[method-assign]
+        _assert_equal("B. FAILED on consolidated QA", failed_payload["status"], STATUS_FAILED)
+        _assert_true("B. consolidated ran", failed_payload.get("consolidated_qa_ran"))
+        _assert_equal("B. consolidated status FAIL", failed_payload.get("consolidated_qa_status"), "FAIL")
+        _assert_true("B. failures listed", bool(failed_payload.get("consolidated_qa_failures")))
+    _pass(results, "B. consolidated QA failure => FAILED")
 
     # Notebook menu labels present
     nb = json.loads(

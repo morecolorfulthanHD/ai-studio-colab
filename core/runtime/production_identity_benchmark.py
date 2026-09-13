@@ -12,8 +12,13 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .character_identity import list_characters, load_character, verify_character_face
+from .comfyui_userdata import DEFAULT_COMFY_BASE_URL, comfyui_reachable
 from .generation_evidence_ledger import file_sha256
 from .identity_architecture_benchmark import (
+    INSTANTID_REQUIRED_GRAPH_NODES,
+    assess_instantid_asset_readiness,
+    assess_instantid_license_gate,
+    assess_instantid_structural_readiness,
     architecture_ledger_path,
     format_architecture_benchmark_report,
     load_architecture_benchmark_records,
@@ -23,13 +28,29 @@ from .identity_architecture_execution import (
     should_fail_fast,
 )
 from .identity_benchmark import SCENARIO_IDS, normalize_scenario_id
+from .package4123_qa import run_consolidated_package4123_qa
 from .registry_loader import RegistryLoader
+from .runtime_health import HealthStatus, check_output_watcher
 
 STATUS_COMPLETE = "COMPLETE"
 STATUS_HUMAN_REVIEW = "HUMAN_REVIEW_REQUIRED"
 STATUS_FAILED = "FAILED"
 
 _REVIEW_QA = frozenset({"inconclusive", "provisional_pass"})
+
+# Live InstantID node types that must appear in ComfyUI /object_info.
+_INSTANTID_LIVE_NODE_TYPES = tuple(
+    sorted(
+        t
+        for t in INSTANTID_REQUIRED_GRAPH_NODES
+        if t
+        in {
+            "InstantIDModelLoader",
+            "InstantIDFaceAnalysis",
+            "ApplyInstantIDAdvanced",
+        }
+    )
+)
 
 
 @dataclass
@@ -304,6 +325,220 @@ def may_satisfy_benchmark_confirmation(*, explicit_live_run_request: bool) -> bo
     return bool(explicit_live_run_request)
 
 
+def run_production_runtime_preflight(
+    repo_root: Path,
+    bundle: Any,
+    *,
+    allow_missing_models: bool = False,
+    allow_missing_nodes: bool = False,
+    allow_unverified_assets: bool = False,
+    base_url: str | None = None,
+    comfy_reachable_fn: Callable[..., bool] | None = None,
+    object_info_fn: Callable[..., tuple[str, dict[str, Any] | None, str, list]] | None = None,
+    watcher_check_fn: Callable[..., Any] | None = None,
+) -> dict[str, Any]:
+    """Verify production runtime readiness before GPU scenarios.
+
+    Sequence:
+      1. ComfyUI reachable
+      2. InstantID node types live in /object_info
+      3. InstantID structural node/model registry readiness
+      4. InstantID asset hash/verification readiness
+      5. License gate evaluation (existing semantics; does not alone block investigation)
+      6. OutputWatcher healthy for current runtime
+    """
+    from .identity_benchmark import _fetch_comfy_object_info
+
+    drive_root = bundle.path("drive_root")
+    comfy_runtime = bundle.path("comfyui_runtime")
+    base = base_url or DEFAULT_COMFY_BASE_URL
+    steps: list[dict[str, Any]] = []
+    errors: list[str] = []
+    messages: list[str] = []
+    warnings: list[str] = []
+
+    reachable_fn = comfy_reachable_fn or comfyui_reachable
+    reachable = bool(reachable_fn(base))
+    steps.append({"step": "comfyui_reachable", "ok": reachable, "base_url": base})
+    if not reachable:
+        errors.append(
+            f"ERROR: ComfyUI is not reachable at {base}. "
+            "Full Launch (control panel → 1 → full) and confirm ComfyUI is running, then retry."
+        )
+
+    oi_status = "unchecked"
+    oi_notes = ""
+    missing_live: list[str] = []
+    if reachable:
+        fetch = object_info_fn or _fetch_comfy_object_info
+        oi_status, oi_payload, oi_notes, _attempts = fetch(base)
+        keys = set(oi_payload.keys()) if isinstance(oi_payload, dict) else set()
+        missing_live = [t for t in _INSTANTID_LIVE_NODE_TYPES if t not in keys]
+        live_ok = oi_status == "ok" and not missing_live
+        steps.append(
+            {
+                "step": "instantid_live_nodes",
+                "ok": live_ok,
+                "object_info_status": oi_status,
+                "notes": oi_notes,
+                "required": list(_INSTANTID_LIVE_NODE_TYPES),
+                "missing": missing_live,
+            }
+        )
+        if oi_status != "ok":
+            errors.append(
+                f"ERROR: ComfyUI /object_info status={oi_status} ({oi_notes}). "
+                "Confirm Full Launch completed and InstantID custom nodes imported."
+            )
+        elif missing_live:
+            errors.append(
+                "ERROR: Required InstantID node types not live in ComfyUI object_info: "
+                + ", ".join(missing_live)
+                + ". Full Launch / install_nodes, then restart ComfyUI if needed."
+            )
+    else:
+        steps.append(
+            {
+                "step": "instantid_live_nodes",
+                "ok": False,
+                "object_info_status": "skipped",
+                "notes": "skipped — ComfyUI unreachable",
+                "required": list(_INSTANTID_LIVE_NODE_TYPES),
+                "missing": list(_INSTANTID_LIVE_NODE_TYPES),
+            }
+        )
+
+    structural = assess_instantid_structural_readiness(
+        bundle_models=list(bundle.models),
+        bundle_nodes=list(bundle.nodes),
+        comfyui_custom_nodes=Path(comfy_runtime) / "custom_nodes",
+    )
+    models_ok = (not structural.get("models_missing")) or allow_missing_models
+    nodes_ok = (not structural.get("nodes_missing")) or allow_missing_nodes
+    pin = structural.get("node_pin") or {}
+    if structural.get("ready"):
+        structural_ok = True
+    else:
+        structural_ok = models_ok and nodes_ok and (
+            bool(pin.get("present")) or allow_missing_nodes
+        )
+        if allow_missing_models:
+            warnings.append(
+                "WARN: allow_missing_models — structural model gaps ignored for investigation."
+            )
+        if allow_missing_nodes:
+            warnings.append(
+                "WARN: allow_missing_nodes — structural node gaps ignored for investigation."
+            )
+    steps.append({"step": "instantid_structural", "ok": structural_ok, "detail": structural})
+    if not structural_ok:
+        missing_m = structural.get("models_missing") or []
+        missing_n = structural.get("nodes_missing") or []
+        errors.append(
+            "ERROR: InstantID structural readiness failed "
+            f"(models_missing={missing_m}; nodes_missing={missing_n}). "
+            "Run Full Launch and place required InstantID assets; see Characters → Advanced → Dependency diagnostics."
+        )
+
+    assets = assess_instantid_asset_readiness(
+        drive_root=drive_root,
+        bundle_models=list(bundle.models),
+        comfyui_runtime=comfy_runtime,
+    )
+    assets_ok = bool(assets.get("ready")) or allow_unverified_assets
+    if allow_unverified_assets and not assets.get("ready"):
+        warnings.append(
+            "WARN: allow_unverified_assets — InstantID hash gate overridden for investigation only; "
+            "promotion remains blocked."
+        )
+    steps.append({"step": "instantid_assets", "ok": assets_ok, "detail": assets})
+    if not assets_ok:
+        for err in assets.get("errors") or ["ERROR: InstantID assets not verified."]:
+            errors.append(str(err))
+        errors.append(
+            "ACTION: Verify InstantID model hashes on Drive / run Full Launch asset bridge; "
+            "do not use --allow-unverified-assets for production claims."
+        )
+
+    license_gate = assess_instantid_license_gate(repo_root)
+    steps.append(
+        {
+            "step": "license_gate",
+            "ok": True,  # evaluated; does not alone fail investigation preflight
+            "detail": license_gate,
+            "promotion_allowed": bool(license_gate.get("promotion_allowed")),
+        }
+    )
+    messages.append(
+        "License gate evaluated "
+        f"(status={license_gate.get('overall_status')}; "
+        f"promotion_allowed={license_gate.get('promotion_allowed')})."
+    )
+
+    watcher_fn = watcher_check_fn or check_output_watcher
+    watcher = watcher_fn(bundle)
+    watcher_status = getattr(watcher, "status", None)
+    watcher_details = getattr(watcher, "details", {}) or {}
+    ownership = str(watcher_details.get("ownership_state") or "")
+    watcher_ok = watcher_status == HealthStatus.OK and ownership in {"", "current_runtime"}
+    if watcher_status == HealthStatus.OK:
+        watcher_ok = True
+    elif watcher_status == HealthStatus.WARN and ownership == "current_runtime":
+        watcher_ok = True
+        warnings.append(f"WARN: OutputWatcher WARN but current-runtime: {getattr(watcher, 'message', '')}")
+    else:
+        watcher_ok = False
+    steps.append(
+        {
+            "step": "output_watcher",
+            "ok": watcher_ok,
+            "status": str(watcher_status.value if hasattr(watcher_status, "value") else watcher_status),
+            "message": getattr(watcher, "message", ""),
+            "ownership_state": ownership,
+        }
+    )
+    if not watcher_ok:
+        errors.append(
+            "ERROR: OutputWatcher is not healthy for the current runtime "
+            f"(status={watcher_status}; ownership={ownership or 'absent'}). "
+            f"{getattr(watcher, 'message', '')} "
+            "ACTION: Complete Full Launch so OutputWatcher is running for this runtime "
+            "(non-destructive); do not Full Reset."
+        )
+
+    ok = not errors
+    return {
+        "ok": ok,
+        "steps": steps,
+        "errors": errors,
+        "messages": messages,
+        "warnings": warnings,
+        "license_gate": license_gate,
+        "preflight_sequence": [
+            "comfyui_reachable",
+            "instantid_live_nodes",
+            "instantid_structural",
+            "instantid_assets",
+            "license_gate",
+            "output_watcher",
+        ],
+    }
+
+
+def apply_consolidated_qa_to_status(
+    status: str,
+    *,
+    consolidated_ok: bool | None,
+    consolidated_ran: bool,
+) -> tuple[str, str | None]:
+    """Consolidate QA failure forces FAILED; never COMPLETE on consolidated fail."""
+    if not consolidated_ran:
+        return status, None
+    if consolidated_ok is False:
+        return STATUS_FAILED, "Package 4.12.3 consolidated QA failed."
+    return status, None
+
+
 def run_production_identity_benchmark(
     repo_root: Path,
     *,
@@ -321,6 +556,10 @@ def run_production_identity_benchmark(
     seed: int | None = None,
     execute_fn: Callable[..., Any] | None = None,
     skip_gpu_confirmation: bool = False,
+    skip_preflight: bool = False,
+    preflight_fn: Callable[..., dict[str, Any]] | None = None,
+    consolidated_qa_fn: Callable[..., dict[str, Any]] | None = None,
+    skip_consolidated_qa: bool = False,
 ) -> dict[str, Any]:
     """One-action production identity benchmark (default S1–S4)."""
     bundle = RegistryLoader(repo_root).load_all()
@@ -349,6 +588,11 @@ def run_production_identity_benchmark(
         "ok": False,
         "execute_benchmark": True,
         "browser_required": False,
+        "preflight": None,
+        "consolidated_qa_ran": False,
+        "consolidated_qa_status": None,
+        "consolidated_qa_report_path": None,
+        "consolidated_qa_failures": [],
     }
 
     resolve = resolve_production_character(
@@ -392,6 +636,29 @@ def run_production_identity_benchmark(
             "Wrapper confirmation satisfies controlled invoke of live InstantID execution "
             "(lower-level runner ack semantics preserved; flags not typed by the user)."
         )
+
+    if not skip_preflight:
+        print("\n--- Production runtime preflight ---")
+        preflight = (preflight_fn or run_production_runtime_preflight)(
+            repo_root,
+            bundle,
+            allow_missing_models=allow_missing_models,
+            allow_missing_nodes=allow_missing_nodes,
+            allow_unverified_assets=allow_unverified_assets,
+        )
+        payload["preflight"] = preflight
+        for msg in preflight.get("messages") or []:
+            print(f"- {msg}")
+        for warn in preflight.get("warnings") or []:
+            print(warn)
+        for err in preflight.get("errors") or []:
+            print(err)
+        if not preflight.get("ok"):
+            payload["failure_reason"] = "; ".join(preflight.get("errors") or []) or "Runtime preflight failed."
+            payload["status"] = STATUS_FAILED
+            print(f"\nstatus={payload['status']}")
+            return payload
+        print("Preflight OK — proceeding to S1–S4.")
 
     runner = execute_fn or execute_architecture_scenario
     scenario_rows: list[dict[str, Any]] = []
@@ -513,6 +780,53 @@ def run_production_identity_benchmark(
                 failure_reason = None
                 break
 
+    # Consolidated Package 4.12.3 QA after scenario/capture stage.
+    if not skip_consolidated_qa:
+        print("\n--- Package 4.12.3 consolidated QA ---")
+        qa_runner = consolidated_qa_fn or run_consolidated_package4123_qa
+        try:
+            cqa = qa_runner(repo_root, print_summary=True, write_reports=True)
+        except TypeError:
+            # Allow simple test doubles: fn(repo_root) -> dict
+            cqa = qa_runner(repo_root)
+        payload["consolidated_qa_ran"] = True
+        payload["consolidated_qa_status"] = (
+            "PASS" if cqa.get("ok") or cqa.get("all_required_suites_pass") else "FAIL"
+        )
+        payload["consolidated_qa_report_path"] = (
+            cqa.get("report_path")
+            or (cqa.get("report_paths") or [None])[0]
+            or None
+        )
+        failures = []
+        for suite in cqa.get("suites") or []:
+            if not suite.get("ok"):
+                failures.append(
+                    f"{suite.get('name')}: failed={suite.get('failed')} "
+                    f"exit={suite.get('exit_code')}"
+                )
+        tz = cqa.get("timezone_checks") or {}
+        if tz and not tz.get("ok") and not tz.get("skipped_by_caller"):
+            failures.append("timezone_inline: FAIL")
+        payload["consolidated_qa_failures"] = failures
+        payload["consolidated_qa"] = {
+            "ok": bool(cqa.get("ok") or cqa.get("all_required_suites_pass")),
+            "totals": cqa.get("totals"),
+            "report_path": payload["consolidated_qa_report_path"],
+        }
+        status, cqa_fail = apply_consolidated_qa_to_status(
+            status,
+            consolidated_ok=payload["consolidated_qa"]["ok"],
+            consolidated_ran=True,
+        )
+        if cqa_fail:
+            failure_reason = cqa_fail
+            human_review = False
+            print(f"ERROR: {cqa_fail}")
+    else:
+        payload["consolidated_qa_ran"] = False
+        payload["consolidated_qa_status"] = "SKIPPED"
+
     payload["status"] = status
     payload["human_review_required"] = human_review or status == STATUS_HUMAN_REVIEW
     payload["failure_reason"] = failure_reason
@@ -560,6 +874,9 @@ def run_production_identity_benchmark(
             f"completed: {', '.join(payload['scenarios_completed']) or '-'}",
             f"reused: {', '.join(payload['scenarios_skipped_reuse']) or '-'}",
             f"ledger: {ledger}",
+            f"consolidated_qa_ran: {payload.get('consolidated_qa_ran')}",
+            f"consolidated_qa_status: {payload.get('consolidated_qa_status')}",
+            f"consolidated_qa_report: {payload.get('consolidated_qa_report_path') or '-'}",
             "",
             format_architecture_benchmark_report(load_architecture_benchmark_records(ledger)),
         ]

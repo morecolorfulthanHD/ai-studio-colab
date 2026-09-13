@@ -117,7 +117,11 @@ Helper: `navigation_sequence("run_production_identity_benchmark")` in `core/runt
 
 **GPU confirmation:** Interactive menu asks `[y/N]` before GPU work. If the originating user request **explicitly** asked Cursor to RUN the live production identity benchmark, Cursor may satisfy that routine confirmation automatically (`--operator-live-intent`). Merely opening Characters never authorizes GPU execution. Still stop for Google/Drive auth, billing, CAPTCHA, or other real consent gates.
 
-Orchestrator: `core/scripts/run_production_identity_benchmark.py` — emits `status=COMPLETE|HUMAN_REVIEW_REQUIRED|FAILED` plus structured JSON fields (character, scenarios, prompt IDs, durable paths, report paths).
+Orchestrator: `core/scripts/run_production_identity_benchmark.py` — emits `status=COMPLETE|HUMAN_REVIEW_REQUIRED|FAILED` plus structured JSON fields (character, scenarios, prompt IDs, durable paths, report paths, consolidated QA).
+
+**Preflight (before GPU scenarios):** ComfyUI reachable → InstantID live `/object_info` nodes → structural InstantID readiness → asset hash gates → license gate evaluation → OutputWatcher current-runtime health. Fail closed with actionable messages; never Full Reset.
+
+**After scenario capture:** invokes authoritative Package 4.12.3 consolidated QA (`core.runtime.package4123_qa.run_consolidated_package4123_qa`). Consolidated QA failure forces `FAILED` (never `COMPLETE`).
 
 Do not ask the user to paste routine Colab logs; collect visible cell output and Drive report paths yourself.
 

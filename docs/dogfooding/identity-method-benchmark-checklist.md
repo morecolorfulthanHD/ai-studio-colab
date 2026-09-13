@@ -16,7 +16,7 @@ CODE/SIM readiness proves character foundation + **executable** benchmark graphs
 
 **Characters → 11. Run production identity benchmark**
 
-One action orchestrates character resolve → preflight → InstantID readiness → prepare S1–S4 → ComfyUI `/prompt` execute → durable Drive capture → automated QA → consolidated status/report.
+One action orchestrates character resolve → runtime preflight → prepare S1–S4 → ComfyUI `/prompt` execute → durable Drive capture → automated scenario QA → **Package 4.12.3 consolidated QA** → consolidated status/report.
 
 Ends in exactly one of: `COMPLETE` | `HUMAN_REVIEW_REQUIRED` | `FAILED`.
 
