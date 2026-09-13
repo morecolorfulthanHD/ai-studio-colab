@@ -199,12 +199,36 @@ Do **not** programmatically change user settings. Recommend:
 
 ---
 
+## Safe notebook cell entry (CDP)
+
+When driving Colab via Chrome CDP, **never** send text to the current caret
+(`Input.insertText` alone). That append path produced:
+
+```text
+control_panel()control_panel()
+SyntaxError: invalid syntax
+```
+
+Mandatory primitive: `core.runtime.colab_cdp_cells`
+
+1. Prefer **run existing** when `getText()` already matches (`RUN_EXISTING`).
+2. If source must change: **`cell.setText(desired)`** then verify with `getText()` —
+   never caret-append.
+3. Execute via the cell’s **`<colab-run-button>`** (shadow click) — do not retype
+   source as part of Run.
+4. Retries must be idempotent (no duplicated command glue).
+
+Simulation: `python core/scripts/simulate_colab_cdp_cells.py`
+
+---
+
 ## Local helpers
 
 ```bash
 python core/scripts/report_colab_operator_state.py
 python core/scripts/report_colab_operator_state.py --state DISCONNECTED
 python core/scripts/simulate_colab_operator.py
+python core/scripts/simulate_colab_cdp_cells.py
 ```
 
 These do not open Colab; they validate config/state policy deterministically.
