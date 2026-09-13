@@ -203,6 +203,7 @@ def main() -> int:
         "simulate_package410_generation_reproduction.py",
         "simulate_output_autosync.py",
         "simulate_package4123_identity_architecture.py",
+        "simulate_colab_operator.py",
     ]
     results = [_run_suite(repo_root, name) for name in suites]
     tz_result = _timezone_checks()

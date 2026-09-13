@@ -10,6 +10,8 @@ Open it in Colab from GitHub (not from a Drive copy):
 
 This notebook is the official control panel. Do not duplicate it. Future improvements should enhance this notebook rather than replace it.
 
+**Cursor live-validation orchestration:** see [cursor-colab-operator.md](cursor-colab-operator.md) and `configs/operator/colab_operator.json`.
+
 ## GitHub vs. Google Drive
 
 | Location | Canonical? | Purpose |
