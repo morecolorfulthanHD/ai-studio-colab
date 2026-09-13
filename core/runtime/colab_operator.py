@@ -165,6 +165,14 @@ def may_change_gpu_without_asking(config: dict[str, Any] | None = None) -> bool:
     return bool(policy.get("may_change_gpu_runtime_without_asking", False))
 
 
+def may_satisfy_benchmark_confirmation(*, explicit_live_run_request: bool) -> bool:
+    """Routine GPU confirmation may be auto-satisfied only on explicit live-run intent.
+
+    Merely opening the Characters menu never authorizes benchmark GPU execution.
+    """
+    return bool(explicit_live_run_request)
+
+
 @dataclass
 class TransitionResult:
     ok: bool

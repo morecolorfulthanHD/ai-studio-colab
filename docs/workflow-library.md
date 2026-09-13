@@ -222,7 +222,15 @@ python core/scripts/show_character.py --character-id char_<uuid>
 - `reactor_faceswap_benchmark`
 - `ipadapter_faceid_sd15_benchmark`
 
-InstantID/SDXL was deferred in 4.12; Package **4.12.3** investigates `instantid_sdxl_benchmark` as the production identity architecture candidate. ReActor and SD1.5 FaceID are **REJECTED_FOR_PRODUCTION_IDENTITY**; the 4.12.2 FaceID sweep is **FAILED_FIRST_SWEEP** — do not retune. Explicit `--allow-benchmark` is required. Prepare/open is **plumbing only** — not a quality claim. Automated QA: `python core/scripts/qa_package4123.py`. No automatic Package 4.13 promotion.
+InstantID/SDXL was deferred in 4.12; Package **4.12.3** investigates `instantid_sdxl_benchmark` as the production identity architecture candidate. ReActor and SD1.5 FaceID are **REJECTED_FOR_PRODUCTION_IDENTITY**; the 4.12.2 FaceID sweep is **FAILED_FIRST_SWEEP** — do not retune.
+
+**Normal production identity workflow:** Characters → **Run production identity benchmark** (one-action S1–S4), or:
+
+```bash
+python core/scripts/run_production_identity_benchmark.py --scenario S1-S4 --json
+```
+
+Advanced/debug prepare / raw execute remain under **Advanced identity benchmark tools** and the older scripts (`prepare_identity_architecture_benchmark.py`, `run_identity_architecture_benchmark.py`). Explicit lower-level ack flags are still required for the raw runner. Prepare/open alone is **plumbing only** — not a quality claim. Automated QA: `python core/scripts/qa_package4123.py`. No automatic Package 4.13 promotion.
 
 ```bash
 python core/scripts/prepare_identity_benchmark.py \

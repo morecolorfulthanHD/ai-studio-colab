@@ -1,12 +1,14 @@
 {
   "package": "colab_operator",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "notes": [
     "Orchestration metadata for Cursor Agent browser workflows only.",
     "Does not change Package 4.12.3 benchmark semantics.",
     "Does not start Package 4.13.",
     "Canonical notebook is GitHub-backed — never a stale Drive copy.",
-    "Characters is nested: Main 9 Workspace/Projects → 13 Characters (not top-level 13)."
+    "Characters is nested: Main 9 Workspace/Projects → 13 Characters (not top-level 13).",
+    "Normal production identity path is Characters option 11 (one-action S1–S4).",
+    "Opening Characters alone never authorizes GPU benchmark execution."
   ],
   "canonical_notebook": {
     "repo": "morecolorfulthanHD/ai-studio-colab",
@@ -40,7 +42,8 @@
   "menu_titles": {
     "control_panel": "=== AI Studio Control Panel ===",
     "workspace_projects": "=== Workspace / Projects ===",
-    "characters": "=== Characters (Package 4.12 / 4.12.3) ==="
+    "characters": "=== Characters (Package 4.12 / 4.12.3) ===",
+    "advanced_identity": "=== Advanced identity benchmark tools ==="
   },
   "control_panel_menu": {
     "launch": {
@@ -77,31 +80,94 @@
   },
   "characters_menu": {
     "list": {"select": "1", "label": "List characters"},
-    "prepare_instantid": {
+    "run_production_identity_benchmark": {
       "select": "11",
-      "label": "Prepare production identity benchmark (InstantID SDXL)",
-      "script": "core/scripts/prepare_identity_architecture_benchmark.py"
+      "label": "Run production identity benchmark",
+      "script": "core/scripts/run_production_identity_benchmark.py",
+      "orchestrates": [
+        "character resolve",
+        "preflight / InstantID readiness",
+        "prepare S1-S4",
+        "execute /prompt",
+        "durable Drive capture",
+        "automated QA",
+        "architecture/status report"
+      ],
+      "routine_confirmation_prompt": "Run the full S1-S4 production identity benchmark now? This will use the active GPU runtime. [y/N]",
+      "operator_may_satisfy_confirmation_when": "originating user request explicitly asked Cursor to RUN the live production identity benchmark",
+      "do_not_auto_start_without_explicit_user_request": true,
+      "lower_level_ack_flags_still_required_internally": [
+        "--execute-benchmark",
+        "--allow-benchmark",
+        "--i-acknowledge-gpu-cost"
+      ]
+    },
+    "status_report": {
+      "select": "12",
+      "label": "Production identity benchmark status / report",
+      "script": "core/scripts/report_identity_architecture_benchmark.py"
+    },
+    "advanced": {
+      "select": "13",
+      "label": "Advanced identity benchmark tools",
+      "expected_next_title": "=== Advanced identity benchmark tools ==="
     },
     "run_instantid": {
-      "select": "12",
-      "label": "Run production identity benchmark (EXECUTE + automated QA)",
+      "select": "11",
+      "label": "Run production identity benchmark",
+      "alias_of": "run_production_identity_benchmark",
+      "notes": "Alias kept for older operator references; prefer run_production_identity_benchmark."
+    },
+    "prepare_instantid": {
+      "select": "1",
+      "menu": "advanced_identity",
+      "label": "Prepare InstantID benchmark (debug)",
+      "script": "core/scripts/prepare_identity_architecture_benchmark.py",
+      "notes": "Advanced/debug only — not the normal user path."
+    },
+    "raw_execute": {
+      "select": "2",
+      "menu": "advanced_identity",
+      "label": "Raw execute InstantID runner (legacy flags)",
       "script": "core/scripts/run_identity_architecture_benchmark.py",
       "requires_ack_flags": [
         "--execute-benchmark",
         "--allow-benchmark",
         "--i-acknowledge-gpu-cost"
-      ],
-      "do_not_auto_start_without_explicit_user_request": true
+      ]
     },
     "architecture_report": {
-      "select": "13",
-      "label": "Production identity QA / architecture report",
+      "select": "12",
+      "label": "Production identity benchmark status / report",
       "script": "core/scripts/report_identity_architecture_benchmark.py"
     },
     "faceid_prepare": {
       "select": "5",
       "label": "Prepare identity benchmark (benchmark ack required)",
       "status": "REJECTED_FOR_PRODUCTION_IDENTITY — do not re-run for production validation"
+    },
+    "back": {"select": "0", "label": "Back"}
+  },
+  "advanced_identity_menu": {
+    "prepare_instantid": {
+      "select": "1",
+      "label": "Prepare InstantID benchmark (debug)"
+    },
+    "raw_execute": {
+      "select": "2",
+      "label": "Raw execute InstantID runner (legacy flags)"
+    },
+    "architecture_report": {
+      "select": "3",
+      "label": "Architecture / QA report"
+    },
+    "dependency_diagnostics": {
+      "select": "4",
+      "label": "Dependency diagnostics"
+    },
+    "ledger_diagnostics": {
+      "select": "5",
+      "label": "Evidence / ledger diagnostics (architecture report)"
     },
     "back": {"select": "0", "label": "Back"}
   },
@@ -121,8 +187,27 @@
       },
       {
         "menu": "characters",
+        "select": "11",
+        "label": "Run production identity benchmark"
+      }
+    ],
+    "production_identity_status_report": [
+      {
+        "menu": "control_panel",
+        "select": "9",
+        "label": "Workspace / Projects",
+        "verify_title": "=== Workspace / Projects ==="
+      },
+      {
+        "menu": "workspace_projects",
+        "select": "13",
+        "label": "Characters (identity foundation / identity benchmark)",
+        "verify_title": "=== Characters (Package 4.12 / 4.12.3) ==="
+      },
+      {
+        "menu": "characters",
         "select": "12",
-        "label": "Run production identity benchmark (EXECUTE + automated QA)"
+        "label": "Production identity benchmark status / report"
       }
     ],
     "prepare_production_identity_benchmark": [
@@ -140,8 +225,14 @@
       },
       {
         "menu": "characters",
-        "select": "11",
-        "label": "Prepare production identity benchmark (InstantID SDXL)"
+        "select": "13",
+        "label": "Advanced identity benchmark tools",
+        "verify_title": "=== Advanced identity benchmark tools ==="
+      },
+      {
+        "menu": "advanced_identity",
+        "select": "1",
+        "label": "Prepare InstantID benchmark (debug)"
       }
     ],
     "architecture_report": [
@@ -159,8 +250,8 @@
       },
       {
         "menu": "characters",
-        "select": "13",
-        "label": "Production identity QA / architecture report"
+        "select": "12",
+        "label": "Production identity benchmark status / report"
       }
     ]
   },
@@ -172,6 +263,10 @@
     "operator_simulation": {
       "script": "core/scripts/simulate_colab_operator.py",
       "label": "Colab operator state-machine simulation"
+    },
+    "production_identity_ux_simulation": {
+      "script": "core/scripts/simulate_production_identity_benchmark_ux.py",
+      "label": "One-action production identity UX simulation"
     }
   },
   "states": [
@@ -208,7 +303,8 @@
     "Run all when notebook identity is verified",
     "Full Launch (full) after recoverable reconnect when documented",
     "navigate control panel menus",
-    "collect visible logs and QA report paths"
+    "collect visible logs and QA report paths",
+    "satisfy routine benchmark confirmation when originating user request explicitly asked to RUN live production identity benchmark"
   ],
   "never_auto": [
     "Full Reset",
@@ -219,7 +315,8 @@
     "benchmark evidence deletion",
     "bypass license / asset verification gates",
     "FaceID / ReActor production re-runs",
-    "start Package 4.13"
+    "start Package 4.13",
+    "infer GPU benchmark permission from merely opening Characters"
   ],
   "restart_policy": {
     "may_reconnect": true,

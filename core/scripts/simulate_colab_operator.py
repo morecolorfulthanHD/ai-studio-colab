@@ -208,7 +208,9 @@ def main() -> int:
     _assert_true("4.13 blocked in policy", "4.13" in never)
     _pass(results, "policy blocks FaceID reruns and Package 4.13")
 
-    # Live-navigation hierarchy: main 9 -> workspace 13 -> characters 12
+    # Live-navigation hierarchy: main 9 -> workspace 13 -> characters 11 (one-action)
+    from core.runtime.colab_operator import may_satisfy_benchmark_confirmation
+
     cp = cfg.get("control_panel_menu") or {}
     ws = cfg.get("workspace_projects_menu") or {}
     ch = cfg.get("characters_menu") or {}
@@ -218,7 +220,14 @@ def main() -> int:
         "characters" not in cp or (cp.get("characters") or {}).get("select") in (None, ""),
     )
     _assert_equal("workspace option 13 characters", (ws.get("characters") or {}).get("select"), "13")
-    _assert_equal("characters option 12 execute", (ch.get("run_instantid") or {}).get("select"), "12")
+    run_item = ch.get("run_production_identity_benchmark") or ch.get("run_instantid") or {}
+    _assert_equal("characters option 11 one-action", run_item.get("select"), "11")
+    _assert_equal(
+        "characters option 12 status/report",
+        (ch.get("status_report") or ch.get("architecture_report") or {}).get("select"),
+        "12",
+    )
+    _assert_equal("characters option 13 advanced", (ch.get("advanced") or {}).get("select"), "13")
     seq = navigation_sequence("run_production_identity_benchmark", cfg)
     _assert_equal("nav len 3", len(seq), 3)
     _assert_equal("nav step0 menu", seq[0].get("menu"), "control_panel")
@@ -226,10 +235,10 @@ def main() -> int:
     _assert_equal("nav step1 menu", seq[1].get("menu"), "workspace_projects")
     _assert_equal("nav step1 select 13", seq[1].get("select"), "13")
     _assert_equal("nav step2 menu", seq[2].get("menu"), "characters")
-    _assert_equal("nav step2 select 12", seq[2].get("select"), "12")
+    _assert_equal("nav step2 select 11", seq[2].get("select"), "11")
     selects = [s.get("select") for s in seq]
-    _assert_equal("nav selects 9-13-12", selects, ["9", "13", "12"])
-    _assert_true("nav is not flat 13-12", selects != ["13", "12"])
+    _assert_equal("nav selects 9-13-11", selects, ["9", "13", "11"])
+    _assert_true("nav is not flat 13-11", selects != ["13", "11"])
     _assert_true(
         "verify workspace title helper",
         assert_expected_menu_title(
@@ -248,8 +257,20 @@ def main() -> int:
         "missing title fails closed",
         not assert_expected_menu_title("=== AI Studio Control Panel ===", "=== Workspace / Projects ==="),
     )
-    _pass(results, "live nav hierarchy 9 -> 13 -> 12 with submenu title checks")
-
+    _assert_true(
+        "explicit live-run may satisfy routine confirm",
+        may_satisfy_benchmark_confirmation(explicit_live_run_request=True),
+    )
+    _assert_true(
+        "opening Characters alone does not authorize GPU",
+        not may_satisfy_benchmark_confirmation(explicit_live_run_request=False),
+    )
+    never = " ".join(str(x) for x in (cfg.get("never_auto") or []))
+    _assert_true(
+        "policy blocks Characters-open GPU inference",
+        "Characters" in never or "opening Characters" in never,
+    )
+    _pass(results, "live nav hierarchy 9 -> 13 -> 11 with submenu title checks + GPU intent gates")
     print()
     passed = sum(1 for status, _ in results if status == "PASS")
     print(f"RESULT: {passed}/{len(results)} Colab operator simulations passed.")

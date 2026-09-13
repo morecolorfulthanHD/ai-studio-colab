@@ -105,18 +105,23 @@ Path:
 
 | Need | Select | Notes |
 |------|--------|-------|
-| Prepare InstantID architecture | `11` | Prepare only; not a quality claim |
-| Run InstantID live execute + QA | `12` | Requires explicit user request + ack flags; GPU cost |
-| Architecture / production identity report | `13` | Report only |
+| **Run production identity benchmark** | `11` | **Normal path** — one-action S1–S4 (prepare→execute→capture→QA→report) |
+| Status / architecture report | `12` | Report only; capture ≠ production PASS |
+| Advanced identity benchmark tools | `13` | Prepare / raw execute / diagnostics (debug escape hatch) |
 | Package 4.12.3 consolidated QA | run `python core/scripts/qa_package4123.py` in repo | Offline/sim QA |
 | Rejected FaceID/ReActor | **Do not re-run for production** | Status remains rejected |
 
-Live execute sequence is **`9` → `13` → `12`**, not top-level `13` → `12`.
+Live execute sequence is **`9` → `13` → `11`**, not top-level `13` → `11`.
 
 Helper: `navigation_sequence("run_production_identity_benchmark")` in `core/runtime/colab_operator.py`.
 
-Default character when needed: `char_7471a702-55cf-4c7b-adb2-e17404d28c91` (do not re-register casually).
+**GPU confirmation:** Interactive menu asks `[y/N]` before GPU work. If the originating user request **explicitly** asked Cursor to RUN the live production identity benchmark, Cursor may satisfy that routine confirmation automatically (`--operator-live-intent`). Merely opening Characters never authorizes GPU execution. Still stop for Google/Drive auth, billing, CAPTCHA, or other real consent gates.
 
+Orchestrator: `core/scripts/run_production_identity_benchmark.py` — emits `status=COMPLETE|HUMAN_REVIEW_REQUIRED|FAILED` plus structured JSON fields (character, scenarios, prompt IDs, durable paths, report paths).
+
+Do not ask the user to paste routine Colab logs; collect visible cell output and Drive report paths yourself.
+
+Character selection: explicit ID, else sole valid character auto-selected, else numbered pick — do not hard-code a character.
 ### H. OBSERVE
 
 Collect without asking the user to paste logs when browser-visible:

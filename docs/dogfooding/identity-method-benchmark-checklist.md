@@ -12,12 +12,33 @@ CODE/SIM readiness proves character foundation + **executable** benchmark graphs
 | FaceID 4.12.2 sweep | **FAILED_FIRST_SWEEP** |
 | InstantID SDXL | **INVESTIGATION** |
 
+### Recommended normal workflow
+
+**Characters → 11. Run production identity benchmark**
+
+One action orchestrates character resolve → preflight → InstantID readiness → prepare S1–S4 → ComfyUI `/prompt` execute → durable Drive capture → automated QA → consolidated status/report.
+
+Ends in exactly one of: `COMPLETE` | `HUMAN_REVIEW_REQUIRED` | `FAILED`.
+
+CLI equivalent:
+
+```bash
+python core/scripts/run_production_identity_benchmark.py --scenario S1-S4 --json
+# Interactive [y/N] confirmation, or:
+#   --user-confirmed-gpu-run
+#   --operator-live-intent   # Cursor only when user explicitly asked to RUN live
+```
+
+Status/report: **Characters → 12**. Advanced/debug (prepare, raw execute, diagnostics): **Characters → 13**.
+
+Do **not** use prepare → manually run → manually report as the normal path.
+
 - Ledger: `AI_Studio/logs/identity_architecture_benchmark.jsonl` (separate from `identity_benchmark.jsonl` and tuning ledger)
 - Automated QA config: `configs/benchmarks/identity_architecture_qa.json` (`calibration_status: uncalibrated`)
 - Consolidated QA: `python core/scripts/qa_package4123.py`
 - S4 resolution: **1024×768** landscape (not 512×768 portrait)
 - Do **not** retune rejected SD1.5 FaceID graphs
-
+- Cursor/Colab operator: `docs/cursor-colab-operator.md` — navigate `9 → 13 → 11`
 ## OPERATIONAL PASS vs VISUAL SCENARIO PASS
 
 Never use “benchmark passed” when only execution/capture succeeded.

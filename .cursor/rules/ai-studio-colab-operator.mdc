@@ -39,13 +39,15 @@ Workspace / Projects:
 - `13` → Characters  
   → verify `=== Characters (Package 4.12 / 4.12.3) ===`
 
-Characters:
+Characters (normal production identity path):
 
-- `11` → prepare/debug InstantID
-- `12` → execute InstantID live (only with explicit request + GPU cost ack)
-- `13` → architecture report
+- `11` → **Run production identity benchmark** (one-action S1–S4 orchestrator)
+- `12` → Production identity benchmark status / report
+- `13` → Advanced identity benchmark tools (prepare / raw execute / diagnostics)
 
-Live execute path is **`9` → `13` → `12`**, never top-level `13` then `12`.
+Live execute path is **`9` → `13` → `11`**, never top-level `13` then `11`.
+
+When the originating user request **explicitly** asked Cursor to RUN the live production identity benchmark, Cursor may satisfy the routine `[y/N]` GPU confirmation automatically (`--operator-live-intent`). Merely opening Characters does **not** authorize GPU execution.
 
 ## Do NOT
 
