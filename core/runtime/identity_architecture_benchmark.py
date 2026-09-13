@@ -261,6 +261,31 @@ def find_architecture_ledger_row(
     return None
 
 
+def find_architecture_ledger_rows_by_execution(
+    ledger_path: Path,
+    *,
+    prompt_id: str,
+    output_node_id: str,
+) -> list[dict[str, Any]]:
+    """Return all architecture ledger rows for prompt_id + output_node_id.
+
+    Used by recovery when local ComfyUI bytes are gone. Capture still uses the
+    full prompt|node|SHA idempotence key.
+    """
+    pid = str(prompt_id or "")
+    node = str(output_node_id or "")
+    if not pid or not node:
+        return []
+    matches: list[dict[str, Any]] = []
+    for row in load_architecture_benchmark_records(ledger_path):
+        if str(row.get("prompt_id") or "") != pid:
+            continue
+        if str(row.get("output_node_id") or "") != node:
+            continue
+        matches.append(row)
+    return matches
+
+
 def load_architecture_benchmark_records(ledger_path: Path) -> list[dict[str, Any]]:
     if not ledger_path.is_file():
         return []

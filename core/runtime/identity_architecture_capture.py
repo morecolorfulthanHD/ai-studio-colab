@@ -26,6 +26,7 @@ from .identity_architecture_benchmark import (
     architecture_ledger_path,
     assess_instantid_license_gate,
     find_architecture_ledger_row,
+    find_architecture_ledger_rows_by_execution,
     is_identity_architecture_metadata,
     load_architecture_benchmark_records,
     update_architecture_ledger_qa,
@@ -516,6 +517,9 @@ def capture_identity_architecture_execution(
     return result
 
 
+STATUS_AMBIGUOUS_LEDGER_EXECUTION = "AMBIGUOUS_LEDGER_EXECUTION"
+
+
 def recover_identity_architecture_from_history(
     *,
     drive_root: Path,
@@ -528,7 +532,11 @@ def recover_identity_architecture_from_history(
     evidence_path: Path | None = None,
     registered_hashes: dict[str, tuple[str, str, str]] | None = None,
 ) -> dict[str, Any]:
-    """Scan ComfyUI history for uncaptured architecture-benchmark executions."""
+    """Scan ComfyUI history for uncaptured architecture-benchmark executions.
+
+    Already-captured executions are verified via the durable Drive ledger row
+    without requiring the ephemeral local ComfyUI file.
+    """
     from .comfyui_events import extract_output_files, fetch_history
     from .output_autosync import resolve_comfy_output_path
     from .workflow_provenance import extract_execution_provenance, extract_ui_workflow_from_history
@@ -562,6 +570,9 @@ def recover_identity_architecture_from_history(
     out_dir = Path(drive_output_dir) if drive_output_dir else _default_drive_output_dir(drive_root)
     ev_path = Path(evidence_path) if evidence_path else _default_evidence_path(drive_root)
     before_rows = len(load_architecture_benchmark_records(ledger))
+    before_drive_files = (
+        len(list(out_dir.glob("identity_architecture_benchmark_*"))) if out_dir.is_dir() else 0
+    )
 
     for prompt_id, entry in hist.items():
         if not isinstance(entry, dict):
@@ -582,6 +593,55 @@ def recover_identity_architecture_from_history(
         if not is_identity_architecture_benchmark_provenance(provenance, ui_workflow):
             report["skipped_non_architecture"] += 1
             continue
+
+        pid = str(prompt_id)
+        existing_rows = find_architecture_ledger_rows_by_execution(
+            ledger, prompt_id=pid, output_node_id=node_id
+        )
+        if len(existing_rows) > 1:
+            shas = {
+                str(r.get("output_sha256") or "").strip().lower() for r in existing_rows
+            }
+            if len(shas) > 1:
+                report["failed"] += 1
+                report["ok"] = False
+                report["errors"].append(
+                    f"ERROR: {STATUS_AMBIGUOUS_LEDGER_EXECUTION} — multiple architecture "
+                    f"ledger rows for prompt_id={pid} output_node_id={node_id} with "
+                    f"different SHAs; refuse guess."
+                )
+                continue
+            # Same SHA duplicated rows — treat as single captured execution.
+            existing_rows = [existing_rows[0]]
+
+        if len(existing_rows) == 1:
+            row = existing_rows[0]
+            status, _path, msgs, errs = verify_existing_ledger_artifact(
+                row, expected_sha256=str(row.get("output_sha256") or "")
+            )
+            errs = [
+                e.replace("identity benchmark ledger", "identity architecture ledger")
+                for e in errs
+            ]
+            report["messages"].extend(msgs)
+            if status == STATUS_DUPLICATE_REUSED_LEDGER_ARTIFACT:
+                report["duplicates"] += 1
+                report["messages"].append(
+                    f"Recovery duplicate (ledger verified, local not required): {pid}|{node_id}"
+                )
+                continue
+            report["failed"] += 1
+            report["ok"] = False
+            report["errors"].extend(
+                errs
+                or [
+                    f"ERROR: Architecture ledger artifact verification failed for {pid}|{node_id} "
+                    f"(status={status})."
+                ]
+            )
+            continue
+
+        # No ledger match — local ComfyUI output required to establish SHA.
         local = resolve(
             Path(comfy_output_dir),
             filename=str(meta.get("filename") or ""),
@@ -590,8 +650,8 @@ def recover_identity_architecture_from_history(
         if not Path(local).is_file():
             report["failed"] += 1
             report["errors"].append(
-                f"ERROR: Architecture recovery missing local output for {prompt_id}; "
-                "refuse ambiguous SHA reconstruction."
+                f"ERROR: Architecture execution {pid}|{node_id} is uncaptured and local "
+                f"ComfyUI output is missing: {local}"
             )
             report["ok"] = False
             continue
@@ -606,7 +666,7 @@ def recover_identity_architecture_from_history(
         cap = capture_identity_architecture_execution(
             drive_root=drive_root,
             ledger_path=ledger,
-            prompt_id=str(prompt_id),
+            prompt_id=pid,
             output_node_id=node_id,
             output_path=Path(local),
             output_sha256=sha,
@@ -630,10 +690,15 @@ def recover_identity_architecture_from_history(
             report["captures"].append(cap.to_dict())
 
     after_rows = len(load_architecture_benchmark_records(ledger))
+    after_drive_files = (
+        len(list(out_dir.glob("identity_architecture_benchmark_*"))) if out_dir.is_dir() else 0
+    )
     report["new_architecture_rows"] = max(0, after_rows - before_rows)
+    report["new_drive_files"] = max(0, after_drive_files - before_drive_files)
     report["messages"].append(
         f"Architecture recovery: examined={report['examined']} "
         f"captured={report['captured']} duplicates={report['duplicates']} "
-        f"new_rows={report['new_architecture_rows']}"
+        f"failed={report['failed']} new_rows={report['new_architecture_rows']} "
+        f"new_drive_files={report['new_drive_files']}"
     )
     return report

@@ -860,13 +860,17 @@ def main() -> int:
             )
             _pass(results, "concurrent runner+watcher converge to one row")
 
-            # Recovery after capture -> zero new rows
+            # Recovery A: captured + local deleted -> duplicate via Drive ledger
             hist = {
                 "pid-run-first": {
                     "outputs": {
                         "9": {
                             "images": [
-                                {"filename": "runner_first.png", "subfolder": "", "type": "output"}
+                                {
+                                    "filename": "runner_first.png",
+                                    "subfolder": "",
+                                    "type": "output",
+                                }
                             ]
                         }
                     },
@@ -874,6 +878,10 @@ def main() -> int:
                     "prompt": [0, "c", {}, {"extra_pnginfo": {"workflow": prep_wf}}, ["9"]],
                 }
             }
+            run_local_path = out_dir / "runner_first.png"
+            _assert_true("precondition local exists", run_local_path.is_file())
+            run_local_path.unlink()
+            _assert_true("local deleted for recovery A", not run_local_path.is_file())
             rows_pre_rec = len(load_architecture_benchmark_records(architecture_ledger_path(drive)))
             files_pre = list((drive / "outputs").glob("identity_architecture_benchmark_*"))
             rec_rep = recover_identity_architecture_from_history(
@@ -882,22 +890,231 @@ def main() -> int:
                 base_url="http://127.0.0.1:8188",
                 history=hist,
             )
-            _assert_true("recovery ok", rec_rep.get("ok"))
-            _assert_equal("recovery captured 0", rec_rep.get("captured"), 0)
-            _assert_true("recovery duplicates >=1", int(rec_rep.get("duplicates") or 0) >= 1)
+            _assert_true("recovery A ok", rec_rep.get("ok") is True)
+            _assert_equal("recovery A captured", rec_rep.get("captured"), 0)
+            _assert_equal("recovery A duplicates", rec_rep.get("duplicates"), 1)
+            _assert_equal("recovery A failed", rec_rep.get("failed"), 0)
+            _assert_equal("recovery A new_architecture_rows", rec_rep.get("new_architecture_rows"), 0)
+            _assert_equal("recovery A new_drive_files", rec_rep.get("new_drive_files"), 0)
             _assert_equal(
-                "recovery new rows 0",
+                "recovery A ledger row count unchanged",
                 len(load_architecture_benchmark_records(architecture_ledger_path(drive))),
                 rows_pre_rec,
             )
             _assert_equal(
-                "recovery no new drive files",
+                "recovery A drive file count unchanged",
                 len(list((drive / "outputs").glob("identity_architecture_benchmark_*"))),
                 len(files_pre),
             )
-            _pass(results, "recovery after capture: zero new files/rows")
+            _pass(
+                results,
+                "recovery A: captured + local deleted -> duplicates=1, no new files/rows",
+            )
 
-            # Missing ledger Drive artifact -> REPAIR_REQUIRED
+            # Recovery B: captured + local deleted + Drive missing -> REPAIR_REQUIRED_MISSING
+            b_local = out_dir / "recover_b.png"
+            b_local.write_bytes(out_img.read_bytes())
+            b_sha = file_sha256(b_local).lower()
+            b_cap = capture_identity_architecture_execution(
+                drive_root=drive,
+                prompt_id="pid-recover-b",
+                output_node_id="9",
+                output_path=b_local,
+                output_sha256=b_sha,
+                provenance=prov_arch,
+                ui_workflow=prep_wf,
+                preparation_id=prep.preparation_id,
+                scenario="S1_near_front_portrait",
+                character_id=reg.character.character_id,
+                seed=11,
+            )
+            _assert_true(f"recovery B capture ok ({b_cap.errors})", b_cap.ok)
+            b_drive = Path(b_cap.drive_path)
+            b_local.unlink(missing_ok=True)
+            b_drive.unlink(missing_ok=True)
+            files_b_pre = list((drive / "outputs").glob("identity_architecture_benchmark_*"))
+            hist_b = {
+                "pid-recover-b": {
+                    "outputs": {
+                        "9": {
+                            "images": [
+                                {"filename": "recover_b.png", "subfolder": "", "type": "output"}
+                            ]
+                        }
+                    },
+                    "status": {"completed": True},
+                    "prompt": [0, "c", {}, {"extra_pnginfo": {"workflow": prep_wf}}, ["9"]],
+                }
+            }
+            rec_b = recover_identity_architecture_from_history(
+                drive_root=drive,
+                comfy_output_dir=out_dir,
+                base_url="http://127.0.0.1:8188",
+                history=hist_b,
+            )
+            _assert_true("recovery B not ok", rec_b.get("ok") is False)
+            _assert_true(
+                "recovery B REPAIR_REQUIRED_MISSING",
+                any("REPAIR_REQUIRED" in e for e in (rec_b.get("errors") or [])),
+            )
+            _assert_true(
+                "recovery B no SHA mismatch label",
+                not any("SHA_MISMATCH" in e for e in (rec_b.get("errors") or [])),
+            )
+            _assert_true(
+                "recovery B no replacement file",
+                len(list((drive / "outputs").glob("identity_architecture_benchmark_*")))
+                == len(files_b_pre),
+            )
+            _pass(results, "recovery B: Drive missing -> REPAIR_REQUIRED, no replacement")
+
+            # Recovery C: captured + local deleted + Drive SHA mismatch
+            c_local = out_dir / "recover_c.png"
+            c_local.write_bytes(out_img.read_bytes())
+            c_sha = file_sha256(c_local).lower()
+            c_cap = capture_identity_architecture_execution(
+                drive_root=drive,
+                prompt_id="pid-recover-c",
+                output_node_id="9",
+                output_path=c_local,
+                output_sha256=c_sha,
+                provenance=prov_arch,
+                ui_workflow=prep_wf,
+                preparation_id=prep.preparation_id,
+                scenario="S1_near_front_portrait",
+                character_id=reg.character.character_id,
+                seed=12,
+            )
+            _assert_true(f"recovery C capture ok ({c_cap.errors})", c_cap.ok)
+            c_drive = Path(c_cap.drive_path)
+            c_local.unlink(missing_ok=True)
+            c_drive.write_bytes(b"\x89PNG\r\n\x1a\n" + b"CORRUPTED-ARCH-BYTES")
+            files_c_pre = list((drive / "outputs").glob("identity_architecture_benchmark_*"))
+            hist_c = {
+                "pid-recover-c": {
+                    "outputs": {
+                        "9": {
+                            "images": [
+                                {"filename": "recover_c.png", "subfolder": "", "type": "output"}
+                            ]
+                        }
+                    },
+                    "status": {"completed": True},
+                    "prompt": [0, "c", {}, {"extra_pnginfo": {"workflow": prep_wf}}, ["9"]],
+                }
+            }
+            rec_c = recover_identity_architecture_from_history(
+                drive_root=drive,
+                comfy_output_dir=out_dir,
+                base_url="http://127.0.0.1:8188",
+                history=hist_c,
+            )
+            _assert_true("recovery C not ok", rec_c.get("ok") is False)
+            _assert_true(
+                "recovery C SHA mismatch",
+                any("SHA_MISMATCH" in e or "SHA mismatch" in e for e in (rec_c.get("errors") or [])),
+            )
+            _assert_equal(
+                "recovery C no extra drive files",
+                len(list((drive / "outputs").glob("identity_architecture_benchmark_*"))),
+                len(files_c_pre),
+            )
+            _pass(results, "recovery C: Drive SHA mismatch -> fail closed, no replacement")
+
+            # Recovery D: uncaptured + local missing
+            hist_d = {
+                "pid-recover-d": {
+                    "outputs": {
+                        "9": {
+                            "images": [
+                                {
+                                    "filename": "never_existed_arch.png",
+                                    "subfolder": "",
+                                    "type": "output",
+                                }
+                            ]
+                        }
+                    },
+                    "status": {"completed": True},
+                    "prompt": [0, "c", {}, {"extra_pnginfo": {"workflow": prep_wf}}, ["9"]],
+                }
+            }
+            rec_d = recover_identity_architecture_from_history(
+                drive_root=drive,
+                comfy_output_dir=out_dir,
+                base_url="http://127.0.0.1:8188",
+                history=hist_d,
+            )
+            _assert_true("recovery D not ok", rec_d.get("ok") is False)
+            _assert_true(
+                "recovery D uncaptured/missing local",
+                any(
+                    "uncaptured" in e.lower() or "missing" in e.lower()
+                    for e in (rec_d.get("errors") or [])
+                ),
+            )
+            _pass(results, "recovery D: uncaptured + local missing -> fail closed")
+
+            # Recovery E: ambiguous ledger execution (same prompt/node, different SHAs)
+            append_architecture_benchmark_record(
+                architecture_ledger_path(drive),
+                IdentityArchitectureRecord(
+                    candidate=CANDIDATE_INSTANTID,
+                    architecture="instantid_sdxl",
+                    scenario="S1_near_front_portrait",
+                    character_id=reg.character.character_id,
+                    prompt_id="pid-ambiguous",
+                    output_node_id="9",
+                    output_path=str(drive / "outputs" / "ambig_a.png"),
+                    output_sha256="a" * 64,
+                    capture_idempotence_key=architecture_idempotence_key(
+                        "pid-ambiguous", "9", "a" * 64
+                    ),
+                ),
+            )
+            append_architecture_benchmark_record(
+                architecture_ledger_path(drive),
+                IdentityArchitectureRecord(
+                    candidate=CANDIDATE_INSTANTID,
+                    architecture="instantid_sdxl",
+                    scenario="S1_near_front_portrait",
+                    character_id=reg.character.character_id,
+                    prompt_id="pid-ambiguous",
+                    output_node_id="9",
+                    output_path=str(drive / "outputs" / "ambig_b.png"),
+                    output_sha256="b" * 64,
+                    capture_idempotence_key=architecture_idempotence_key(
+                        "pid-ambiguous", "9", "b" * 64
+                    ),
+                ),
+            )
+            hist_e = {
+                "pid-ambiguous": {
+                    "outputs": {
+                        "9": {
+                            "images": [
+                                {"filename": "ambig_gone.png", "subfolder": "", "type": "output"}
+                            ]
+                        }
+                    },
+                    "status": {"completed": True},
+                    "prompt": [0, "c", {}, {"extra_pnginfo": {"workflow": prep_wf}}, ["9"]],
+                }
+            }
+            rec_e = recover_identity_architecture_from_history(
+                drive_root=drive,
+                comfy_output_dir=out_dir,
+                base_url="http://127.0.0.1:8188",
+                history=hist_e,
+            )
+            _assert_true("recovery E not ok", rec_e.get("ok") is False)
+            _assert_true(
+                "recovery E AMBIGUOUS_LEDGER_EXECUTION",
+                any("AMBIGUOUS_LEDGER_EXECUTION" in e for e in (rec_e.get("errors") or [])),
+            )
+            _pass(results, "recovery E: ambiguous prompt/node SHAs -> fail closed")
+
+            # Missing ledger Drive artifact -> REPAIR_REQUIRED (capture path)
             bad_row = dict(same_key_rows[0])
             bad_row["output_path"] = str(drive / "outputs" / "missing_arch_artifact.png")
             bad_row["prompt_id"] = "pid-repair"
