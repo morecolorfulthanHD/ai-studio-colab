@@ -199,6 +199,37 @@ Do **not** programmatically change user settings. Recommend:
 
 ---
 
+## Operator cancellation / lifecycle
+
+Machine-local only (`%LOCALAPPDATA%\AI_Studio\operator\` on Windows).
+
+```bash
+python core/scripts/colab_operator_control.py begin --checkpoint "LABEL"
+python core/scripts/colab_operator_control.py status
+python core/scripts/colab_operator_control.py stop
+python core/scripts/colab_operator_control.py stop --close-browser
+python core/scripts/colab_operator_control.py clear-stale
+python core/scripts/simulate_colab_operator_lifecycle.py
+```
+
+**User stop/pause phrases** (`stop`, `pause`, `stop running`, …) ⇒ immediately
+`stop`, verify CANCELLED/idle, do **not** auto-resume or relaunch Chrome.
+
+Default `stop` prevents Chrome relaunch and kills owned helper processes; it does
+**not** close an already-open dedicated Chrome window unless `--close-browser`.
+Never kill normal/default-profile Chrome. Never disconnect Colab / Full Reset /
+delete Drive / kill remote ComfyUI or OutputWatcher as part of local cancellation.
+
+Dedicated Chrome launch must go through
+`python core/scripts/launch_operator_chrome.py --run-id <id>` (gated).
+
+**Cursor UI Stop limitation:** if Cursor kills the agent abruptly, Python `atexit`
+hooks may not run. Mitigation: cooperative cancellation + PID registry + optional
+Windows Job Object `KILL_ON_JOB_CLOSE` for spawned children; helpers self-exit when
+their `run_id` is cancelled or superseded.
+
+---
+
 ## Safe notebook cell entry (CDP)
 
 When driving Colab via Chrome CDP, **never** send text to the current caret
@@ -229,6 +260,8 @@ python core/scripts/report_colab_operator_state.py
 python core/scripts/report_colab_operator_state.py --state DISCONNECTED
 python core/scripts/simulate_colab_operator.py
 python core/scripts/simulate_colab_cdp_cells.py
+python core/scripts/simulate_colab_operator_lifecycle.py
+python core/scripts/colab_operator_control.py status
 ```
 
-These do not open Colab; they validate config/state policy deterministically.
+These do not open Colab (except the gated Chrome launcher when explicitly used).

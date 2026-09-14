@@ -58,3 +58,26 @@ When the originating user request **explicitly** asked Cursor to RUN the live pr
 - Silently continue past `HUMAN_REVIEW_REQUIRED` or license/asset fail-closed gates.
 - Mark runtime CONNECTED solely because Connect was clicked.
 - Bypass Google login / 2FA / Drive mount / paid GPU consent / CAPTCHA — **ask the user**, then resume.
+
+## Operator stop / pause (mandatory)
+
+When the user says **stop**, **stop running**, **pause**, **stop the operator**,
+**pause for the night**, **don't keep running**, or equivalent:
+
+1. Treat it as an **immediate operator cancellation** (not a soft ignore).
+2. Run: `python core/scripts/colab_operator_control.py stop`
+3. Verify status is `CANCELLED` / idle via `... status`.
+4. Confirm no owned `_checkpoint_*` / `_probe_*` / helper processes remain.
+5. **Do not** restart work, relaunch dedicated Chrome, or spawn recovery helpers.
+6. **Do not** disconnect/delete the Colab runtime, Full Reset, or delete Drive data.
+
+Default `stop` leaves an already-open dedicated Chrome window alone.
+Use `stop --close-browser` only when the user explicitly wants the operator browser closed.
+
+Lifecycle module: `core.runtime.colab_operator_lifecycle`  
+Local state: `%LOCALAPPDATA%\AI_Studio\operator\` (not Drive).
+
+**Limitation:** Cursor’s UI Stop may kill the agent without running Python hooks.
+Defensive design: helpers must heartbeat/check run validity; Chrome relaunch requires
+an explicitly RUNNING valid `operator_run_id`; Windows Job Objects may reclaim
+children when the parent exits. Do not claim UI Stop always runs cleanup hooks.
