@@ -223,6 +223,69 @@ def main() -> int:
         _assert_true("clear-stale ok", cleared.get("cleared") is True)
         _pass(results, "clear-stale removes terminal active_run.json")
 
+        # O. central spawn API: helper spawn registers; cancelled spawn fails closed
+        spawned_argv: list[list[str]] = []
+
+        class _FakeProc:
+            def __init__(self, pid: int):
+                self.pid = pid
+
+        next_pid = {"n": 7000}
+
+        def fake_popen(argv, **_kwargs):  # noqa: ANN001
+            spawned_argv.append(list(argv))
+            next_pid["n"] += 1
+            return _FakeProc(next_pid["n"])
+
+        life8 = OperatorLifecycle(
+            state_dir=Path(td) / "operator8",
+            chrome_user_data_dir=chrome_dir,
+            kill_fn=kill_fn,
+            list_chrome_pids_fn=lambda _p: [],
+            enable_job_containment=False,
+            popen_fn=fake_popen,
+        )
+        run8 = life8.begin(checkpoint_label="SPAWN_API")
+        helper = life8.spawn_owned_helper(
+            run8.operator_run_id,
+            [sys.executable, "-c", "pass"],
+            kind="helper",
+            contain=True,
+        )
+        _assert_true("O helper pid", helper.pid == 7001)
+        _assert_true("O helper kind", helper.kind == "helper")
+        _assert_true("O helper not contained when disabled", helper.contained is False)
+        chrome_spawn = life8.spawn_owned_helper(
+            run8.operator_run_id,
+            [sys.executable, "-c", "chrome"],
+            kind="chrome",
+            contain=True,  # forced False for kind=chrome
+        )
+        _assert_true("O chrome never job-contained", chrome_spawn.contained is False)
+        _assert_true("O chrome pid tracked", chrome_spawn.pid in life8.status()["chrome_pids"])
+        life8.stop()
+        blocked = False
+        try:
+            life8.spawn_owned_helper(
+                run8.operator_run_id, [sys.executable, "-c", "nope"], kind="helper"
+            )
+        except OperatorCancelled:
+            blocked = True
+        _assert_true("O spawn after cancel fails closed", blocked)
+        alias = OperatorLifecycle(
+            state_dir=Path(td) / "operator8b",
+            enable_job_containment=False,
+            popen_fn=fake_popen,
+            list_chrome_pids_fn=lambda _p: [],
+            kill_fn=kill_fn,
+        )
+        run_alias = alias.begin()
+        via_alias = alias.spawn_operator_process(
+            run_alias.operator_run_id, [sys.executable, "-c", "alias"]
+        )
+        _assert_true("O spawn_operator_process alias works", via_alias.pid > 0)
+        _pass(results, "O. spawn_owned_helper / spawn_operator_process central API")
+
     print(f"\nsimulate_colab_operator_lifecycle: {len(results)} checks passed")
     return 0
 

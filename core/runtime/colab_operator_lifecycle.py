@@ -90,9 +90,31 @@ def default_chrome_user_data_dir() -> Path:
 @dataclass
 class ChildProcRecord:
     pid: int
-    kind: str  # helper | chrome | other
+    kind: str  # helper | chrome | chrome_launcher | other
     argv0: str = ""
+    job_contained: bool = False
     registered_at: str = field(default_factory=_utc_now_iso)
+
+
+@dataclass
+class SpawnResult:
+    """Metadata from spawn_owned_helper / spawn_operator_process."""
+
+    pid: int
+    popen: Any  # subprocess.Popen
+    contained: bool
+    kind: str
+    argv: list[str]
+    run_id: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "pid": self.pid,
+            "contained": self.contained,
+            "kind": self.kind,
+            "argv": list(self.argv),
+            "run_id": self.run_id,
+        }
 
 
 @dataclass
@@ -167,6 +189,8 @@ class OperatorLifecycle:
         kill_fn: Callable[[int], bool] | None = None,
         list_chrome_pids_fn: Callable[[Path], list[int]] | None = None,
         clock: Callable[[], float] | None = None,
+        enable_job_containment: bool = True,
+        popen_fn: Callable[..., Any] | None = None,
     ):
         self.state_dir = Path(state_dir) if state_dir else default_operator_state_dir()
         self.chrome_user_data_dir = (
@@ -175,6 +199,9 @@ class OperatorLifecycle:
         self._kill_fn = kill_fn or _default_kill_pid
         self._list_chrome_pids_fn = list_chrome_pids_fn or list_dedicated_chrome_pids
         self._clock = clock or time.monotonic
+        self._enable_job_containment = bool(enable_job_containment)
+        self._popen_fn = popen_fn or subprocess.Popen
+        self._job: Any = None  # WindowsJobContainment | None (process-local)
         self.state_dir.mkdir(parents=True, exist_ok=True)
         (self.state_dir / self.HISTORY_DIR).mkdir(parents=True, exist_ok=True)
 
@@ -277,18 +304,108 @@ class OperatorLifecycle:
         *,
         kind: str = "helper",
         argv0: str = "",
+        job_contained: bool = False,
     ) -> OperatorRunState:
         state = self._require_run(run_id)
         self._fail_if_not_owner(state)
         if not self.may_spawn_helpers(run_id):
             raise OperatorCancelled(run_id, reason="cannot_register_child_while_cancelled")
-        rec = ChildProcRecord(pid=int(pid), kind=kind, argv0=argv0)
+        rec = ChildProcRecord(
+            pid=int(pid), kind=kind, argv0=argv0, job_contained=bool(job_contained)
+        )
         state.children.append(asdict(rec))
         if kind == "chrome":
             if int(pid) not in state.chrome_pids:
                 state.chrome_pids.append(int(pid))
         self._write_active(state)
         return state
+
+    def _ensure_job(self) -> Any:
+        """Process-local Job Object; closed when this Python process exits."""
+        if not self._enable_job_containment:
+            return None
+        if self._job is not None:
+            return self._job
+        try:
+            from core.runtime.operator_job_containment import try_create_job
+
+            self._job = try_create_job(name=f"AIStudioOperatorJob_{os.getpid()}")
+        except Exception:
+            self._job = None
+        return self._job
+
+    def spawn_owned_helper(
+        self,
+        run_id: str,
+        argv: list[str],
+        *,
+        kind: str = "helper",
+        contain: bool | None = None,
+        cwd: str | Path | None = None,
+        env: dict[str, str] | None = None,
+    ) -> SpawnResult:
+        """Central operator child-process launcher (only supported spawn path).
+
+        - Requires valid RUNNING run_id (fail closed if cancelled/stale).
+        - Registers PID in lifecycle state.
+        - On Windows, assigns transient helpers into a Job Object with
+          JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE when ``contain`` is True.
+        - Dedicated Chrome browser processes must use contain=False (kind=chrome)
+          so default stop does not kill an already-open operator browser via
+          parent-death job closure.
+        """
+        self.assert_run_valid(run_id)
+        if not self.may_spawn_helpers(run_id):
+            raise OperatorCancelled(run_id, reason="cannot_spawn_while_cancelled")
+        if not argv:
+            raise ValueError("argv must be non-empty")
+
+        # Policy: never put persistent dedicated Chrome into kill-on-close job
+        if kind == "chrome":
+            use_contain = False
+        elif contain is None:
+            use_contain = kind in {"helper", "chrome_launcher", "other"}
+        else:
+            use_contain = bool(contain)
+
+        popen_kwargs: dict[str, Any] = {}
+        if cwd is not None:
+            popen_kwargs["cwd"] = str(cwd)
+        if env is not None:
+            popen_kwargs["env"] = env
+
+        proc = self._popen_fn(list(argv), **popen_kwargs)
+        pid = int(proc.pid)
+        contained = False
+        if use_contain:
+            job = self._ensure_job()
+            if job is not None:
+                contained = bool(job.assign_pid(pid))
+
+        self.register_child(
+            run_id,
+            pid,
+            kind=kind,
+            argv0=str(argv[0]),
+            job_contained=contained,
+        )
+        return SpawnResult(
+            pid=pid,
+            popen=proc,
+            contained=contained,
+            kind=kind,
+            argv=list(argv),
+            run_id=run_id,
+        )
+
+    # Alias required by operator contract
+    def spawn_operator_process(
+        self,
+        run_id: str,
+        argv: list[str],
+        **kwargs: Any,
+    ) -> SpawnResult:
+        return self.spawn_owned_helper(run_id, argv, **kwargs)
 
     def may_spawn_helpers(self, run_id: str) -> bool:
         state = self._read_active()
@@ -640,6 +757,23 @@ def launch_operator_chrome_allowed(lifecycle: OperatorLifecycle, run_id: str) ->
         return lifecycle.may_launch_chrome(run_id)
     except OperatorCancelled:
         return False
+
+
+def spawn_owned_helper(
+    run_id: str,
+    argv: list[str],
+    **kwargs: Any,
+) -> SpawnResult:
+    """Module-level convenience wrapper around OperatorLifecycle.spawn_owned_helper."""
+    return OperatorLifecycle().spawn_owned_helper(run_id, argv, **kwargs)
+
+
+def spawn_operator_process(
+    run_id: str,
+    argv: list[str],
+    **kwargs: Any,
+) -> SpawnResult:
+    return spawn_owned_helper(run_id, argv, **kwargs)
 
 
 # ---------------------------------------------------------------------------

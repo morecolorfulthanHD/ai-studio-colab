@@ -210,6 +210,7 @@ python core/scripts/colab_operator_control.py stop
 python core/scripts/colab_operator_control.py stop --close-browser
 python core/scripts/colab_operator_control.py clear-stale
 python core/scripts/simulate_colab_operator_lifecycle.py
+python core/scripts/simulate_operator_job_containment.py
 ```
 
 **User stop/pause phrases** (`stop`, `pause`, `stop running`, …) ⇒ immediately
@@ -220,12 +221,19 @@ Default `stop` prevents Chrome relaunch and kills owned helper processes; it doe
 Never kill normal/default-profile Chrome. Never disconnect Colab / Full Reset /
 delete Drive / kill remote ComfyUI or OutputWatcher as part of local cancellation.
 
+All operator-owned local children must launch via
+`OperatorLifecycle.spawn_owned_helper` / `spawn_operator_process` (central API).
+Transient helpers use Windows Job Object `KILL_ON_JOB_CLOSE` when `contain=True`.
+Dedicated Chrome uses `kind=chrome` with containment forced off so parent death /
+normal `stop` does not tear down an already-open operator browser.
+
 Dedicated Chrome launch must go through
-`python core/scripts/launch_operator_chrome.py --run-id <id>` (gated).
+`python core/scripts/launch_operator_chrome.py --run-id <id>` (gated
+`launch_chrome_for_run`).
 
 **Cursor UI Stop limitation:** if Cursor kills the agent abruptly, Python `atexit`
-hooks may not run. Mitigation: cooperative cancellation + PID registry + optional
-Windows Job Object `KILL_ON_JOB_CLOSE` for spawned children; helpers self-exit when
+hooks may not run. Mitigation: cooperative cancellation + PID registry + Windows
+Job Object `KILL_ON_JOB_CLOSE` for contained helpers; helpers self-exit when
 their `run_id` is cancelled or superseded.
 
 ---
@@ -261,6 +269,7 @@ python core/scripts/report_colab_operator_state.py --state DISCONNECTED
 python core/scripts/simulate_colab_operator.py
 python core/scripts/simulate_colab_cdp_cells.py
 python core/scripts/simulate_colab_operator_lifecycle.py
+python core/scripts/simulate_operator_job_containment.py
 python core/scripts/colab_operator_control.py status
 ```
 
