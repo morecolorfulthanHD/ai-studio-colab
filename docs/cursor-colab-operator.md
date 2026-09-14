@@ -49,9 +49,39 @@ Reason from **visible labels/text**, not fixed pixel coordinates.
 
 ## Normal browser sequence
 
+### 0. BEGIN OPERATOR RUN (mandatory)
+
+Every live operator session starts here:
+
+```bash
+python core/scripts/colab_operator_control.py begin --checkpoint "<label>"
+```
+
+Capture `operator_run_id` from the JSON output. No Chrome launch, checkpoint
+helper, probe, monitor, or recovery helper may run before a valid **RUNNING**
+`operator_run_id` exists.
+
+Dedicated Chrome:
+
+```bash
+python core/scripts/launch_operator_chrome.py --run-id <current-id>
+```
+
+Long-running helpers (never direct Agent-terminal `_checkpoint_*` / `_probe_*`):
+
+```bash
+python core/scripts/colab_operator_control.py run-helper \
+  --run-id <current-id> \
+  -- \
+  python core/scripts/<helper>.py ...
+```
+
+`run-helper` must remain alive as the Job Object containment parent for the
+helper's full lifetime (do not spawn-and-exit).
+
 ### A. OPEN
 
-1. Navigate to canonical Colab URL from config.
+1. Navigate to canonical Colab URL from config (via gated Chrome launcher above).
 2. Confirm notebook identity markers.
 3. State → `COLAB_OPEN`.
 
@@ -206,15 +236,31 @@ Machine-local only (`%LOCALAPPDATA%\AI_Studio\operator\` on Windows).
 ```bash
 python core/scripts/colab_operator_control.py begin --checkpoint "LABEL"
 python core/scripts/colab_operator_control.py status
+python core/scripts/colab_operator_control.py run-helper --run-id <id> -- python core/scripts/<helper>.py
 python core/scripts/colab_operator_control.py stop
 python core/scripts/colab_operator_control.py stop --close-browser
 python core/scripts/colab_operator_control.py clear-stale
 python core/scripts/simulate_colab_operator_lifecycle.py
 python core/scripts/simulate_operator_job_containment.py
+python core/scripts/simulate_operator_run_helper_cli.py
 ```
 
+**Begin is mandatory** before any Chrome / helper / probe / monitor work.
+Capture `operator_run_id` from `begin` JSON.
+
+**Banned for live operator work (direct Agent terminal):**
+`_checkpoint_*.py`, `_probe_*.py`, `_diag_*.py`, `_status_*.py`, and other
+long-running operator helpers. Use `run-helper` instead. Routine short commands
+(`git status`, `git rev-parse`, lifecycle `status`) may run directly if they do
+not spawn persistent/background work.
+
 **User stop/pause phrases** (`stop`, `pause`, `stop running`, …) ⇒ immediately
-`stop`, verify CANCELLED/idle, do **not** auto-resume or relaunch Chrome.
+`stop` (preferred while the agent is alive), verify CANCELLED/idle, do **not**
+auto-resume or relaunch Chrome. Contained `run-helper` parents notice
+cancellation and exit CANCELLED; direct helper Agent terminals should no longer
+exist outside those parents. If Cursor UI Stop abruptly kills a `run-helper`
+parent, Windows Job Object `KILL_ON_JOB_CLOSE` should reclaim that parent's
+contained transient helpers.
 
 Default `stop` prevents Chrome relaunch and kills owned helper processes; it does
 **not** close an already-open dedicated Chrome window unless `--close-browser`.
@@ -222,19 +268,21 @@ Never kill normal/default-profile Chrome. Never disconnect Colab / Full Reset /
 delete Drive / kill remote ComfyUI or OutputWatcher as part of local cancellation.
 
 All operator-owned local children must launch via
-`OperatorLifecycle.spawn_owned_helper` / `spawn_operator_process` (central API).
+`OperatorLifecycle.spawn_owned_helper` / `spawn_operator_process` (central API),
+normally through `colab_operator_control.py run-helper` for Cursor sessions.
 Transient helpers use Windows Job Object `KILL_ON_JOB_CLOSE` when `contain=True`.
 Dedicated Chrome uses `kind=chrome` with containment forced off so parent death /
 normal `stop` does not tear down an already-open operator browser.
 
 Dedicated Chrome launch must go through
 `python core/scripts/launch_operator_chrome.py --run-id <id>` (gated
-`launch_chrome_for_run`).
+`launch_chrome_for_run`). `--run-id` is required.
 
 **Cursor UI Stop limitation:** if Cursor kills the agent abruptly, Python `atexit`
 hooks may not run. Mitigation: cooperative cancellation + PID registry + Windows
-Job Object `KILL_ON_JOB_CLOSE` for contained helpers; helpers self-exit when
-their `run_id` is cancelled or superseded.
+Job Object `KILL_ON_JOB_CLOSE` for contained helpers owned by a living
+`run-helper` parent; helpers self-exit when their `run_id` is cancelled or
+superseded.
 
 ---
 
@@ -270,6 +318,7 @@ python core/scripts/simulate_colab_operator.py
 python core/scripts/simulate_colab_cdp_cells.py
 python core/scripts/simulate_colab_operator_lifecycle.py
 python core/scripts/simulate_operator_job_containment.py
+python core/scripts/simulate_operator_run_helper_cli.py
 python core/scripts/colab_operator_control.py status
 ```
 

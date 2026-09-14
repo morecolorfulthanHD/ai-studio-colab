@@ -9,23 +9,63 @@ When the user asks to **run live validation**, **operate Colab**, **Full Launch*
 
 ## Do this
 
-1. Use browser automation (semantic labels/text — not brittle fixed coordinates).
-2. Open the **canonical** notebook from config  
+1. **Begin a mandatory operator run** (capture `operator_run_id` from JSON):
+   ```
+   python core/scripts/colab_operator_control.py begin --checkpoint "<label>"
+   ```
+   No Chrome launch / checkpoint helper / probe / monitor / recovery helper may
+   run before a valid **RUNNING** `operator_run_id` exists.
+2. Use browser automation (semantic labels/text — not brittle fixed coordinates).
+3. Launch dedicated operator Chrome **only** via:
+   ```
+   python core/scripts/launch_operator_chrome.py --run-id <current-id>
+   ```
+   Never spawn Chrome directly as a subprocess outside this gated launcher.
+4. Open the **canonical** notebook from config  
    `configs/operator/colab_operator.json` → `canonical_notebook.colab_url`  
    (GitHub-backed `AI_Studio_Control_Panel_Colab.ipynb` — never treat a Drive copy as source of truth).
-3. Connect / recover runtime when disconnected (auto reconnect click is allowed).  
+5. Connect / recover runtime when disconnected (auto reconnect click is allowed).  
    **Clicking Connect does not mean CONNECTED** — wait for connected UI evidence (Connected / RAM / Disk), then continue.
-4. Sync repo (Repository Sync); prefer `origin/main`.
-5. Run all / required startup cells until the AI Studio control panel is ready.
-6. Full Launch mode **full**; wait for ComfyUI URL + healthy OutputWatcher.
-7. Execute the **requested** live QA via the nested menu path below.
-8. After **every** menu selection: inspect visible menu title/text, verify the expected submenu, only then continue. If the expected title is missing → **STOP / reassess** (do not blindly type the next number).
-9. Collect visible logs, cell output, and QA report paths yourself — do not ask the user to paste routine terminal output.
-10. Stop only for auth/consent, ambiguous GPU/billing changes, missing submenu title, `HUMAN_REVIEW_REQUIRED`, hard failures, or uncertain destructive actions.
-11. Report: runtime state, repo SHA, launch result, QA result, human action needed?
+6. Sync repo (Repository Sync); prefer `origin/main`.
+7. Run all / required startup cells until the AI Studio control panel is ready.
+8. Full Launch mode **full**; wait for ComfyUI URL + healthy OutputWatcher.
+9. Execute the **requested** live QA via the nested menu path below.
+10. After **every** menu selection: inspect visible menu title/text, verify the expected submenu, only then continue. If the expected title is missing → **STOP / reassess** (do not blindly type the next number).
+11. Collect visible logs, cell output, and QA report paths yourself — do not ask the user to paste routine terminal output.
+12. Stop only for auth/consent, ambiguous GPU/billing changes, missing submenu title, `HUMAN_REVIEW_REQUIRED`, hard failures, or uncertain destructive actions.
+13. Report: runtime state, repo SHA, launch result, QA result, human action needed?
 
 Follow the full runbook: `docs/cursor-colab-operator.md`.  
 Use `navigation_sequence(...)` from `core/runtime/colab_operator.py` when available.
+
+## Contained helpers (mandatory)
+
+For live operator work, Cursor **MUST NOT** directly execute long-running operator
+helpers in an Agent terminal, including:
+
+- `python core/scripts/_checkpoint_*.py`
+- `python core/scripts/_probe_*.py`
+- `python core/scripts/_diag_*.py`
+- `python core/scripts/_status_*.py`
+- other long-running operator helper / monitor / recovery scripts
+
+They **must** run through the contained helper surface (parent stays alive):
+
+```
+python core/scripts/colab_operator_control.py run-helper \
+  --run-id <current-id> \
+  -- \
+  python core/scripts/<helper>.py ...
+```
+
+`run-helper` validates the run is current/RUNNING, launches via
+`spawn_owned_helper(..., kind="helper", contain=True)`, and **keeps the
+containment-owning parent alive** while the child runs. Never detach a transient
+helper outside the Job Object (do not spawn-and-exit wrappers).
+
+Routine short commands (`git status`, `git rev-parse`,
+`colab_operator_control.py status`) may run directly if they do **not** spawn
+persistent/background work.
 
 ## Menu quick map (nested — do not flatten)
 
@@ -58,6 +98,8 @@ When the originating user request **explicitly** asked Cursor to RUN the live pr
 - Silently continue past `HUMAN_REVIEW_REQUIRED` or license/asset fail-closed gates.
 - Mark runtime CONNECTED solely because Connect was clicked.
 - Bypass Google login / 2FA / Drive mount / paid GPU consent / CAPTCHA — **ask the user**, then resume.
+- Launch Chrome or long-running helpers before `begin` returns a RUNNING `operator_run_id`.
+- Run `_checkpoint_*` / `_probe_*` / similar helpers directly in an Agent terminal.
 
 ## Operator stop / pause (mandatory)
 
@@ -65,9 +107,13 @@ When the user says **stop**, **stop running**, **pause**, **stop the operator**,
 **pause for the night**, **don't keep running**, or equivalent:
 
 1. Treat it as an **immediate operator cancellation** (not a soft ignore).
-2. Run: `python core/scripts/colab_operator_control.py stop`
+2. Prefer explicit stop while the agent is still alive:
+   `python core/scripts/colab_operator_control.py stop`
 3. Verify status is `CANCELLED` / idle via `... status`.
-4. Confirm no owned `_checkpoint_*` / `_probe_*` / helper processes remain.
+4. Contained helpers launched via `run-helper` should exit promptly (stop kills
+   registered helpers; `run-helper` notices cancellation and returns CANCELLED).
+   Direct long-running helper Agent terminals should no longer exist outside
+   contained `run-helper` parents.
 5. **Do not** restart work, relaunch dedicated Chrome, or spawn recovery helpers.
 6. **Do not** disconnect/delete the Colab runtime, Full Reset, or delete Drive data.
 
@@ -78,6 +124,8 @@ Lifecycle module: `core.runtime.colab_operator_lifecycle`
 Local state: `%LOCALAPPDATA%\AI_Studio\operator\` (not Drive).
 
 **Limitation:** Cursor’s UI Stop may kill the agent without running Python hooks.
-Defensive design: helpers must heartbeat/check run validity; Chrome relaunch requires
-an explicitly RUNNING valid `operator_run_id`; Windows Job Objects may reclaim
-children when the parent exits. Do not claim UI Stop always runs cleanup hooks.
+When UI Stop abruptly kills a `run-helper` containment parent, Windows Job Object
+`KILL_ON_JOB_CLOSE` should reclaim that parent's contained transient helpers.
+Chrome relaunch remains blocked by run state (`launch_operator_chrome.py --run-id`
+requires a valid RUNNING run). Existing dedicated Chrome stays open unless
+`--close-browser` was requested. Do not claim UI Stop always runs cleanup hooks.
