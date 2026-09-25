@@ -33,15 +33,20 @@
       "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/checkpoints/sd_xl_base_1.0.safetensors",
       "required_for": [
         "instantid_sdxl_benchmark",
+        "ipadapter_plus_face_sdxl_benchmark",
         "identity_architecture_benchmark"
       ],
       "status": "planned",
       "filename": "sd_xl_base_1.0.safetensors",
       "install_policy": "manual_only",
-      "verification_state": "UNVERIFIED_MANUAL_ASSET",
+      "verification_state": "PENDING_FIRST_DOWNLOAD_PIN",
+      "pin_state": "PENDING_FIRST_DOWNLOAD_PIN",
+      "expected_sha256": null,
+      "expected_size_bytes": null,
       "source_url": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0",
-      "license_notes": "CreativeML Open RAIL++-M — restricted; not unconditional commercial ACCEPTABLE.",
-      "notes": "SDXL base for InstantID architecture benchmark. Hash/size not pinned in-repo yet → UNVERIFIED_MANUAL_ASSET (live readiness fail closed until hashes recorded)."
+      "revision": "main",
+      "license_notes": "CreativeML Open RAIL++-M. PATH C (IP-Adapter Plus Face) treats commercial use OK; InstantID license file still lists RESTRICTED. Hash not invented — controlled first-download→hash→pin.",
+      "notes": "SDXL base for InstantID + IP-Adapter Plus Face. Hash/size not pinned in-repo → PENDING_FIRST_DOWNLOAD_PIN (live readiness fail closed until operator records verified SHA256/size)."
     },
     {
       "name": "sdxl_refiner",
@@ -372,6 +377,55 @@
         {"filename": "scrfd_10g_bnkps.onnx", "expected_sha256": null, "expected_size_bytes": null}
       ],
       "license_notes": "InsightFace research/non-commercial typical terms — BLOCKED_FOR_COMMERCIAL until counsel ACCEPTABLE."
+    },
+    {
+      "name": "ipadapter_plus_face_sdxl_vit_h",
+      "category": "ipadapter",
+      "intended_path": "assets/ipadapter/ip-adapter-plus-face_sdxl_vit-h.safetensors",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/ipadapter/ip-adapter-plus-face_sdxl_vit-h.safetensors",
+      "required_for": [
+        "ipadapter_plus_face_sdxl_benchmark",
+        "identity_architecture_benchmark"
+      ],
+      "status": "planned",
+      "filename": "ip-adapter-plus-face_sdxl_vit-h.safetensors",
+      "install_policy": "manual_only",
+      "source_url": "https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter-plus-face_sdxl_vit-h.safetensors",
+      "source_repo": "https://huggingface.co/h94/IP-Adapter",
+      "source_path": "sdxl_models/ip-adapter-plus-face_sdxl_vit-h.safetensors",
+      "revision": "main",
+      "expected_sha256": "677ad8860204f7d0bfba12d29e6c31ded9beefdf3e4bbd102518357d31a292c1",
+      "expected_size_bytes": 847517512,
+      "pin_state": "PUBLISHED_UPSTREAM_SHA",
+      "verification_state": "HASH_DEFINED",
+      "license": "apache-2.0",
+      "license_notes": "h94/IP-Adapter Apache-2.0. Published Hugging Face LFS SHA256 pinned; no download in foundation checkpoint. Live readiness still requires file present + hash verify.",
+      "provenance": "Hugging Face LFS pointer oid sha256 for sdxl_models/ip-adapter-plus-face_sdxl_vit-h.safetensors (h94/IP-Adapter).",
+      "notes": "PATH C CLIP NON-FaceID Plus Face SDXL. Not FaceID. Not InstantID. Controlled acquire→verify later; do not invent alternate hashes."
+    },
+    {
+      "name": "clip_vision_vit_h_openclip",
+      "category": "clip",
+      "intended_path": "assets/clip_vision/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
+      "runtime_path": "/content/drive/MyDrive/AI_Studio/models/shared/clip_vision/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
+      "required_for": [
+        "ipadapter_plus_face_sdxl_benchmark",
+        "identity_architecture_benchmark"
+      ],
+      "status": "planned",
+      "filename": "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
+      "install_policy": "manual_only",
+      "source_url": "https://huggingface.co/h94/IP-Adapter/resolve/main/models/image_encoder/model.safetensors",
+      "source_repo": "https://huggingface.co/h94/IP-Adapter",
+      "source_path": "models/image_encoder/model.safetensors",
+      "revision": "main",
+      "expected_sha256": "6ca9667da1ca9e0b0f75e46bb030f7e011f44f86cbfb8d5a36590fcd7507b030",
+      "expected_size_bytes": 2528373448,
+      "pin_state": "PUBLISHED_UPSTREAM_SHA",
+      "verification_state": "HASH_DEFINED",
+      "license_notes": "OpenCLIP ViT-H-14 encoder used by IP-Adapter vit-h models. Same bytes as clip_vision_sd15 FaceID path encoder filename; NON-FaceID use here.",
+      "provenance": "Prior Package 4.12 FaceID registry pin for CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors reused for CLIP Plus Face (not FaceID).",
+      "notes": "OpenCLIP ViT-H for IP-Adapter Plus Face SDXL. Fail closed until file present + hash verify. No download in foundation checkpoint."
     }
   ]
 }

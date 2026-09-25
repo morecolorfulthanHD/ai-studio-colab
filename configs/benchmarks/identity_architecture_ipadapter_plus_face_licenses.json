@@ -1,0 +1,50 @@
+{
+  "package": "4.12.3",
+  "architecture": "ipadapter_plus_face_sdxl",
+  "notes": [
+    "PATH C prototype license gate — zero paid model/checkpoint licensing.",
+    "Promotion requires every non-FORBIDDEN component status == ACCEPTABLE.",
+    "SDXL base commercial OK for this path (not InsightFace-blocked).",
+    "Statuses: ACCEPTABLE | RESTRICTED | REVIEW_REQUIRED | BLOCKED_FOR_COMMERCIAL | FORBIDDEN",
+    "InsightFace / FaceID / InstantID / antelope / buffalo must remain absent or FORBIDDEN."
+  ],
+  "components": {
+    "ComfyUI_IPAdapter_plus_node": {
+      "status": "REVIEW_REQUIRED",
+      "source": "https://github.com/cubiq/ComfyUI_IPAdapter_plus",
+      "pinned_commit": "a0f451a5113cf9becb0847b92884cb10cbdec0ef",
+      "notes": "Confirm LICENSE at pinned checkout before ACCEPTABLE."
+    },
+    "ipadapter_plus_face_sdxl_vit_h": {
+      "status": "REVIEW_REQUIRED",
+      "source": "https://huggingface.co/h94/IP-Adapter",
+      "license": "apache-2.0",
+      "notes": "h94/IP-Adapter Plus Face SDXL ViT-H — Apache-2.0 upstream; confirm before ACCEPTABLE."
+    },
+    "clip_vision_vit_h_openclip": {
+      "status": "REVIEW_REQUIRED",
+      "source": "https://huggingface.co/h94/IP-Adapter",
+      "notes": "OpenCLIP ViT-H-14 encoder used by IP-Adapter vit-h models — confirm permissive terms."
+    },
+    "sdxl_base": {
+      "status": "ACCEPTABLE",
+      "commercially_ok": true,
+      "source": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0",
+      "notes": "PATH C: SDXL base commercial use treated OK for this prototype (Open RAIL++-M acknowledged)."
+    },
+    "insightface_antelopev2": {
+      "status": "FORBIDDEN",
+      "notes": "Must not appear on IP-Adapter Plus Face CLIP path."
+    },
+    "ipadapter_faceid": {
+      "status": "FORBIDDEN",
+      "notes": "FaceID rejected — NON-FaceID CLIP path only."
+    },
+    "instantid": {
+      "status": "FORBIDDEN",
+      "notes": "InstantID is a separate blocked architecture; not used here."
+    }
+  },
+  "overall_status": "REVIEW_REQUIRED",
+  "promotion_allowed": false
+}

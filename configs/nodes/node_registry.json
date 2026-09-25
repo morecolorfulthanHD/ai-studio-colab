@@ -77,11 +77,13 @@
       "category": "reference",
       "required_for": [
         "ipadapter_faceid_sd15_benchmark",
-        "identity_benchmark"
+        "ipadapter_plus_face_sdxl_benchmark",
+        "identity_benchmark",
+        "identity_architecture_benchmark"
       ],
       "install_mode": "planned",
       "pinned_commit": "a0f451a5113cf9becb0847b92884cb10cbdec0ef",
-      "notes": "Package 4.12 approved IPAdapter FaceID pin (FACEID PLUS V2 SD1.5). Confirm live ComfyUI import at Case C; do not auto-download FaceID/InsightFace weights. Not a production identity default."
+      "notes": "Package 4.12 FaceID pin retained for rejected FaceID path. Also required for PATH C IP-Adapter Plus Face SDXL CLIP NON-FaceID prototype (same node pack; FaceID loaders forbidden on Plus Face graph)."
     },
     {
       "name": "ComfyUI_InstantID",

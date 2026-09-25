@@ -1,27 +1,54 @@
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "label": "identity_architecture_benchmark_manifest",
   "package": "4.12.3",
   "notes": [
-    "Package 4.12.3 production identity architecture investigation (InstantID SDXL only).",
+    "Package 4.12.3 identity architecture investigation — pluggable architectures.",
+    "InstantID SDXL remains BLOCKED_FOR_COMMERCIAL (InsightFace); option 11 blocked; promotion_allowed=false.",
+    "PATH C prototype: ipadapter_plus_face_sdxl (CLIP NON-FaceID) first; PhotoMaker V1 deferred.",
     "ReActor and SD1.5 FaceID are REJECTED_FOR_PRODUCTION_IDENTITY — do not retune.",
     "faceid_conditioning_sweep: FAILED_FIRST_SWEEP — preserved in identity_benchmark_tuning.jsonl.",
     "Prepare/open is plumbing only; live GPU QA + automated visual gates required.",
     "No automatic promotion to Package 4.13.",
-    "No auto-download of restricted weights."
+    "No auto-download of restricted weights in foundation checkpoint."
   ],
   "architecture_status": {
     "reactor_faceswap_benchmark": "REJECTED_FOR_PRODUCTION_IDENTITY",
     "ipadapter_faceid_sd15_benchmark": "REJECTED_FOR_PRODUCTION_IDENTITY",
     "faceid_conditioning_sweep": "FAILED_FIRST_SWEEP",
-    "instantid_sdxl_benchmark": "INVESTIGATION"
+    "instantid_sdxl_benchmark": "BLOCKED_FOR_COMMERCIAL",
+    "ipadapter_plus_face_sdxl_benchmark": "PROTOTYPE"
   },
-  "live_candidate": "instantid_sdxl_benchmark",
-  "architecture": "instantid_sdxl",
+  "architectures": {
+    "instantid_sdxl": {
+      "architecture_id": "instantid_sdxl",
+      "candidate": "instantid_sdxl_benchmark",
+      "status": "BLOCKED_FOR_COMMERCIAL",
+      "promotion_allowed": false,
+      "production_menu_allowed": false,
+      "workflow": "reference/identity_instantid_sdxl_benchmark"
+    },
+    "ipadapter_plus_face_sdxl": {
+      "architecture_id": "ipadapter_plus_face_sdxl",
+      "candidate": "ipadapter_plus_face_sdxl_benchmark",
+      "status": "PROTOTYPE",
+      "promotion_allowed": false,
+      "production_menu_allowed": false,
+      "workflow": "reference/identity_ipadapter_plus_face_sdxl_benchmark",
+      "face_crop_policy": "bucket_a_deterministic_opencv_or_prepimage"
+    }
+  },
+  "live_candidate": "ipadapter_plus_face_sdxl_benchmark",
+  "architecture": "ipadapter_plus_face_sdxl",
+  "blocked_candidate": "instantid_sdxl_benchmark",
   "secondary_candidates": {
     "pulid_sdxl": {
       "status": "investigated_not_selected",
       "reason": "PuLID SDXL investigated; not added as fragile second live candidate for 4.12.3."
+    },
+    "photomaker_v1": {
+      "status": "deferred",
+      "reason": "Accepted order: IP-Adapter Plus Face first; PhotoMaker V1 later — not implemented in this checkpoint."
     }
   },
   "scenarios": [
@@ -31,23 +58,46 @@
     {"id": "S4_wardrobe_environment", "role": "scene_composition_decisive", "width": 1024, "height": 768}
   ],
   "s4_resolution_choice": "1024x768",
-  "required_models": [
-    "sdxl_base",
-    "instantid_ip_adapter",
-    "instantid_controlnet",
-    "insightface_antelopev2"
-  ],
-  "required_nodes": [
-    {
-      "name": "ComfyUI_InstantID",
-      "repo_url": "https://github.com/cubiq/ComfyUI_InstantID",
-      "pinned_commit": "72495e806bc2ab9c41581e15ccaa1bcf83c477e8"
+  "required_models_by_architecture": {
+    "instantid_sdxl": [
+      "sdxl_base",
+      "instantid_ip_adapter",
+      "instantid_controlnet",
+      "insightface_antelopev2"
+    ],
+    "ipadapter_plus_face_sdxl": [
+      "sdxl_base",
+      "ipadapter_plus_face_sdxl_vit_h",
+      "clip_vision_vit_h_openclip"
+    ]
+  },
+  "required_nodes_by_architecture": {
+    "instantid_sdxl": [
+      {
+        "name": "ComfyUI_InstantID",
+        "repo_url": "https://github.com/cubiq/ComfyUI_InstantID",
+        "pinned_commit": "72495e806bc2ab9c41581e15ccaa1bcf83c477e8"
+      }
+    ],
+    "ipadapter_plus_face_sdxl": [
+      {
+        "name": "ComfyUI_IPAdapter_plus",
+        "repo_url": "https://github.com/cubiq/ComfyUI_IPAdapter_plus.git",
+        "pinned_commit": "a0f451a5113cf9becb0847b92884cb10cbdec0ef"
+      }
+    ]
+  },
+  "workflows": {
+    "instantid_sdxl": {
+      "identifier": "reference/identity_instantid_sdxl_benchmark",
+      "path": "workflows/reference/identity_instantid_sdxl_benchmark/workflow.json",
+      "hash": "29189cb885fda501a2a0c56d159a76498f8b2428c09626f78236cf1d15ff7d51"
+    },
+    "ipadapter_plus_face_sdxl": {
+      "identifier": "reference/identity_ipadapter_plus_face_sdxl_benchmark",
+      "path": "workflows/reference/identity_ipadapter_plus_face_sdxl_benchmark/workflow.json",
+      "hash": "2bf0670f958e7b8e9a58d30c67c034133cd361ad400ef4be28519b573b0a1ea6"
     }
-  ],
-  "workflow": {
-    "identifier": "reference/identity_instantid_sdxl_benchmark",
-    "path": "workflows/reference/identity_instantid_sdxl_benchmark/workflow.json",
-    "hash": "29189cb885fda501a2a0c56d159a76498f8b2428c09626f78236cf1d15ff7d51"
   },
   "ledger": "logs/identity_architecture_benchmark.jsonl",
   "live_character_reuse": {

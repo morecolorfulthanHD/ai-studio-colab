@@ -116,6 +116,7 @@ def collect_files() -> list[Path]:
         "simulate_package4111_seed_precision.py",
         "simulate_package412_character_identity.py",
         "simulate_package4123_identity_architecture.py",
+        "simulate_package4123_ipadapter_plus_face_foundation.py",
         "qa_package4123.py",
         "prepare_identity_architecture_benchmark.py",
         "run_identity_architecture_benchmark.py",

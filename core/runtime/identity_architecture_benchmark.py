@@ -51,7 +51,8 @@ ARCHITECTURE_STATUS: dict[str, str] = {
     "reactor_faceswap_benchmark": "REJECTED_FOR_PRODUCTION_IDENTITY",
     "ipadapter_faceid_sd15_benchmark": "REJECTED_FOR_PRODUCTION_IDENTITY",
     "faceid_conditioning_sweep": "FAILED_FIRST_SWEEP",
-    "instantid_sdxl_benchmark": "INVESTIGATION",
+    "instantid_sdxl_benchmark": "BLOCKED_FOR_COMMERCIAL",
+    "ipadapter_plus_face_sdxl_benchmark": "PROTOTYPE",
 }
 
 ARCHITECTURE_SCENARIO_PROMPTS: dict[str, str] = {
@@ -109,6 +110,15 @@ BENCHMARK_WORKFLOW_IDENTIFIERS = frozenset(
     {
         "reference/identity_instantid_sdxl_benchmark",
         "benchmark/identity_instantid_sdxl",
+        "reference/identity_ipadapter_plus_face_sdxl_benchmark",
+        "benchmark/identity_ipadapter_plus_face_sdxl",
+    }
+)
+
+SUPPORTED_ARCHITECTURES = frozenset(
+    {
+        "instantid_sdxl",
+        "ipadapter_plus_face_sdxl",
     }
 )
 
@@ -176,13 +186,17 @@ def assert_instantid_graph(workflow_data: dict[str, Any]) -> list[str]:
 def is_identity_architecture_metadata(metadata: dict[str, Any] | None) -> bool:
     if not isinstance(metadata, dict):
         return False
-    if metadata.get("benchmark_run") is True and str(metadata.get("architecture") or "") == ARCHITECTURE_INSTANTID:
+    architecture = str(metadata.get("architecture") or metadata.get("architecture_id") or "")
+    if metadata.get("benchmark_run") is True and architecture in SUPPORTED_ARCHITECTURES:
         return True
     if str(metadata.get("preparation_kind") or "") == PREPARATION_KIND:
         return True
     if str(metadata.get("capability") or "") == BENCHMARK_CAPABILITY:
         return True
-    if str(metadata.get("candidate") or "") == CANDIDATE_INSTANTID:
+    if str(metadata.get("candidate") or "") in {
+        CANDIDATE_INSTANTID,
+        "ipadapter_plus_face_sdxl_benchmark",
+    }:
         return True
     identifier = str(metadata.get("workflow_identifier") or "").strip()
     return identifier in BENCHMARK_WORKFLOW_IDENTIFIERS
@@ -495,6 +509,8 @@ def build_architecture_benchmark_index_record(
     width: int,
     height: int,
     created_timestamp: str | None = None,
+    architecture: str = ARCHITECTURE_INSTANTID,
+    candidate: str = CANDIDATE_INSTANTID,
 ) -> dict[str, Any]:
     ts = created_timestamp or utc_now()
     return {
@@ -505,8 +521,9 @@ def build_architecture_benchmark_index_record(
         "created_at": ts,
         "benchmark_run": True,
         "benchmark_acknowledged": True,
-        "architecture": ARCHITECTURE_INSTANTID,
-        "candidate": CANDIDATE_INSTANTID,
+        "architecture": architecture,
+        "architecture_id": architecture,
+        "candidate": candidate,
         "scenario": scenario,
         "character_id": character_id,
         "prepared_workflow_path": str(runtime_prepared_dir / f"{preparation_id}.workflow.json"),
@@ -519,7 +536,11 @@ def build_architecture_benchmark_index_record(
             "seed_mode": "fixed",
             "width": width,
             "height": height,
-            "save_prefix": "ai_studio_idarch_instantid",
+            "save_prefix": (
+                "ai_studio_idarch_ipadapter_plus_face"
+                if architecture == "ipadapter_plus_face_sdxl"
+                else "ai_studio_idarch_instantid"
+            ),
         },
         "prepared_workflow_hash": prepared_workflow_hash,
         "canonical_workflow_hash": canonical_workflow_hash,
@@ -590,6 +611,12 @@ def finalize_identity_architecture_benchmark_preparation(
         width=width,
         height=height,
         created_timestamp=str(metadata.get("created_timestamp") or metadata.get("created_at") or utc_now()),
+        architecture=str(
+            metadata.get("architecture")
+            or metadata.get("architecture_id")
+            or ARCHITECTURE_INSTANTID
+        ),
+        candidate=str(metadata.get("candidate") or CANDIDATE_INSTANTID),
     )
     append_preparation_record(log_path, index_record)
     messages.append(f"Appended preparation record to {log_path}")
@@ -670,10 +697,15 @@ def assess_instantid_asset_readiness(
             "integrity": None,
         }
         if verification_state == "UNVERIFIED_MANUAL_ASSET" or not expected_sha or expected_size is None:
-            entry["verification_state"] = "UNVERIFIED_MANUAL_ASSET"
+            entry["verification_state"] = (
+                verification_state
+                if verification_state
+                in {"UNVERIFIED_MANUAL_ASSET", "PENDING_FIRST_DOWNLOAD_PIN"}
+                else "UNVERIFIED_MANUAL_ASSET"
+            )
             errors.append(
                 f"ERROR: Asset {name} lacks expected_sha256/expected_size_bytes "
-                "(UNVERIFIED_MANUAL_ASSET) — live readiness fail closed."
+                f"({entry['verification_state']}) — live readiness fail closed."
             )
             assets.append(entry)
             continue
@@ -806,9 +838,39 @@ def prepare_identity_architecture_benchmark(
     dry_run: bool = False,
     allow_benchmark: bool = False,
     candidate: str = CANDIDATE_INSTANTID,
+    architecture: str | None = None,
 ) -> IdentityArchitecturePrepResult:
     from .workflow_parameters import apply_parameter_bindings
     from .workflow_provenance import hash_ui_workflow
+
+    arch = str(architecture or "").strip()
+    if not arch:
+        if candidate == "ipadapter_plus_face_sdxl_benchmark":
+            arch = "ipadapter_plus_face_sdxl"
+        else:
+            arch = ARCHITECTURE_INSTANTID
+    if arch == "ipadapter_plus_face_sdxl" or candidate == "ipadapter_plus_face_sdxl_benchmark":
+        from .identity_architecture_ipadapter_plus_face import (
+            prepare_ipadapter_plus_face_benchmark,
+        )
+
+        return prepare_ipadapter_plus_face_benchmark(
+            repo_root,
+            drive_root=drive_root,
+            scenario=scenario,
+            character_id=character_id,
+            runtime_prepared_root=runtime_prepared_root,
+            comfyui_input_dir=comfyui_input_dir,
+            bundle_models=bundle_models,
+            bundle_nodes=bundle_nodes,
+            comfyui_custom_nodes=comfyui_custom_nodes,
+            drive_prepared_root=drive_prepared_root,
+            seed=seed,
+            require_models=require_models,
+            require_nodes=require_nodes,
+            dry_run=dry_run,
+            allow_benchmark=allow_benchmark,
+        )
 
     result = IdentityArchitecturePrepResult(
         ok=False,
@@ -825,7 +887,8 @@ def prepare_identity_architecture_benchmark(
         return result
     if candidate != CANDIDATE_INSTANTID:
         result.errors.append(
-            f"ERROR: Package 4.12.3 supports only {CANDIDATE_INSTANTID}; got {candidate}."
+            f"ERROR: Unsupported InstantID-path candidate {candidate}; "
+            f"use {CANDIDATE_INSTANTID} or ipadapter_plus_face_sdxl_benchmark."
         )
         return result
     canonical_scenario = normalize_scenario_id(scenario)

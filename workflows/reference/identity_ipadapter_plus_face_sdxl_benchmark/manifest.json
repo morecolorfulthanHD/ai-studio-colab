@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "workflow_identifier": "reference/identity_ipadapter_plus_face_sdxl_benchmark",
+  "display_name": "Identity Architecture Benchmark — IP-Adapter Plus Face SDXL (CLIP)",
+  "description": "Package 4.12.3 PATH C prototype: IP-Adapter Plus Face SDXL CLIP NON-FaceID. Bucket A crop. Not InstantID. Not PhotoMaker. Not Package 4.13.",
+  "category": "identity_architecture_benchmark",
+  "capability": "identity_architecture_benchmark",
+  "architecture_id": "ipadapter_plus_face_sdxl",
+  "implementation_status": "prototype",
+  "runtime_status": "partial",
+  "quality_status": "untested",
+  "production_status": "benchmark_only",
+  "status_reason": "Structural CLIP Plus Face graph for prototype foundation. Prepare/open is not a quality claim. Assets not downloaded in foundation checkpoint. Live GPU QA required later.",
+  "model_family": "sdxl",
+  "required_model_files": [
+    "sdxl_base",
+    "ipadapter_plus_face_sdxl_vit_h",
+    "clip_vision_vit_h_openclip"
+  ],
+  "optional_model_files": [],
+  "required_nodes": [
+    "ComfyUI_IPAdapter_plus"
+  ],
+  "optional_nodes": [],
+  "canonical_workflow_path": "workflows/reference/identity_ipadapter_plus_face_sdxl_benchmark/workflow.json",
+  "workflow_hash": "2bf0670f958e7b8e9a58d30c67c034133cd361ad400ef4be28519b573b0a1ea6",
+  "workflow_hash_type": "ui_workflow_v1",
+  "face_crop_policy": "bucket_a_deterministic_opencv_or_prepimage",
+  "forbidden": [
+    "InsightFace",
+    "FaceID",
+    "antelopev2",
+    "buffalo_l",
+    "InstantID",
+    "PhotoMaker V2",
+    "PuLID",
+    "FLUX.dev"
+  ],
+  "controlnet_pose_expression": {
+    "status": "GATED_DEFINITION_ONLY",
+    "download_allowed": false,
+    "instantid_keypoint_reuse": false,
+    "notes": "Pose/expression ControlNet may be added later under Package 4.12.3; not acquired here."
+  },
+  "parameter_schema": {
+    "input_image": {
+      "type": "string",
+      "required": true,
+      "default": "",
+      "target_node_id": 13,
+      "target_field": "widgets_values[0]"
+    },
+    "positive_prompt": {
+      "type": "string",
+      "required": true,
+      "default": "portrait",
+      "target_node_id": 39,
+      "target_field": "widgets_values[0]"
+    },
+    "seed": {
+      "type": "integer",
+      "required": true,
+      "default": 42,
+      "min": 0,
+      "max": 9007199254740991,
+      "target_node_id": 3,
+      "target_field": "widgets_values[0]"
+    },
+    "seed_mode": {
+      "type": "string",
+      "required": false,
+      "default": "fixed",
+      "allowed_values": ["fixed", "randomize"],
+      "target_node_id": 3,
+      "target_field": "widgets_values[1]"
+    },
+    "width": {
+      "type": "integer",
+      "required": false,
+      "default": 1024,
+      "target_node_id": 5,
+      "target_field": "widgets_values[0]"
+    },
+    "height": {
+      "type": "integer",
+      "required": false,
+      "default": 1024,
+      "target_node_id": 5,
+      "target_field": "widgets_values[1]"
+    },
+    "save_prefix": {
+      "type": "string",
+      "required": true,
+      "default": "ai_studio_idarch_ipadapter_plus_face",
+      "target_node_id": 15,
+      "target_field": "widgets_values[0]"
+    }
+  },
+  "default_parameters": {
+    "input_image": "",
+    "positive_prompt": "portrait",
+    "seed": 42,
+    "seed_mode": "fixed",
+    "width": 1024,
+    "height": 1024,
+    "save_prefix": "ai_studio_idarch_ipadapter_plus_face"
+  },
+  "scenario_dimensions": {
+    "S1_near_front_portrait": {"width": 1024, "height": 1024},
+    "S2_head_angle_pose": {"width": 1024, "height": 1024},
+    "S3_expression_change": {"width": 1024, "height": 1024},
+    "S4_wardrobe_environment": {"width": 1024, "height": 768}
+  },
+  "output_prefix": "ai_studio_idarch_ipadapter_plus_face",
+  "supported_environments": ["colab"],
+  "license_notes": [
+    "h94/IP-Adapter Apache-2.0 Plus Face SDXL weights — PATH C zero paid licensing.",
+    "OpenCLIP ViT-H encoder — confirm permissive terms.",
+    "SDXL base CreativeML Open RAIL++-M — PATH C treats commercial use OK for this prototype.",
+    "No InsightFace / FaceID / InstantID weights on this path.",
+    "No auto-download in foundation checkpoint."
+  ],
+  "tags": ["benchmark", "identity", "package4123", "ipadapter", "plus_face", "sdxl", "prototype", "bucket_a"],
+  "documentation_path": "workflows/reference/identity_ipadapter_plus_face_sdxl_benchmark/README.md",
+  "launchable": false,
+  "requires_experimental": false,
+  "requires_benchmark": true
+}

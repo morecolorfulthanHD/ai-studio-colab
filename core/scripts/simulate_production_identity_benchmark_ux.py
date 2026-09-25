@@ -339,6 +339,7 @@ def main() -> int:
                 execute_fn=_exec,
                 preflight_fn=_preflight_ok,
                 consolidated_qa_fn=_cqa_pass,
+                allow_blocked_instantid=True,
             )
         finally:
             RegistryLoader.load_all = orig  # type: ignore[method-assign]
@@ -524,6 +525,7 @@ def main() -> int:
                     "steps": [],
                 },
                 consolidated_qa_fn=lambda *_a, **_k: {"ok": True},
+                allow_blocked_instantid=True,
             )
         finally:
             RegistryLoader.load_all = orig  # type: ignore[method-assign]
@@ -541,7 +543,9 @@ def main() -> int:
     _assert_true("J. no FaceID/ReActor production reruns", "FaceID" in never or "ReActor" in never)
     _assert_true(
         "consolidated suites include architecture sim",
-        "simulate_package4123_identity_architecture.py" in DEFAULT_PACKAGE4123_SUITES,
+        "simulate_package4123_identity_architecture.py" in DEFAULT_PACKAGE4123_SUITES
+        and "simulate_package4123_ipadapter_plus_face_foundation.py"
+        in DEFAULT_PACKAGE4123_SUITES,
     )
     _pass(results, "H/I/J. operator nav + Package 4.13/FaceID protections")
 
@@ -600,6 +604,7 @@ def main() -> int:
                     "timezone_checks": {"ok": True},
                     "report_path": "/tmp/qa.json",
                 },
+                allow_blocked_instantid=True,
             )
         finally:
             RegistryLoader.load_all = orig  # type: ignore[method-assign]
@@ -624,7 +629,65 @@ def main() -> int:
         "old prepare not top-level 11",
         "11. Prepare production identity benchmark" not in src,
     )
+    _assert_true(
+        "option 11 InstantID blocked messaging",
+        "BLOCKED_FOR_COMMERCIAL" in src or "option 11" in src.lower() or "blocked" in src.lower(),
+    )
     _pass(results, "Characters menu one-action UX text")
+
+    # Option 11 / InstantID production blocked by default
+    from core.runtime.identity_architecture_plugin import is_instantid_production_blocked
+
+    blocked, gate = is_instantid_production_blocked(repo_root)
+    _assert_true("InstantID production blocked", blocked)
+    _assert_equal("promotion_allowed false", gate.get("promotion_allowed"), False)
+    _assert_equal(
+        "overall BLOCKED_FOR_COMMERCIAL",
+        gate.get("overall_status"),
+        "BLOCKED_FOR_COMMERCIAL",
+    )
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        drive = root / "AI_Studio"
+        drive.mkdir(parents=True)
+        (root / "ComfyUI").mkdir(parents=True)
+        (root / "runtime").mkdir(parents=True)
+
+        class _FakeBundleBlock:
+            def __init__(self, root: Path):
+                self.root = root
+                self.models = []
+                self.nodes = []
+
+            def path(self, key: str) -> Path:
+                return {
+                    "drive_root": self.root / "AI_Studio",
+                    "comfyui_runtime": self.root / "ComfyUI",
+                    "runtime_root": self.root / "runtime",
+                    "drive_workflows": self.root / "AI_Studio" / "workflows",
+                }[key]
+
+        orig = RegistryLoader.load_all
+        RegistryLoader.load_all = lambda self: _FakeBundleBlock(root)  # type: ignore[method-assign]
+        try:
+            refused = run_production_identity_benchmark(
+                repo_root,
+                character_id="char_unused",
+                scenarios=[SCENARIO_IDS[0]],
+                operator_live_intent=True,
+                interactive=False,
+                skip_preflight=True,
+                skip_consolidated_qa=True,
+            )
+        finally:
+            RegistryLoader.load_all = orig  # type: ignore[method-assign]
+        _assert_true("option 11 refused", refused.get("option_11_blocked") is True)
+        _assert_equal("refused status FAILED", refused["status"], STATUS_FAILED)
+        _assert_true(
+            "refused mentions BLOCKED",
+            "BLOCKED" in str(refused.get("failure_reason") or ""),
+        )
+    _pass(results, "InstantID option 11 BLOCKED_FOR_COMMERCIAL fail-closed")
 
     print()
     passed = sum(1 for s, _ in results if s == "PASS")

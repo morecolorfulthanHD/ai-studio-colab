@@ -560,8 +560,16 @@ def run_production_identity_benchmark(
     preflight_fn: Callable[..., dict[str, Any]] | None = None,
     consolidated_qa_fn: Callable[..., dict[str, Any]] | None = None,
     skip_consolidated_qa: bool = False,
+    allow_blocked_instantid: bool = False,
 ) -> dict[str, Any]:
-    """One-action production identity benchmark (default S1–S4)."""
+    """One-action production identity benchmark (default S1–S4).
+
+    InstantID production / Characters option 11 is blocked while the InstantID
+    license gate remains BLOCKED_FOR_COMMERCIAL (InsightFace). Tests may pass
+    allow_blocked_instantid=True to exercise orchestration plumbing only.
+    """
+    from .identity_architecture_plugin import is_instantid_production_blocked
+
     bundle = RegistryLoader(repo_root).load_all()
     drive_root = bundle.path("drive_root")
     comfy_runtime = bundle.path("comfyui_runtime")
@@ -593,7 +601,24 @@ def run_production_identity_benchmark(
         "consolidated_qa_status": None,
         "consolidated_qa_report_path": None,
         "consolidated_qa_failures": [],
+        "architecture_id": "instantid_sdxl",
+        "option_11_blocked": False,
     }
+
+    blocked, license_gate = is_instantid_production_blocked(repo_root)
+    payload["instantid_license_gate"] = license_gate
+    if blocked and not allow_blocked_instantid:
+        payload["option_11_blocked"] = True
+        payload["failure_reason"] = (
+            "BLOCKED: InstantID production identity path is BLOCKED_FOR_COMMERCIAL "
+            f"(status={license_gate.get('overall_status')}; "
+            f"promotion_allowed={license_gate.get('promotion_allowed')}). "
+            "Characters option 11 refused. Prototype path: ipadapter_plus_face_sdxl "
+            "(PATH C). Do not weaken InstantID gates."
+        )
+        payload["status"] = STATUS_FAILED
+        print(payload["failure_reason"])
+        return payload
 
     resolve = resolve_production_character(
         drive_root,

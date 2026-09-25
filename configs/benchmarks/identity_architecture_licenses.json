@@ -1,8 +1,12 @@
 {
   "package": "4.12.3",
+  "architecture": "instantid_sdxl",
   "notes": [
+    "InstantID path only. Do not weaken: overall_status=BLOCKED_FOR_COMMERCIAL; promotion_allowed=false.",
     "Production promotion requires every component status == ACCEPTABLE.",
     "Technical benchmark success alone must not promote InstantID.",
+    "Characters option 11 remains blocked while this gate is BLOCKED_FOR_COMMERCIAL.",
+    "PATH C IP-Adapter Plus Face uses identity_architecture_ipadapter_plus_face_licenses.json.",
     "Statuses: ACCEPTABLE | RESTRICTED | REVIEW_REQUIRED | BLOCKED_FOR_COMMERCIAL"
   ],
   "components": {

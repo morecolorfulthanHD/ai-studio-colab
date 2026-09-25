@@ -263,7 +263,23 @@
       "required_nodes": [
         "ComfyUI_InstantID"
       ],
-      "notes": "Package 4.12.3 InstantID SDXL production identity architecture investigation. S4 default 1024x768. Not Package 4.13."
+      "notes": "Package 4.12.3 InstantID SDXL — BLOCKED_FOR_COMMERCIAL (InsightFace). Not Package 4.13."
+    },
+    {
+      "id": "identity_ipadapter_plus_face_sdxl_benchmark",
+      "category": "identity_architecture_benchmark",
+      "path": "workflows/reference/identity_ipadapter_plus_face_sdxl_benchmark/workflow.json",
+      "status": "prototype",
+      "architecture_id": "ipadapter_plus_face_sdxl",
+      "required_models": [
+        "sdxl_base",
+        "ipadapter_plus_face_sdxl_vit_h",
+        "clip_vision_vit_h_openclip"
+      ],
+      "required_nodes": [
+        "ComfyUI_IPAdapter_plus"
+      ],
+      "notes": "Package 4.12.3 PATH C prototype: IP-Adapter Plus Face SDXL CLIP NON-FaceID. Bucket A crop. No InsightFace/FaceID. Not PhotoMaker. Not Package 4.13."
     }
   ]
 }

@@ -623,7 +623,7 @@
     {
       "id": "identity_architecture_benchmark",
       "name": "Identity Architecture Benchmark",
-      "description": "Package 4.12.3 InstantID SDXL production identity architecture investigation with automated visual QA gates.",
+      "description": "Package 4.12.3 pluggable identity architectures: InstantID SDXL (BLOCKED_FOR_COMMERCIAL) + IP-Adapter Plus Face SDXL CLIP prototype (PATH C).",
       "category": "consistency",
       "maturity": "experimental",
       "status": "planned",
@@ -632,20 +632,19 @@
       ],
       "required_models": [
         "sdxl_base",
-        "instantid_ip_adapter",
-        "instantid_controlnet",
-        "insightface_antelopev2"
+        "ipadapter_plus_face_sdxl_vit_h",
+        "clip_vision_vit_h_openclip"
       ],
       "required_nodes": [
-        "ComfyUI_InstantID"
+        "ComfyUI_IPAdapter_plus"
       ],
       "required_assets": [
         "sdxl_base_checkpoint",
-        "instantid_ip_adapter",
-        "instantid_controlnet",
-        "insightface_antelopev2"
+        "ipadapter_plus_face_sdxl_vit_h",
+        "clip_vision_vit_h_openclip"
       ],
       "required_workflows": [
+        "identity_ipadapter_plus_face_sdxl_benchmark",
         "identity_instantid_sdxl_benchmark"
       ],
       "dependencies": [],
@@ -653,7 +652,7 @@
         "all_required_nodes_registered",
         "all_required_models_registered"
       ],
-      "notes": "INVESTIGATION. ReActor/FaceID rejected. PuLID SDXL investigated but not selected as second live candidate. No automatic 4.13 promotion.",
+      "notes": "PATH C prototype first (ipadapter_plus_face_sdxl). InstantID remains commercially blocked. PhotoMaker V1 deferred. No automatic 4.13 promotion.",
       "implementation_status": "benchmark",
       "production_status": "benchmark_only",
       "quality_status": "untested"

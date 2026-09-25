@@ -149,7 +149,7 @@ def main() -> int:
     _assert_equal(
         "instantid investigation",
         architecture_status_for(CANDIDATE_INSTANTID),
-        "INVESTIGATION",
+        "BLOCKED_FOR_COMMERCIAL",
     )
     _pass(results, "rejected architecture status constants")
 
@@ -457,8 +457,11 @@ def main() -> int:
         )
         _assert_equal("instantid assets not ready without hashes", asset.get("ready"), False)
         _assert_true(
-            "UNVERIFIED in errors",
-            any("UNVERIFIED" in e for e in (asset.get("errors") or [])),
+            "UNVERIFIED or PENDING pin in errors",
+            any(
+                ("UNVERIFIED" in e) or ("PENDING_FIRST_DOWNLOAD_PIN" in e)
+                for e in (asset.get("errors") or [])
+            ),
         )
         _pass(results, "missing InstantID hash -> readiness fail")
 
