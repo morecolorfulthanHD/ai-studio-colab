@@ -34,6 +34,7 @@ When the user asks to **run live validation**, **operate Colab**, **Full Launch*
 11. Collect visible logs, cell output, and QA report paths yourself — do not ask the user to paste routine terminal output.
 12. Stop only for auth/consent, ambiguous GPU/billing changes, missing submenu title, `HUMAN_REVIEW_REQUIRED`, hard failures, or uncertain destructive actions.
 13. Report: runtime state, repo SHA, launch result, QA result, human action needed?
+14. **Before STOP FOR REVIEW / after completing a named checkpoint:** append **ONE** comment to the GitHub checkpoint ledger issue (exact title `AI Studio Operator Checkpoint Ledger`) via `gh issue comment`. Do **not** open a new issue per checkpoint, require screenshots for routine checkpoints, or use main-branch commits merely to transmit reports. Find the issue by exact title if the number is unknown. Comment format: see Checkpoint ledger section below and `docs/cursor-colab-operator.md`.
 
 Follow the full runbook: `docs/cursor-colab-operator.md`.  
 Use `navigation_sequence(...)` from `core/runtime/colab_operator.py` when available.
@@ -100,6 +101,33 @@ When the originating user request **explicitly** asked Cursor to RUN the live pr
 - Bypass Google login / 2FA / Drive mount / paid GPU consent / CAPTCHA — **ask the user**, then resume.
 - Launch Chrome or long-running helpers before `begin` returns a RUNNING `operator_run_id`.
 - Run `_checkpoint_*` / `_probe_*` / similar helpers directly in an Agent terminal.
+
+## Checkpoint ledger (mandatory before STOP FOR REVIEW)
+
+After completing a **named checkpoint**, and before **STOP FOR REVIEW**, append
+**ONE** comment to the single persistent GitHub issue titled exactly
+`AI Studio Operator Checkpoint Ledger` (`morecolorfulthanHD/ai-studio-colab`).
+
+```bash
+# Find by exact title if number unknown
+gh issue list --repo morecolorfulthanHD/ai-studio-colab --state open \
+  --search "AI Studio Operator Checkpoint Ledger in:title" --json number,title
+
+gh issue comment <number> --repo morecolorfulthanHD/ai-studio-colab --body-file <checkpoint.md>
+```
+
+Do **not** open a new issue per checkpoint, require screenshots for routine
+checkpoints, or use main commits merely to transmit reports.
+
+Each comment **MUST** begin with the fields below (then a trailing JSON block):
+
+- `CHECKPOINT_ID`, `CHECKPOINT_TITLE`, `STATUS` (`PASS` | `BLOCKED` | `FAIL` | `HUMAN_ACTION_REQUIRED`)
+- `OPERATOR_RUN_ID`, `REPO_HEAD`, `PACKAGE`
+- `SUMMARY`, `EVIDENCE`, `BLOCKERS`, `CHANGES`, `HUMAN_ACTION`, `NEXT_RECOMMENDED_STEP`
+- Trailing fenced JSON with: `checkpoint_id`, `title`, `status`, `operator_run_id`,
+  `repo_head`, `evidence`, `blockers`, `human_action`, `next_recommended_step`
+
+Full template: `docs/cursor-colab-operator.md` → Checkpoint ledger.
 
 ## Operator stop / pause (mandatory)
 

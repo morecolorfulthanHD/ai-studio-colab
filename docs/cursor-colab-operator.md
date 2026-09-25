@@ -177,6 +177,80 @@ Summarize:
 - QA result / provisional vs fail
 - whether human action is required
 
+### J. CHECKPOINT LEDGER (mandatory before STOP FOR REVIEW)
+
+After completing a **named checkpoint** (and before **STOP FOR REVIEW**), Cursor must
+append **ONE** comment to the single persistent GitHub issue:
+
+**Exact title:** `AI Studio Operator Checkpoint Ledger`  
+**Repo:** `morecolorfulthanHD/ai-studio-colab`
+
+Rules:
+
+- Do **not** open a new issue per checkpoint.
+- Do **not** use main-branch commits merely to transmit checkpoint reports.
+- Screenshots are **not** required for routine checkpoint review — ChatGPT/human
+  review uses the ledger issue comments.
+- If the issue number is unknown, find it by exact title, then comment.
+
+Post with `gh`:
+
+```bash
+# Resolve issue number by exact title (when unknown)
+gh issue list --repo morecolorfulthanHD/ai-studio-colab --state open \
+  --search "AI Studio Operator Checkpoint Ledger in:title" --json number,title
+
+# Append one checkpoint comment (prefer --body-file for multiline)
+gh issue comment <number> --repo morecolorfulthanHD/ai-studio-colab --body-file <checkpoint.md>
+```
+
+Each comment **MUST** begin with this format:
+
+~~~~
+CHECKPOINT_ID: <UTC timestamp or unique id>
+CHECKPOINT_TITLE: <checkpoint name>
+STATUS: PASS | BLOCKED | FAIL | HUMAN_ACTION_REQUIRED
+OPERATOR_RUN_ID: <id or none>
+REPO_HEAD: <sha>
+PACKAGE: <package, e.g. 4.12.3>
+
+SUMMARY:
+<short factual summary>
+
+EVIDENCE:
+- key: value
+...
+
+BLOCKERS:
+- ...
+
+CHANGES:
+- repo changes: yes/no
+- commit SHA: ...
+- temporary files remaining: yes/no
+
+HUMAN_ACTION:
+- none
+or exact action required
+
+NEXT_RECOMMENDED_STEP:
+<one concrete next step>
+
+```json
+{
+  "checkpoint_id": "...",
+  "title": "...",
+  "status": "...",
+  "operator_run_id": "...",
+  "repo_head": "...",
+  "evidence": {},
+  "blockers": [],
+  "human_action": null,
+  "next_recommended_step": "..."
+}
+```
+~~~~
+
 ---
 
 ## Restart / reconnect policy
