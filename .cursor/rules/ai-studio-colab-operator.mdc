@@ -34,7 +34,7 @@ When the user asks to **run live validation**, **operate Colab**, **Full Launch*
 11. Collect visible logs, cell output, and QA report paths yourself — do not ask the user to paste routine terminal output.
 12. Stop only for auth/consent, ambiguous GPU/billing changes, missing submenu title, `HUMAN_REVIEW_REQUIRED`, hard failures, or uncertain destructive actions.
 13. Report: runtime state, repo SHA, launch result, QA result, human action needed?
-14. **Before STOP FOR REVIEW / after completing a named checkpoint:** append **ONE** comment to the GitHub checkpoint ledger issue (exact title `AI Studio Operator Checkpoint Ledger`) via `gh issue comment`. Do **not** open a new issue per checkpoint, require screenshots for routine checkpoints, or use main-branch commits merely to transmit reports. Find the issue by exact title if the number is unknown. Comment format: see Checkpoint ledger section below and `docs/cursor-colab-operator.md`.
+14. **Before every STOP FOR REVIEW:** follow the Checkpoint ledger sequence (construct → publish → confirm → then stop). See section below and `docs/cursor-colab-operator.md`.
 
 Follow the full runbook: `docs/cursor-colab-operator.md`.  
 Use `navigation_sequence(...)` from `core/runtime/colab_operator.py` when available.
@@ -104,28 +104,53 @@ When the originating user request **explicitly** asked Cursor to RUN the live pr
 
 ## Checkpoint ledger (mandatory before STOP FOR REVIEW)
 
-After completing a **named checkpoint**, and before **STOP FOR REVIEW**, append
-**ONE** comment to the single persistent GitHub issue titled exactly
-`AI Studio Operator Checkpoint Ledger` (`morecolorfulthanHD/ai-studio-colab`).
+Every **STOP FOR REVIEW** (and every named checkpoint completion) must publish
+evidence to the single GitHub issue titled exactly
+`AI Studio Operator Checkpoint Ledger` before stopping.
+
+### STOP FOR REVIEW sequence (mandatory order)
+
+1. **Construct** the checkpoint report (template fields below).
+2. **Publish** as **ONE** new comment on the ledger issue via `gh issue comment`
+   (find by exact title if number unknown). Never open a new issue per checkpoint.
+3. **Confirm** publication succeeded (comment URL and/or issue number in agent output).
+   If publish fails → write the report locally, state the exact GitHub error, and
+   **STOP** — do not silently continue.
+4. **Then** stop for human/ChatGPT review (`review checkpoint`).
+
+Do **not** use main-branch commits merely to transmit checkpoint reports.
+Do **not** require screenshots for routine checkpoints.
 
 ```bash
-# Find by exact title if number unknown
 gh issue list --repo morecolorfulthanHD/ai-studio-colab --state open \
-  --search "AI Studio Operator Checkpoint Ledger in:title" --json number,title
+  --search "AI Studio Operator Checkpoint Ledger in:title" --json number,title,url
 
 gh issue comment <number> --repo morecolorfulthanHD/ai-studio-colab --body-file <checkpoint.md>
 ```
 
-Do **not** open a new issue per checkpoint, require screenshots for routine
-checkpoints, or use main commits merely to transmit reports.
+### Comment template (required fields)
 
-Each comment **MUST** begin with the fields below (then a trailing JSON block):
+Each ledger comment **MUST** begin with:
 
 - `CHECKPOINT_ID`, `CHECKPOINT_TITLE`, `STATUS` (`PASS` | `BLOCKED` | `FAIL` | `HUMAN_ACTION_REQUIRED`)
 - `OPERATOR_RUN_ID`, `REPO_HEAD`, `PACKAGE`
 - `SUMMARY`, `EVIDENCE`, `BLOCKERS`, `CHANGES`, `HUMAN_ACTION`, `NEXT_RECOMMENDED_STEP`
-- Trailing fenced JSON with: `checkpoint_id`, `title`, `status`, `operator_run_id`,
+- Trailing fenced JSON: `checkpoint_id`, `title`, `status`, `operator_run_id`,
   `repo_head`, `evidence`, `blockers`, `human_action`, `next_recommended_step`
+
+Include in `EVIDENCE` as applicable: live-runtime facts (run id/status, Colab/Chrome
+state, menu path, QA paths); research/business facts (contacts, drafts, license
+paths, decisions); code-checkpoint facts (files touched, commit SHA or n/a,
+temps remaining).
+
+### Human visual / consent gates (screenshots / user visual interaction)
+
+Routine checkpoints: **screenshots not required**. User only needs to tell ChatGPT
+`review checkpoint` after the ledger comment exists.
+
+Ask the user for visual/interactive help **only** for: Google login, 2FA/passkey,
+Drive mount consent, GitHub trust prompts, CAPTCHA, billing/GPU consent,
+uncertain destructive actions, or `HUMAN_REVIEW_REQUIRED` visual output review.
 
 Full template: `docs/cursor-colab-operator.md` → Checkpoint ledger.
 

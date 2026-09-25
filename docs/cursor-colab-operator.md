@@ -179,77 +179,92 @@ Summarize:
 
 ### J. CHECKPOINT LEDGER (mandatory before STOP FOR REVIEW)
 
-After completing a **named checkpoint** (and before **STOP FOR REVIEW**), Cursor must
-append **ONE** comment to the single persistent GitHub issue:
+Before every **STOP FOR REVIEW** (and after every named checkpoint), publish
+evidence to the **single** GitHub issue titled exactly
+`AI Studio Operator Checkpoint Ledger`
+([morecolorfulthanHD/ai-studio-colab](https://github.com/morecolorfulthanHD/ai-studio-colab)).
 
-**Exact title:** `AI Studio Operator Checkpoint Ledger`  
-**Repo:** `morecolorfulthanHD/ai-studio-colab`
+**Order (do not skip):**
 
-Rules:
+1. Construct the checkpoint report (template below).
+2. Publish **ONE** comment on the ledger issue (`gh issue comment … --body-file`).
+3. Confirm publication succeeded (comment URL / issue number). If publish fails →
+   write the report locally, state the exact GitHub error, and **STOP**.
+4. Then stop. Human/ChatGPT reviews via `review checkpoint` (issue comments).
 
-- Do **not** open a new issue per checkpoint.
+**Hard rules:**
+
+- Do **not** create a new GitHub issue per checkpoint.
 - Do **not** use main-branch commits merely to transmit checkpoint reports.
-- Screenshots are **not** required for routine checkpoint review — ChatGPT/human
-  review uses the ledger issue comments.
-- If the issue number is unknown, find it by exact title, then comment.
-
-Post with `gh`:
+- Do **not** require screenshots for routine checkpoints.
+- Do **not** expose secrets/tokens in ledger comments.
 
 ```bash
-# Resolve issue number by exact title (when unknown)
 gh issue list --repo morecolorfulthanHD/ai-studio-colab --state open \
-  --search "AI Studio Operator Checkpoint Ledger in:title" --json number,title
+  --search "AI Studio Operator Checkpoint Ledger in:title" \
+  --json number,title,url
 
-# Append one checkpoint comment (prefer --body-file for multiline)
-gh issue comment <number> --repo morecolorfulthanHD/ai-studio-colab --body-file <checkpoint.md>
+gh issue comment <number> --repo morecolorfulthanHD/ai-studio-colab \
+  --body-file <checkpoint.md>
 ```
 
-Each comment **MUST** begin with this format:
+**Comment template** (must begin with these fields; end with a JSON block):
 
 ~~~~
-CHECKPOINT_ID: <UTC timestamp or unique id>
-CHECKPOINT_TITLE: <checkpoint name>
+CHECKPOINT_ID: <UTC ISO8601 or unique id>
+CHECKPOINT_TITLE: <short title>
 STATUS: PASS | BLOCKED | FAIL | HUMAN_ACTION_REQUIRED
-OPERATOR_RUN_ID: <id or none>
-REPO_HEAD: <sha>
-PACKAGE: <package, e.g. 4.12.3>
+OPERATOR_RUN_ID: <id or n/a> (<status if known>)
+REPO_HEAD: <git rev-parse HEAD>
+PACKAGE: 4.12.3
 
 SUMMARY:
-<short factual summary>
+...
 
 EVIDENCE:
-- key: value
-...
+- ...   # live-runtime / research-business / code-checkpoint facts as applicable
 
 BLOCKERS:
 - ...
 
 CHANGES:
-- repo changes: yes/no
-- commit SHA: ...
-- temporary files remaining: yes/no
+- repo changes: yes|no
+- commit SHA: <sha|n/a>
+- temporary files remaining: ...
 
 HUMAN_ACTION:
-- none
-or exact action required
+- ...
 
 NEXT_RECOMMENDED_STEP:
-<one concrete next step>
+...
 
 ```json
-{
-  "checkpoint_id": "...",
-  "title": "...",
-  "status": "...",
-  "operator_run_id": "...",
-  "repo_head": "...",
-  "evidence": {},
-  "blockers": [],
-  "human_action": null,
-  "next_recommended_step": "..."
-}
+{ "checkpoint_id": "...", "title": "...", "status": "...",
+  "operator_run_id": "...", "repo_head": "...",
+  "evidence": {}, "blockers": [], "human_action": "...",
+  "next_recommended_step": "..." }
 ```
 ~~~~
+
+**Evidence buckets (include what applies):**
+
+| Bucket | Examples |
+|--------|----------|
+| Live-runtime | `operator_run_id` / status, Colab connected?, Chrome state, menu path taken, ComfyUI/QA report paths, fail-closed gate hits |
+| Research / business | contacts, drafted outreach (subject+body), license conclusions, PATH A/B/C decisions, comparison tables |
+| Code checkpoint | files changed, commit SHA or `n/a`, temps remaining, whether Package 4.12.3 semantics were touched |
+
+**Human visual / consent gates only** (ask user; screenshots/interaction may be required):
+
+- Google login / 2FA / passkey
+- Drive mount consent
+- GitHub trust prompts
+- CAPTCHA
+- Billing / GPU consent
+- Uncertain destructive actions
+- `HUMAN_REVIEW_REQUIRED` visual output review
+
+All other routine STOP FOR REVIEW transmission → ledger comment only; screenshots not required.
 
 ---
 
