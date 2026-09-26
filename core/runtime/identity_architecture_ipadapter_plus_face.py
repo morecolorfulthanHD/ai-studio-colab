@@ -352,7 +352,11 @@ def assess_ipadapter_plus_face_asset_readiness(
 
 
 def assess_ipadapter_plus_face_license_gate(repo_root: Path) -> dict[str, Any]:
-    """License gate for CLIP Plus Face path. SDXL base treated commercially OK for PATH C."""
+    """License gate for CLIP Plus Face path. SDXL base treated commercially OK for PATH C.
+
+    promotion_allowed is always False for this architecture even when every
+    non-FORBIDDEN component is ACCEPTABLE (no automatic production promote).
+    """
     path = Path(repo_root) / LICENSE_REL
     default = {
         "architecture": ARCHITECTURE_IPADAPTER_PLUS_FACE,
@@ -380,27 +384,55 @@ def assess_ipadapter_plus_face_license_gate(repo_root: Path) -> dict[str, Any]:
         "overall_status": "REVIEW_REQUIRED",
         "promotion_allowed": False,
         "forbidden_components_absent": True,
+        "license_ready": False,
     }
     if path.is_file():
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(data, dict) and data.get("components"):
                 components = data["components"]
-                # Hard fail if InsightFace/FaceID sneak into this license file.
+                # Hard fail if InsightFace/FaceID/etc. appear as active dependencies
+                # (FORBIDDEN entries are allowed to name the banned packages).
+                # Strip "non-faceid" / "not-faceid" so explanatory exclusions do not trip.
                 for cname, crow in components.items():
-                    blob = (cname + " " + json.dumps(crow)).lower()
+                    status = str((crow or {}).get("status") or "")
+                    if status == "FORBIDDEN":
+                        continue
+                    fields = [
+                        cname,
+                        str((crow or {}).get("component") or ""),
+                        str((crow or {}).get("source") or ""),
+                        str((crow or {}).get("source_path") or ""),
+                        str((crow or {}).get("source_repo") or ""),
+                        str((crow or {}).get("filename") or ""),
+                        str((crow or {}).get("upstream_origin") or ""),
+                    ]
+                    blob = " ".join(fields).lower()
+                    for excl in (
+                        "non-faceid",
+                        "non_faceid",
+                        "not-faceid",
+                        "not_faceid",
+                        "not faceid",
+                    ):
+                        blob = blob.replace(excl, " ")
                     for token in (
                         "insightface",
                         "antelope",
                         "buffalo",
                         "faceid",
                         "instantid",
+                        "pulid",
+                        "photomaker",
+                        "flux.dev",
+                        "flux_dev",
                     ):
-                        if token in blob and str((crow or {}).get("status")) != "FORBIDDEN":
+                        if token in blob:
                             return {
                                 "components": components,
                                 "overall_status": "BLOCKED_FOR_COMMERCIAL",
                                 "promotion_allowed": False,
+                                "license_ready": False,
                                 "architecture": ARCHITECTURE_IPADAPTER_PLUS_FACE,
                                 "source": str(path),
                                 "errors": [
@@ -416,23 +448,24 @@ def assess_ipadapter_plus_face_license_gate(repo_root: Path) -> dict[str, Any]:
                 ]
                 if any(s == "BLOCKED_FOR_COMMERCIAL" for s in statuses):
                     overall = "BLOCKED_FOR_COMMERCIAL"
-                    promotion = False
                 elif any(s in {"REVIEW_REQUIRED", "RESTRICTED"} for s in statuses):
                     overall = "REVIEW_REQUIRED"
-                    promotion = False
                 elif statuses and all(s == "ACCEPTABLE" for s in statuses):
                     overall = "ACCEPTABLE"
-                    promotion = True
                 else:
                     overall = "REVIEW_REQUIRED"
-                    promotion = False
+                # File may claim promotion_allowed; architecture policy overrides.
+                file_promo = data.get("promotion_allowed")
                 return {
                     "components": components,
                     "overall_status": overall,
-                    "promotion_allowed": promotion,
+                    "promotion_allowed": False,
+                    "license_ready": overall == "ACCEPTABLE",
                     "architecture": ARCHITECTURE_IPADAPTER_PLUS_FACE,
                     "source": str(path),
                     "forbidden_components_absent": True,
+                    "zero_paid_licensing": bool(data.get("zero_paid_licensing", True)),
+                    "file_promotion_allowed_claim": file_promo,
                 }
         except (OSError, json.JSONDecodeError):
             pass

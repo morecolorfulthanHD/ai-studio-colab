@@ -6,8 +6,10 @@ Deterministic CODE/SIM checks (no Colab / no downloads / no GPU):
   - ipadapter_plus_face_sdxl architecture resolves
   - no InsightFace on Plus Face path
   - FaceID rejected on Plus Face graph
-  - asset fail-closed pre-pin (sdxl_base PENDING)
-  - license fail-closed while REVIEW_REQUIRED
+  - asset fail-closed without local files (published SHA/revision pins)
+  - license ACCEPTABLE for PATH C components; promotion_allowed always false
+  - focused license-gate: REVIEW_REQUIRED / FaceID fail closed
+  - InstantID independently blocked
   - evidence metadata architecture tag
   - S1–S4 QA thresholds unchanged
   - no InstantID/FaceID evidence contamination into Plus Face tag
@@ -187,15 +189,15 @@ def main() -> int:
     _assert_true("InsightFace crop fail closed", not bad_crop.ok)
     _pass(results, "Bucket A face crop policy fail-closed on InsightFace")
 
-    # --- Asset fail-closed pre-pin (sdxl_base PENDING) ---
+    # --- Asset fail-closed (hashes pinned; files absent → not ready) ---
     assets = assess_ipadapter_plus_face_asset_readiness(
         drive_root=Path(tempfile.gettempdir()),
         bundle_models=list(bundle_all.models),
     )
-    _assert_true("assets not ready pre-pin/missing files", not assets.get("ready"))
+    _assert_true("assets not ready without local files", not assets.get("ready"))
     err_blob = " ".join(assets.get("errors") or [])
     _assert_true(
-        "sdxl pending or missing fails closed",
+        "missing/unverified assets fail closed",
         "sdxl_base" in err_blob
         or "PENDING_FIRST_DOWNLOAD_PIN" in err_blob
         or "UNVERIFIED" in err_blob
@@ -210,28 +212,127 @@ def main() -> int:
         "677ad8860204f7d0bfba12d29e6c31ded9beefdf3e4bbd102518357d31a292c1",
     )
     _assert_equal("plus-face size", plus.get("expected_size_bytes"), 847517512)
+    _assert_equal(
+        "plus-face immutable revision",
+        plus.get("revision"),
+        "018e402774aeeddd60609b4ecdb7e298259dc729",
+    )
     clip = by_name.get("clip_vision_vit_h_openclip") or {}
-    _assert_true("clip sha published", bool(clip.get("expected_sha256")))
+    _assert_equal(
+        "clip sha published",
+        clip.get("expected_sha256"),
+        "6ca9667da1ca9e0b0f75e46bb030f7e011f44f86cbfb8d5a36590fcd7507b030",
+    )
+    _assert_equal(
+        "clip immutable revision",
+        clip.get("revision"),
+        "018e402774aeeddd60609b4ecdb7e298259dc729",
+    )
     sdxl = by_name.get("sdxl_base") or {}
-    _assert_true(
-        "sdxl hash not invented",
-        sdxl.get("expected_sha256") in (None, "", "null")
-        or sdxl.get("pin_state") == "PENDING_FIRST_DOWNLOAD_PIN",
+    _assert_equal(
+        "sdxl published LFS sha",
+        sdxl.get("expected_sha256"),
+        "31e35c80fc4829d14f90153f4c74cd59c90b779f6afe05a74cd6120b893f7e5b",
     )
-    _pass(results, "asset fail-closed pre-pin; published Plus Face SHA pinned")
+    _assert_equal("sdxl size", sdxl.get("expected_size_bytes"), 6938078334)
+    _assert_equal(
+        "sdxl immutable revision",
+        sdxl.get("revision"),
+        "462165984030d82259a11f4367a4eed129e94a7b",
+    )
+    _assert_equal("sdxl pin_state", sdxl.get("pin_state"), "PUBLISHED_UPSTREAM_SHA")
+    _pass(results, "asset fail-closed without files; published SHA/revision pins")
 
-    # --- License fail-closed (REVIEW_REQUIRED) ---
+    # --- License gate: ACCEPTABLE components, promotion_allowed always false ---
     lic = assess_ipadapter_plus_face_license_gate(repo_root)
-    _assert_equal("IP-Adapter license not ACCEPTABLE yet", lic.get("promotion_allowed"), False)
-    _assert_true(
-        "license REVIEW or blocked",
-        str(lic.get("overall_status")) in {"REVIEW_REQUIRED", "BLOCKED_FOR_COMMERCIAL"},
-    )
+    _assert_equal("IP-Adapter promotion_allowed false", lic.get("promotion_allowed"), False)
+    _assert_equal("license overall ACCEPTABLE", lic.get("overall_status"), "ACCEPTABLE")
+    _assert_true("license_ready when all ACCEPTABLE", bool(lic.get("license_ready")))
+    for cname in (
+        "ComfyUI_IPAdapter_plus_node",
+        "ipadapter_plus_face_sdxl_vit_h",
+        "clip_vision_vit_h_openclip",
+        "sdxl_base",
+    ):
+        crow = (lic.get("components") or {}).get(cname) or {}
+        _assert_equal(f"{cname} ACCEPTABLE", crow.get("status"), "ACCEPTABLE")
+        _assert_true(
+            f"{cname} no paid license",
+            crow.get("paid_license_required") in (False, None)
+            or crow.get("paid_license_required") is False,
+        )
+    for forbidden_name in (
+        "insightface_antelopev2",
+        "ipadapter_faceid",
+        "instantid",
+        "pulid",
+        "photomaker_v2",
+        "flux_dev",
+    ):
+        frow = (lic.get("components") or {}).get(forbidden_name) or {}
+        _assert_equal(f"{forbidden_name} FORBIDDEN", frow.get("status"), "FORBIDDEN")
     sdxl_lic = (lic.get("components") or {}).get("sdxl_base") or {}
     _assert_equal("SDXL commercial OK status", sdxl_lic.get("status"), "ACCEPTABLE")
-    _pass(results, "license fail-closed; SDXL commercial OK on PATH C")
+    _assert_equal("SDXL paid license no", sdxl_lic.get("paid_license_required"), False)
+    plus_lic = (lic.get("components") or {}).get("ipadapter_plus_face_sdxl_vit_h") or {}
+    _assert_true("Plus Face not FaceID flag", plus_lic.get("not_faceid") is True)
+    _pass(results, "license ACCEPTABLE; promotion_allowed false; zero paid")
 
-    # --- Authoritative preflight fails closed when unresolved ---
+    # --- Focused license-gate simulation (temp REVIEW / FORBIDDEN / FaceID) ---
+    with tempfile.TemporaryDirectory() as lic_td:
+        fake_root = Path(lic_td)
+        lic_dir = fake_root / "configs" / "benchmarks"
+        lic_dir.mkdir(parents=True)
+        # REVIEW_REQUIRED blocks license_ready
+        review_payload = {
+            "architecture": "ipadapter_plus_face_sdxl",
+            "promotion_allowed": False,
+            "components": {
+                "ComfyUI_IPAdapter_plus_node": {"status": "REVIEW_REQUIRED"},
+                "ipadapter_plus_face_sdxl_vit_h": {"status": "ACCEPTABLE"},
+                "clip_vision_vit_h_openclip": {"status": "ACCEPTABLE"},
+                "sdxl_base": {"status": "ACCEPTABLE", "commercially_ok": True},
+            },
+        }
+        (lic_dir / "identity_architecture_ipadapter_plus_face_licenses.json").write_text(
+            json.dumps(review_payload), encoding="utf-8"
+        )
+        review_gate = assess_ipadapter_plus_face_license_gate(fake_root)
+        _assert_equal(
+            "REVIEW_REQUIRED overall", review_gate.get("overall_status"), "REVIEW_REQUIRED"
+        )
+        _assert_true("REVIEW not license_ready", not review_gate.get("license_ready"))
+        _assert_equal("REVIEW promo false", review_gate.get("promotion_allowed"), False)
+
+        # FaceID as active (non-FORBIDDEN) component → fail closed
+        faceid_payload = {
+            "architecture": "ipadapter_plus_face_sdxl",
+            "promotion_allowed": True,
+            "components": {
+                "ComfyUI_IPAdapter_plus_node": {"status": "ACCEPTABLE"},
+                "ipadapter_plus_face_sdxl_vit_h": {"status": "ACCEPTABLE"},
+                "clip_vision_vit_h_openclip": {"status": "ACCEPTABLE"},
+                "sdxl_base": {"status": "ACCEPTABLE"},
+                "ipadapter_faceid_plus": {
+                    "status": "ACCEPTABLE",
+                    "source": "https://huggingface.co/h94/IP-Adapter-FaceID",
+                },
+            },
+        }
+        (lic_dir / "identity_architecture_ipadapter_plus_face_licenses.json").write_text(
+            json.dumps(faceid_payload), encoding="utf-8"
+        )
+        faceid_gate = assess_ipadapter_plus_face_license_gate(fake_root)
+        _assert_equal(
+            "FaceID active → BLOCKED",
+            faceid_gate.get("overall_status"),
+            "BLOCKED_FOR_COMMERCIAL",
+        )
+        _assert_equal("FaceID promo false", faceid_gate.get("promotion_allowed"), False)
+        _assert_true("FaceID errors present", bool(faceid_gate.get("errors")))
+    _pass(results, "focused license-gate: REVIEW blocks; FaceID fail-closed")
+
+    # --- Authoritative preflight: licenses ok; assets still fail closed ---
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         (root / "AI_Studio").mkdir(parents=True)
@@ -241,12 +342,63 @@ def main() -> int:
         pre = run_ipadapter_plus_face_preflight(
             repo_root, fake, require_live_comfy=False, workflow_data=wf
         )
-        _assert_true("preflight fail closed unresolved", not pre.get("ok"))
+        _assert_true("preflight fail closed without local assets", not pre.get("ok"))
         steps = {s["step"]: s for s in pre.get("steps") or []}
         _assert_true("architecture step ok", steps.get("architecture", {}).get("ok"))
+        _assert_true("licenses step ok when ACCEPTABLE", steps.get("licenses", {}).get("ok"))
         _assert_true("no_forbidden_deps ok", steps.get("no_forbidden_deps", {}).get("ok"))
         _assert_true("sdxl_commercial_ok flag", pre.get("sdxl_commercial_ok") is True)
-    _pass(results, "authoritative IP-Adapter preflight fail-closed if unresolved")
+        _assert_equal(
+            "preflight promotion_allowed false",
+            (steps.get("licenses") or {}).get("promotion_allowed"),
+            False,
+        )
+        _assert_true(
+            "assets_hashes still fail",
+            not (steps.get("assets_hashes") or {}).get("ok"),
+        )
+    _pass(results, "authoritative preflight: license-ready; assets fail closed")
+
+    # --- Zero-paid forbidden dependency graph scan ---
+    forbidden_tokens = (
+        "insightface",
+        "antelope",
+        "buffalo",
+        "faceid",
+        "instantid",
+        "pulid",
+        "photomaker",
+        "flux.dev",
+        "flux_dev",
+    )
+    graph_blobs = []
+    for name in REQUIRED_MODEL_NAMES:
+        row = by_name.get(name) or {}
+        graph_blobs.append(
+            " ".join(
+                str(row.get(k) or "")
+                for k in (
+                    "name",
+                    "filename",
+                    "source_url",
+                    "source_path",
+                    "runtime_path",
+                    "intended_path",
+                )
+            ).lower()
+        )
+    graph_blobs.append(" ".join(ip.spec.required_assets).lower())
+    graph_blobs.append(" ".join(ip.spec.required_custom_nodes).lower())
+    wf_types = " ".join(
+        str(n.get("type") or "") for n in wf.get("nodes") or [] if isinstance(n, dict)
+    ).lower()
+    graph_blobs.append(wf_types)
+    joined = " ".join(graph_blobs)
+    for excl in ("non-faceid", "non_faceid"):
+        joined = joined.replace(excl, " ")
+    hits = [t for t in forbidden_tokens if t in joined]
+    _assert_equal("zero forbidden tokens on PATH C graph", hits, [])
+    _pass(results, "zero-paid forbidden scan clean on PATH C dependency graph")
 
     # --- Evidence metadata architecture tag ---
     meta = evidence_metadata_for(ARCHITECTURE_IPADAPTER_PLUS_FACE, scenario="S1_near_front_portrait")
