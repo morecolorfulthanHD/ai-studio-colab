@@ -79,6 +79,25 @@ python core/scripts/colab_operator_control.py run-helper \
 `run-helper` must remain alive as the Job Object containment parent for the
 helper's full lifetime (do not spawn-and-exit).
 
+### Background browser policy (mandatory)
+
+Dedicated operator Chrome must **not** steal desktop focus during routine
+automation. The user's active desktop window takes priority.
+
+Do **not** automatically use for routine work: `Page.bringToFront`, OS
+foreground/activation (`SetForegroundWindow`, taskbar, Alt-Tab), pyautogui /
+physical mouse focus clicks, or restore/maximize merely to make Colab visible.
+
+Prefer background-capable paths: CDP `Runtime.evaluate`, DOM inspection, Colab
+notebook/kernel APIs, HTTP/ComfyUI probes, filesystem/runtime probes, lifecycle
+helpers. A background tab with `document.visibilityState == "hidden"` is valid;
+judge health from kernel/HTTP/process/prompt evidence, not visibility.
+
+Foreground only for explicit human-action gates (login, Drive consent, GitHub
+trust / Run anyway, 2FA, CAPTCHA, billing/GPU consent, destructive confirmation,
+human image review): **STOP** and tell the user what to click — do not
+auto-foreground if they can select the window manually.
+
 ### A. OPEN
 
 1. Navigate to canonical Colab URL from config (via gated Chrome launcher above).

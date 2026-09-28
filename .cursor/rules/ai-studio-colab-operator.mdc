@@ -16,6 +16,9 @@ When the user asks to **run live validation**, **operate Colab**, **Full Launch*
    No Chrome launch / checkpoint helper / probe / monitor / recovery helper may
    run before a valid **RUNNING** `operator_run_id` exists.
 2. Use browser automation (semantic labels/text — not brittle fixed coordinates).
+   Prefer **background-capable** CDP / notebook / kernel / HTTP / filesystem
+   probes. Dedicated operator Chrome must **not** steal desktop focus during
+   routine automation (see Background browser policy below).
 3. Launch dedicated operator Chrome **only** via:
    ```
    python core/scripts/launch_operator_chrome.py --run-id <current-id>
@@ -101,6 +104,33 @@ When the originating user request **explicitly** asked Cursor to RUN the live pr
 - Bypass Google login / 2FA / Drive mount / paid GPU consent / CAPTCHA — **ask the user**, then resume.
 - Launch Chrome or long-running helpers before `begin` returns a RUNNING `operator_run_id`.
 - Run `_checkpoint_*` / `_probe_*` / similar helpers directly in an Agent terminal.
+- Steal desktop focus for routine Colab/Chrome operator work (see below).
+
+## Background browser policy (mandatory)
+
+The dedicated Cursor Chrome window must **not** steal desktop focus during
+routine operator automation. The user's active desktop window takes priority.
+
+**Never use automatically for routine work:**
+- `Page.bringToFront`
+- OS window activation / `SetForegroundWindow` / taskbar activation / Alt-Tab
+- pyautogui or physical mouse clicks to force the operator window visible
+- restore/maximize solely to make Colab visible
+- any equivalent foreground/focus mechanism
+
+**Prefer:** CDP `Runtime.evaluate`, DOM/shadow-DOM inspection, Colab notebook
+model APIs, kernel execution APIs (`notebook.kernel.execute` + cell handler when
+needed), HTTP probes, ComfyUI API, filesystem/runtime probes, lifecycle helpers.
+
+`document.visibilityState == "hidden"` on a background Colab tab is **not** a
+failure. Judge health from kernel responses, execution status, stdout/results,
+HTTP status, process state, and prompt/result state — not from tab visibility.
+
+**Human-interaction exception only:** for Google login, Drive consent, GitHub
+trust / Run anyway, 2FA/passkey, CAPTCHA, billing/GPU consent, destructive
+runtime confirmation, or human image review — **STOP** and tell the user what
+to click. Do **not** auto-foreground Chrome even then if the user can select
+the window manually.
 
 ## Checkpoint ledger (mandatory before STOP FOR REVIEW)
 
