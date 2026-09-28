@@ -545,7 +545,8 @@ def main() -> int:
         "consolidated suites include architecture sim",
         "simulate_package4123_identity_architecture.py" in DEFAULT_PACKAGE4123_SUITES
         and "simulate_package4123_ipadapter_plus_face_foundation.py"
-        in DEFAULT_PACKAGE4123_SUITES,
+        in DEFAULT_PACKAGE4123_SUITES
+        and "simulate_path_c_background_launch.py" in DEFAULT_PACKAGE4123_SUITES,
     )
     _pass(results, "H/I/J. operator nav + Package 4.13/FaceID protections")
 

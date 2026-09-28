@@ -693,52 +693,8 @@ def execute_plan(
     return installed, skipped, failed
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Plan ComfyUI node installs from registry.")
-    parser.add_argument("--repo-root", type=Path, default=None)
-    parser.add_argument("--dry-run", action="store_true", help="Print/execute in dry-run mode (default).")
-    parser.add_argument("--execute", action="store_true", help="Execute clone/install steps.")
-    parser.add_argument("--json", action="store_true", help="Output plan as JSON.")
-    parser.add_argument(
-        "--clone-attempts",
-        type=int,
-        default=DEFAULT_CLONE_ATTEMPTS,
-        help=f"Max git clone attempts for transient failures (default {DEFAULT_CLONE_ATTEMPTS}).",
-    )
-    args = parser.parse_args()
-
-    try:
-        repo_root = args.repo_root.resolve() if args.repo_root else find_repo_root()
-        bundle = RegistryLoader(repo_root).load_all()
-        steps = build_node_install_plan(bundle)
-    except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        return 1
-
-    dry_run = not args.execute or args.dry_run
-    clone_attempts = max(1, int(args.clone_attempts))
-
-    if args.json:
-        print(json.dumps([asdict(s) for s in steps], indent=2))
-        return 0
-
-    print_plan(steps, dry_run=dry_run)
-    try:
-        installed, skipped, failed = execute_plan(
-            steps,
-            dry_run=dry_run,
-            clone_attempts=clone_attempts,
-        )
-    except RuntimeError as exc:
-        print(f"\nERROR: {exc}", file=sys.stderr)
-        return 1
-
-    print("\nNode install summary")
-    print("=" * 40)
-    print(f"Installed actions: {installed}")
-    print(f"Skipped actions:   {skipped}")
-    print(f"Failed actions:    {failed}")
-
+def _run_faceid_era_bridges(*, bundle, dry_run: bool) -> None:
+    """Legacy FaceID / ReActor / InsightFace bridges (not used by PATH C)."""
     # ReActor resolves inswapper under ComfyUI/models/insightface (not extra_model_paths).
     # Bridge Drive-canonical InsightFace assets into that runtime-visible path.
     from core.runtime.reactor_model_bridge import (
@@ -846,6 +802,85 @@ def main() -> int:
             "  WARN: FaceID Python runtime not verified. Dependency checker will report not ready.",
             file=sys.stderr,
         )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Plan ComfyUI node installs from registry.")
+    parser.add_argument("--repo-root", type=Path, default=None)
+    parser.add_argument("--dry-run", action="store_true", help="Print/execute in dry-run mode (default).")
+    parser.add_argument("--execute", action="store_true", help="Execute clone/install steps.")
+    parser.add_argument("--json", action="store_true", help="Output plan as JSON.")
+    parser.add_argument(
+        "--identity-architecture",
+        type=str,
+        default=None,
+        help=(
+            "Architecture-aware optional bridges. For ipadapter_plus_face_sdxl (PATH C), "
+            "skip FaceID / InsightFace / ReActor / buffalo probes."
+        ),
+    )
+    parser.add_argument(
+        "--clone-attempts",
+        type=int,
+        default=DEFAULT_CLONE_ATTEMPTS,
+        help=f"Max git clone attempts for transient failures (default {DEFAULT_CLONE_ATTEMPTS}).",
+    )
+    args = parser.parse_args()
+
+    try:
+        repo_root = args.repo_root.resolve() if args.repo_root else find_repo_root()
+        bundle = RegistryLoader(repo_root).load_all()
+        steps = build_node_install_plan(bundle)
+    except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    dry_run = not args.execute or args.dry_run
+    clone_attempts = max(1, int(args.clone_attempts))
+
+    from core.runtime.launch_profiles import (
+        launch_profile_for_architecture,
+        resolve_launch_architecture,
+    )
+
+    architecture_id = resolve_launch_architecture(
+        args.identity_architecture,
+        repo_root=repo_root,
+    )
+    profile = launch_profile_for_architecture(architecture_id)
+    if architecture_id:
+        print(f"identity_architecture={architecture_id} profile={profile.profile_id}")
+    if profile.skip_faceid_era_probes:
+        print(
+            "SKIP FaceID-era bridges (PATH C / ipadapter_plus_face_sdxl — "
+            "CLIP NON-FaceID does not require InsightFace/FaceID/ReActor probes)"
+        )
+
+    if args.json:
+        print(json.dumps([asdict(s) for s in steps], indent=2))
+        return 0
+
+    print_plan(steps, dry_run=dry_run)
+    try:
+        installed, skipped, failed = execute_plan(
+            steps,
+            dry_run=dry_run,
+            clone_attempts=clone_attempts,
+        )
+    except RuntimeError as exc:
+        print(f"\nERROR: {exc}", file=sys.stderr)
+        return 1
+
+    print("\nNode install summary")
+    print("=" * 40)
+    print(f"Installed actions: {installed}")
+    print(f"Skipped actions:   {skipped}")
+    print(f"Failed actions:    {failed}")
+
+    if profile.skip_faceid_era_probes:
+        print("\nSkipping FaceID / ReActor / InsightFace / buffalo bridges (not required by launch profile).")
+    else:
+        _run_faceid_era_bridges(bundle=bundle, dry_run=dry_run)
 
     if failed > 0:
         print("\nRESULT: WARN — one or more optional node steps failed.", file=sys.stderr)

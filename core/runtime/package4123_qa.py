@@ -30,6 +30,7 @@ DEFAULT_PACKAGE4123_SUITES: tuple[str, ...] = (
     "simulate_output_autosync.py",
     "simulate_package4123_identity_architecture.py",
     "simulate_package4123_ipadapter_plus_face_foundation.py",
+    "simulate_path_c_background_launch.py",
     "simulate_colab_operator.py",
     "simulate_production_identity_benchmark_ux.py",
 )

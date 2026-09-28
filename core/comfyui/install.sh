@@ -16,6 +16,8 @@ PYTHON="${PYTHON:-python3}"
 EXTRA_MODEL_PATHS_FILE="${EXTRA_MODEL_PATHS_FILE:-${COMFYUI_DIR}/extra_model_paths.yaml}"
 FORCE_REINSTALL=0
 EXECUTE=0
+IDENTITY_ARCHITECTURE=""
+SKIP_FACEID_ERA=0
 COMFYUI_RUNTIME_STATE=""
 COMFYUI_RUNTIME_EVIDENCE=""
 COMFYUI_LAST_ARCHIVE_PATH=""
@@ -64,12 +66,17 @@ die() {
 usage() {
   cat <<EOF
 Usage:
-  bash core/comfyui/install.sh [--dry-run] [--execute] [--force-reinstall]
+  bash core/comfyui/install.sh [--dry-run] [--execute] [--force-reinstall] \\
+    [--identity-architecture <id>]
 
 Modes:
   --dry-run         Print planned actions only (default)
   --execute         Apply changes (clone/pull, pip install, extra_model_paths.yaml)
   --force-reinstall Archive existing COMFYUI_DIR, then clone fresh (only with --execute)
+  --identity-architecture <id>
+                    Architecture-aware optional deps. For ipadapter_plus_face_sdxl
+                    (PATH C), skip FaceID / InsightFace / ReActor / buffalo probes
+                    including the FaceID albucore/median_blur python die-gate.
 
 Notes:
   Persistent Drive models are configured via ${EXTRA_MODEL_PATHS_FILE}.
@@ -771,6 +778,15 @@ parse_args() {
       --force-reinstall)
         FORCE_REINSTALL=1
         ;;
+      --identity-architecture)
+        shift
+        IDENTITY_ARCHITECTURE="${1:-}"
+        [[ -n "${IDENTITY_ARCHITECTURE}" ]] || die "--identity-architecture requires a value"
+        ;;
+      --identity-architecture=*)
+        IDENTITY_ARCHITECTURE="${1#*=}"
+        [[ -n "${IDENTITY_ARCHITECTURE}" ]] || die "--identity-architecture requires a value"
+        ;;
       --force-replace-models)
         log "WARN: --force-replace-models is deprecated and ignored. Native ComfyUI models/ is preserved; Drive models use extra_model_paths.yaml."
         ;;
@@ -788,6 +804,16 @@ parse_args() {
   if [[ "${FORCE_REINSTALL}" == "1" && "${EXECUTE}" != "1" ]]; then
     die "--force-reinstall requires --execute"
   fi
+
+  # PATH C (ipadapter_plus_face_sdxl) is CLIP NON-FaceID — do not run FaceID-era probes.
+  case "${IDENTITY_ARCHITECTURE}" in
+    ipadapter_plus_face_sdxl|ipadapter_plus_face|path_c|path-c)
+      SKIP_FACEID_ERA=1
+      ;;
+    *)
+      SKIP_FACEID_ERA=0
+      ;;
+  esac
 }
 
 main() {
@@ -798,6 +824,12 @@ main() {
     log "mode=execute"
   else
     log "mode=dry-run"
+  fi
+  if [[ -n "${IDENTITY_ARCHITECTURE}" ]]; then
+    log "identity_architecture=${IDENTITY_ARCHITECTURE}"
+  fi
+  if [[ "${SKIP_FACEID_ERA}" == "1" ]]; then
+    log "SKIP FaceID-era probes (PATH C / ipadapter_plus_face_sdxl profile)"
   fi
   log "COMFYUI_DIR=${COMFYUI_DIR}"
   log "SHARED_MODELS=${SHARED_MODELS}"
@@ -823,80 +855,88 @@ main() {
     fi
   fi
 
-  # Package 4.12: ReActor enumerates swap models via glob(models/insightface/*)
-  # at INPUT_TYPES time (not extra_model_paths). Bridge Drive-canonical files into
-  # a *real* ComfyUI/models/insightface/ directory (file-level links; no dir symlink).
-  if [[ -f "${_repo_root}/core/scripts/ensure_reactor_insightface_bridge.py" ]]; then
-    log "Ensuring ReActor InsightFace file-level runtime bridge (Drive -> ComfyUI/models/insightface/*.onnx)"
-    if [[ "${EXECUTE}" -eq 1 ]]; then
-      "${PYTHON}" "${_repo_root}/core/scripts/ensure_reactor_insightface_bridge.py" \
-        --comfyui-runtime "${COMFYUI_DIR}" \
-        --canonical-insightface-dir "${SHARED_MODELS}/insightface" \
-        --execute \
-        || log "WARN: ReActor InsightFace bridge not verified (canonical may be missing; checker stays fail-closed)"
-    else
-      "${PYTHON}" "${_repo_root}/core/scripts/ensure_reactor_insightface_bridge.py" \
-        --comfyui-runtime "${COMFYUI_DIR}" \
-        --canonical-insightface-dir "${SHARED_MODELS}/insightface" \
-        --dry-run \
-        || log "WARN: ReActor InsightFace bridge dry-run reported issues"
+  if [[ "${SKIP_FACEID_ERA}" == "1" ]]; then
+    log "Skipping ReActor InsightFace bridge (not required for ${IDENTITY_ARCHITECTURE})"
+    log "Skipping FaceID runtime bridge (not required for ${IDENTITY_ARCHITECTURE})"
+    log "Skipping FaceID buffalo_l bridge (not required for ${IDENTITY_ARCHITECTURE})"
+    log "Skipping FaceID Python deps / albucore median_blur probe (not required for ${IDENTITY_ARCHITECTURE})"
+  else
+    # Package 4.12: ReActor enumerates swap models via glob(models/insightface/*)
+    # at INPUT_TYPES time (not extra_model_paths). Bridge Drive-canonical files into
+    # a *real* ComfyUI/models/insightface/ directory (file-level links; no dir symlink).
+    if [[ -f "${_repo_root}/core/scripts/ensure_reactor_insightface_bridge.py" ]]; then
+      log "Ensuring ReActor InsightFace file-level runtime bridge (Drive -> ComfyUI/models/insightface/*.onnx)"
+      if [[ "${EXECUTE}" -eq 1 ]]; then
+        "${PYTHON}" "${_repo_root}/core/scripts/ensure_reactor_insightface_bridge.py" \
+          --comfyui-runtime "${COMFYUI_DIR}" \
+          --canonical-insightface-dir "${SHARED_MODELS}/insightface" \
+          --execute \
+          || log "WARN: ReActor InsightFace bridge not verified (canonical may be missing; checker stays fail-closed)"
+      else
+        "${PYTHON}" "${_repo_root}/core/scripts/ensure_reactor_insightface_bridge.py" \
+          --comfyui-runtime "${COMFYUI_DIR}" \
+          --canonical-insightface-dir "${SHARED_MODELS}/insightface" \
+          --dry-run \
+          || log "WARN: ReActor InsightFace bridge dry-run reported issues"
+      fi
     fi
-  fi
 
-  # Package 4.12: IPAdapter FaceID resolves CLIP Vision via folder_paths clip_vision
-  # (not extra_model_paths) and requires discovery-compatible ipadapter/lora basenames.
-  if [[ -f "${_repo_root}/core/scripts/ensure_faceid_runtime_bridge.py" ]]; then
-    log "Ensuring FaceID file-level runtime bridge (Drive -> ComfyUI/models/{clip_vision,ipadapter,loras})"
-    if [[ "${EXECUTE}" -eq 1 ]]; then
-      "${PYTHON}" "${_repo_root}/core/scripts/ensure_faceid_runtime_bridge.py" \
-        --comfyui-runtime "${COMFYUI_DIR}" \
-        --canonical-clip-vision-dir "${SHARED_MODELS}/clip_vision" \
-        --canonical-ipadapter-dir "${SHARED_MODELS}/ipadapter" \
-        --canonical-lora-dir "${SHARED_MODELS}/loras" \
-        --execute \
-        || log "WARN: FaceID runtime bridge not verified (canonical may be missing; checker stays fail-closed)"
-    else
-      "${PYTHON}" "${_repo_root}/core/scripts/ensure_faceid_runtime_bridge.py" \
-        --comfyui-runtime "${COMFYUI_DIR}" \
-        --canonical-clip-vision-dir "${SHARED_MODELS}/clip_vision" \
-        --canonical-ipadapter-dir "${SHARED_MODELS}/ipadapter" \
-        --canonical-lora-dir "${SHARED_MODELS}/loras" \
-        --dry-run \
-        || log "WARN: FaceID runtime bridge dry-run reported issues"
+    # Package 4.12: IPAdapter FaceID resolves CLIP Vision via folder_paths clip_vision
+    # (not extra_model_paths) and requires discovery-compatible ipadapter/lora basenames.
+    if [[ -f "${_repo_root}/core/scripts/ensure_faceid_runtime_bridge.py" ]]; then
+      log "Ensuring FaceID file-level runtime bridge (Drive -> ComfyUI/models/{clip_vision,ipadapter,loras})"
+      if [[ "${EXECUTE}" -eq 1 ]]; then
+        "${PYTHON}" "${_repo_root}/core/scripts/ensure_faceid_runtime_bridge.py" \
+          --comfyui-runtime "${COMFYUI_DIR}" \
+          --canonical-clip-vision-dir "${SHARED_MODELS}/clip_vision" \
+          --canonical-ipadapter-dir "${SHARED_MODELS}/ipadapter" \
+          --canonical-lora-dir "${SHARED_MODELS}/loras" \
+          --execute \
+          || log "WARN: FaceID runtime bridge not verified (canonical may be missing; checker stays fail-closed)"
+      else
+        "${PYTHON}" "${_repo_root}/core/scripts/ensure_faceid_runtime_bridge.py" \
+          --comfyui-runtime "${COMFYUI_DIR}" \
+          --canonical-clip-vision-dir "${SHARED_MODELS}/clip_vision" \
+          --canonical-ipadapter-dir "${SHARED_MODELS}/ipadapter" \
+          --canonical-lora-dir "${SHARED_MODELS}/loras" \
+          --dry-run \
+          || log "WARN: FaceID runtime bridge dry-run reported issues"
+      fi
     fi
-  fi
 
-  # Package 4.12: FaceAnalysis buffalo_l requires det_10g + w600k under models/buffalo_l/.
-  if [[ -f "${_repo_root}/core/scripts/ensure_faceid_buffalo_bridge.py" ]]; then
-    log "Ensuring FaceID buffalo_l InsightFace bridge (Drive -> ComfyUI/models/insightface/models/buffalo_l/)"
-    if [[ "${EXECUTE}" -eq 1 ]]; then
-      "${PYTHON}" "${_repo_root}/core/scripts/ensure_faceid_buffalo_bridge.py" \
-        --comfyui-runtime "${COMFYUI_DIR}" \
-        --canonical-insightface-dir "${SHARED_MODELS}/insightface" \
-        --execute \
-        || log "WARN: FaceID buffalo_l bridge not verified (canonical may be missing; checker stays fail-closed)"
-    else
-      "${PYTHON}" "${_repo_root}/core/scripts/ensure_faceid_buffalo_bridge.py" \
-        --comfyui-runtime "${COMFYUI_DIR}" \
-        --canonical-insightface-dir "${SHARED_MODELS}/insightface" \
-        --dry-run \
-        || log "WARN: FaceID buffalo_l bridge dry-run reported issues"
+    # Package 4.12: FaceAnalysis buffalo_l requires det_10g + w600k under models/buffalo_l/.
+    if [[ -f "${_repo_root}/core/scripts/ensure_faceid_buffalo_bridge.py" ]]; then
+      log "Ensuring FaceID buffalo_l InsightFace bridge (Drive -> ComfyUI/models/insightface/models/buffalo_l/)"
+      if [[ "${EXECUTE}" -eq 1 ]]; then
+        "${PYTHON}" "${_repo_root}/core/scripts/ensure_faceid_buffalo_bridge.py" \
+          --comfyui-runtime "${COMFYUI_DIR}" \
+          --canonical-insightface-dir "${SHARED_MODELS}/insightface" \
+          --execute \
+          || log "WARN: FaceID buffalo_l bridge not verified (canonical may be missing; checker stays fail-closed)"
+      else
+        "${PYTHON}" "${_repo_root}/core/scripts/ensure_faceid_buffalo_bridge.py" \
+          --comfyui-runtime "${COMFYUI_DIR}" \
+          --canonical-insightface-dir "${SHARED_MODELS}/insightface" \
+          --dry-run \
+          || log "WARN: FaceID buffalo_l bridge dry-run reported issues"
+      fi
     fi
-  fi
 
-  # Package 4.12: pinned IPAdapter FaceID requires lazy insightface import at execution.
-  if [[ -f "${_repo_root}/core/scripts/ensure_faceid_python_deps.py" ]]; then
-    log "Ensuring FaceID Python runtime (insightface + onnxruntime in ComfyUI interpreter)"
-    if [[ "${EXECUTE}" -eq 1 ]]; then
-      "${PYTHON}" "${_repo_root}/core/scripts/ensure_faceid_python_deps.py" \
-        --python "${PYTHON}" \
-        --execute \
-        || die "FaceID Python runtime dependency install/verify failed"
-    else
-      "${PYTHON}" "${_repo_root}/core/scripts/ensure_faceid_python_deps.py" \
-        --python "${PYTHON}" \
-        --dry-run \
-        || log "WARN: FaceID Python runtime dry-run reported issues"
+    # Package 4.12: pinned IPAdapter FaceID requires lazy insightface import at execution.
+    # This is the albucore/median_blur die-gate — keep for FaceID profiles only.
+    if [[ -f "${_repo_root}/core/scripts/ensure_faceid_python_deps.py" ]]; then
+      log "Ensuring FaceID Python runtime (insightface + onnxruntime in ComfyUI interpreter)"
+      if [[ "${EXECUTE}" -eq 1 ]]; then
+        "${PYTHON}" "${_repo_root}/core/scripts/ensure_faceid_python_deps.py" \
+          --python "${PYTHON}" \
+          --execute \
+          || die "FaceID Python runtime dependency install/verify failed"
+      else
+        "${PYTHON}" "${_repo_root}/core/scripts/ensure_faceid_python_deps.py" \
+          --python "${PYTHON}" \
+          --dry-run \
+          || log "WARN: FaceID Python runtime dry-run reported issues"
+      fi
     fi
   fi
 
