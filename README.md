@@ -8,6 +8,24 @@ A general-purpose, version-controlled AI Studio for high-end image generation, e
 
 A modular platform combining ComfyUI, Automatic1111, ControlNet, AnimateDiff, SVD, ReActor, and related tooling into composable, Git-managed workflows. Any future project can adopt the platform without modification.
 
+## Repository Operating Policy
+
+[AGENTS.md](AGENTS.md) is the durable, editor-neutral repository operating-policy
+authority. GitHub is the authoritative implementation-review interchange. The AI
+Studio Colab ChatGPT Project independently reviews the exact canonical GitHub SHA
+through the required project-specific connected account and explicitly accepts
+that SHA. Generated, QA/PASS, notebook, and runtime outputs are evidence, not
+automatically accepted results. Review ZIPs and local handoffs are supplementary
+and cannot replace independent GitHub review. Acceptance does not authorize merge
+or deployment.
+
+All live procedures below require explicit task authority for Colab, Drive, GPU,
+model/data downloads, and runtime execution, with service identity verified first.
+Opening/running the notebook or Run all can cause persistent side effects and is
+not read-only validation. Newer accepted architecture decisions control over stale
+operational examples: current PATH C decisions block InstantID / Characters option
+11. See AGENTS.md for execution gates, unresolved service mappings, and evidence rules.
+
 ## What This Is Not
 
 - Not a single-project repository (Zara Morrison is a validation use case, not the architecture center)
@@ -58,7 +76,7 @@ The **canonical notebook lives in this GitHub repository** — not on Google Dri
 
 **[`colab/notebooks/AI_Studio_Control_Panel_Colab.ipynb`](colab/notebooks/AI_Studio_Control_Panel_Colab.ipynb)**
 
-Open it directly in Colab from GitHub:
+When explicitly authorized, open it directly in Colab from GitHub:
 
 **https://colab.research.google.com/github/morecolorfulthanHD/ai-studio-colab/blob/main/colab/notebooks/AI_Studio_Control_Panel_Colab.ipynb**
 
@@ -97,6 +115,9 @@ ai-studio-colab/
 ```
 
 ## Quick Start (Colab)
+
+Use only after the execution and service-identity gates in [AGENTS.md](AGENTS.md)
+are satisfied; these steps can install dependencies, start compute, and write to Drive.
 
 1. Open the canonical notebook from GitHub in Colab (link above) or browse to `colab/notebooks/AI_Studio_Control_Panel_Colab.ipynb` on GitHub → **Open in Colab**.
 2. Select a GPU runtime.
@@ -209,6 +230,8 @@ Validate core runtime + base txt2img in Colab before adding advanced workflows:
 | [dogfooding/core-runtime-txt2img-checklist.md](docs/dogfooding/core-runtime-txt2img-checklist.md) | Colab validation checklist (Sprint 1) |
 
 ## Immediate Next Steps
+
+For a separately authorized runtime task, subject to [AGENTS.md](AGENTS.md):
 
 1. Run `control_panel()` → **1. Launch** → choose `minimal` for first image readiness.
 2. Confirm SD1.5 at `/content/drive/MyDrive/AI_Studio/models/shared/checkpoints/sd15.safetensors`.

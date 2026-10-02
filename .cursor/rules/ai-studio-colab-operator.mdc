@@ -1,214 +1,31 @@
 ---
-description: Cursor browser workflow for AI Studio Colab live validation
+description: Cursor adapter for authorized AI Studio Colab operator work
 alwaysApply: true
 ---
 
-# AI Studio Colab operator (Cursor)
+# AI Studio Colab operator (Cursor adapter)
 
-When the user asks to **run live validation**, **operate Colab**, **Full Launch**, or similar live QA orchestration:
+Read [AGENTS.md](../../AGENTS.md) for durable, editor-neutral operating authority.
+It and newer accepted architecture decisions take precedence over this adapter
+and older operational examples. This adapter grants no execution or review authority.
 
-## Do this
+For task-authorized Cursor/browser/Colab work, follow the
+[operator runbook](../../docs/cursor-colab-operator.md). It contains the lifecycle,
+Chrome/CDP, menu, checkpoint reporting, and cancellation procedures.
 
-1. **Begin a mandatory operator run** (capture `operator_run_id` from JSON):
-   ```
-   python core/scripts/colab_operator_control.py begin --checkpoint "<label>"
-   ```
-   No Chrome launch / checkpoint helper / probe / monitor / recovery helper may
-   run before a valid **RUNNING** `operator_run_id` exists.
-2. Use browser automation (semantic labels/text — not brittle fixed coordinates).
-   Prefer **background-capable** CDP / notebook / kernel / HTTP / filesystem
-   probes. Dedicated operator Chrome must **not** steal desktop focus during
-   routine automation (see Background browser policy below).
-3. Launch dedicated operator Chrome **only** via:
-   ```
-   python core/scripts/launch_operator_chrome.py --run-id <current-id>
-   ```
-   Never spawn Chrome directly as a subprocess outside this gated launcher.
-4. Open the **canonical** notebook from config  
-   `configs/operator/colab_operator.json` → `canonical_notebook.colab_url`  
-   (GitHub-backed `AI_Studio_Control_Panel_Colab.ipynb` — never treat a Drive copy as source of truth).
-5. Connect / recover runtime when disconnected (auto reconnect click is allowed).  
-   **Clicking Connect does not mean CONNECTED** — wait for connected UI evidence (Connected / RAM / Disk), then continue.
-6. Sync repo (Repository Sync); prefer `origin/main`.
-7. Run all / required startup cells until the AI Studio control panel is ready.
-8. Full Launch mode **full**; wait for ComfyUI URL + healthy OutputWatcher.
-9. Execute the **requested** live QA via the nested menu path below.
-10. After **every** menu selection: inspect visible menu title/text, verify the expected submenu, only then continue. If the expected title is missing → **STOP / reassess** (do not blindly type the next number).
-11. Collect visible logs, cell output, and QA report paths yourself — do not ask the user to paste routine terminal output.
-12. Stop only for auth/consent, ambiguous GPU/billing changes, missing submenu title, `HUMAN_REVIEW_REQUIRED`, hard failures, or uncertain destructive actions.
-13. Report: runtime state, repo SHA, launch result, QA result, human action needed?
-14. **Before every STOP FOR REVIEW:** follow the Checkpoint ledger sequence (construct → publish → confirm → then stop). See section below and `docs/cursor-colab-operator.md`.
+Cursor-specific reminders:
 
-Follow the full runbook: `docs/cursor-colab-operator.md`.  
-Use `navigation_sequence(...)` from `core/runtime/colab_operator.py` when available.
+- Capture a RUNNING `operator_run_id` using the runbook's `begin` procedure before
+  Chrome or helper work; use the gated Chrome launcher.
+- Run long-lived `_checkpoint_*`, `_probe_*`, `_diag_*`, `_status_*`, and similar
+  helpers through `run-helper`, keeping the containment parent alive. Do not run
+  them directly in an Agent terminal or detach a spawn-and-exit wrapper.
+- Prefer background CDP and semantic labels; verify each menu title before the
+  next selection. Do not force desktop focus for routine operator work.
+- For notebook source entry, use the runbook's CDP cell primitive and verify
+  `getText()` after `setText()`; never append at the current caret.
+- Cursor UI Stop may skip Python cleanup hooks. Follow the runbook's explicit
+  stop/status procedure when possible and report cleanup limitations.
 
-## Contained helpers (mandatory)
-
-For live operator work, Cursor **MUST NOT** directly execute long-running operator
-helpers in an Agent terminal, including:
-
-- `python core/scripts/_checkpoint_*.py`
-- `python core/scripts/_probe_*.py`
-- `python core/scripts/_diag_*.py`
-- `python core/scripts/_status_*.py`
-- other long-running operator helper / monitor / recovery scripts
-
-They **must** run through the contained helper surface (parent stays alive):
-
-```
-python core/scripts/colab_operator_control.py run-helper \
-  --run-id <current-id> \
-  -- \
-  python core/scripts/<helper>.py ...
-```
-
-`run-helper` validates the run is current/RUNNING, launches via
-`spawn_owned_helper(..., kind="helper", contain=True)`, and **keeps the
-containment-owning parent alive** while the child runs. Never detach a transient
-helper outside the Job Object (do not spawn-and-exit wrappers).
-
-Routine short commands (`git status`, `git rev-parse`,
-`colab_operator_control.py status`) may run directly if they do **not** spawn
-persistent/background work.
-
-## Menu quick map (nested — do not flatten)
-
-Main control panel (`=== AI Studio Control Panel ===`):
-
-- `9` → Workspace / Projects  
-  → verify `=== Workspace / Projects ===`
-
-Workspace / Projects:
-
-- `13` → Characters  
-  → verify `=== Characters (Package 4.12 / 4.12.3) ===`
-
-Characters (normal production identity path):
-
-- `11` → **Run production identity benchmark** (one-action S1–S4 orchestrator)
-- `12` → Production identity benchmark status / report
-- `13` → Advanced identity benchmark tools (prepare / raw execute / diagnostics)
-
-Live execute path is **`9` → `13` → `11`**, never top-level `13` then `11`.
-
-When the originating user request **explicitly** asked Cursor to RUN the live production identity benchmark, Cursor may satisfy the routine `[y/N]` GPU confirmation automatically (`--operator-live-intent`). Merely opening Characters does **not** authorize GPU execution.
-
-## Do NOT
-
-- Change Package **4.12.3** benchmark semantics or acceptance thresholds.
-- Start Package **4.13**.
-- Auto-invoke Full Reset, Drive/model/project/history/evidence deletion.
-- Re-run rejected FaceID / ReActor production validation.
-- Silently continue past `HUMAN_REVIEW_REQUIRED` or license/asset fail-closed gates.
-- Mark runtime CONNECTED solely because Connect was clicked.
-- Bypass Google login / 2FA / Drive mount / paid GPU consent / CAPTCHA — **ask the user**, then resume.
-- Launch Chrome or long-running helpers before `begin` returns a RUNNING `operator_run_id`.
-- Run `_checkpoint_*` / `_probe_*` / similar helpers directly in an Agent terminal.
-- Steal desktop focus for routine Colab/Chrome operator work (see below).
-
-## Background browser policy (mandatory)
-
-The dedicated Cursor Chrome window must **not** steal desktop focus during
-routine operator automation. The user's active desktop window takes priority.
-
-**Never use automatically for routine work:**
-- `Page.bringToFront`
-- OS window activation / `SetForegroundWindow` / taskbar activation / Alt-Tab
-- pyautogui or physical mouse clicks to force the operator window visible
-- restore/maximize solely to make Colab visible
-- any equivalent foreground/focus mechanism
-
-**Prefer:** CDP `Runtime.evaluate`, DOM/shadow-DOM inspection, Colab notebook
-model APIs, kernel execution APIs (`notebook.kernel.execute` + cell handler when
-needed), HTTP probes, ComfyUI API, filesystem/runtime probes, lifecycle helpers.
-
-`document.visibilityState == "hidden"` on a background Colab tab is **not** a
-failure. Judge health from kernel responses, execution status, stdout/results,
-HTTP status, process state, and prompt/result state — not from tab visibility.
-
-**Human-interaction exception only:** for Google login, Drive consent, GitHub
-trust / Run anyway, 2FA/passkey, CAPTCHA, billing/GPU consent, destructive
-runtime confirmation, or human image review — **STOP** and tell the user what
-to click. Do **not** auto-foreground Chrome even then if the user can select
-the window manually.
-
-## Checkpoint ledger (mandatory before STOP FOR REVIEW)
-
-Every **STOP FOR REVIEW** (and every named checkpoint completion) must publish
-evidence to the single GitHub issue titled exactly
-`AI Studio Operator Checkpoint Ledger` before stopping.
-
-### STOP FOR REVIEW sequence (mandatory order)
-
-1. **Construct** the checkpoint report (template fields below).
-2. **Publish** as **ONE** new comment on the ledger issue via `gh issue comment`
-   (find by exact title if number unknown). Never open a new issue per checkpoint.
-3. **Confirm** publication succeeded (comment URL and/or issue number in agent output).
-   If publish fails → write the report locally, state the exact GitHub error, and
-   **STOP** — do not silently continue.
-4. **Then** stop for human/ChatGPT review (`review checkpoint`).
-
-Do **not** use main-branch commits merely to transmit checkpoint reports.
-Do **not** require screenshots for routine checkpoints.
-
-```bash
-gh issue list --repo morecolorfulthanHD/ai-studio-colab --state open \
-  --search "AI Studio Operator Checkpoint Ledger in:title" --json number,title,url
-
-gh issue comment <number> --repo morecolorfulthanHD/ai-studio-colab --body-file <checkpoint.md>
-```
-
-### Comment template (required fields)
-
-Each ledger comment **MUST** begin with:
-
-- `CHECKPOINT_ID`, `CHECKPOINT_TITLE`, `STATUS` (`PASS` | `BLOCKED` | `FAIL` | `HUMAN_ACTION_REQUIRED`)
-- `OPERATOR_RUN_ID`, `REPO_HEAD`, `PACKAGE`
-- `SUMMARY`, `EVIDENCE`, `BLOCKERS`, `CHANGES`, `HUMAN_ACTION`, `NEXT_RECOMMENDED_STEP`
-- Trailing fenced JSON: `checkpoint_id`, `title`, `status`, `operator_run_id`,
-  `repo_head`, `evidence`, `blockers`, `human_action`, `next_recommended_step`
-
-Include in `EVIDENCE` as applicable: live-runtime facts (run id/status, Colab/Chrome
-state, menu path, QA paths); research/business facts (contacts, drafts, license
-paths, decisions); code-checkpoint facts (files touched, commit SHA or n/a,
-temps remaining).
-
-### Human visual / consent gates (screenshots / user visual interaction)
-
-Routine checkpoints: **screenshots not required**. User only needs to tell ChatGPT
-`review checkpoint` after the ledger comment exists.
-
-Ask the user for visual/interactive help **only** for: Google login, 2FA/passkey,
-Drive mount consent, GitHub trust prompts, CAPTCHA, billing/GPU consent,
-uncertain destructive actions, or `HUMAN_REVIEW_REQUIRED` visual output review.
-
-Full template: `docs/cursor-colab-operator.md` → Checkpoint ledger.
-
-## Operator stop / pause (mandatory)
-
-When the user says **stop**, **stop running**, **pause**, **stop the operator**,
-**pause for the night**, **don't keep running**, or equivalent:
-
-1. Treat it as an **immediate operator cancellation** (not a soft ignore).
-2. Prefer explicit stop while the agent is still alive:
-   `python core/scripts/colab_operator_control.py stop`
-3. Verify status is `CANCELLED` / idle via `... status`.
-4. Contained helpers launched via `run-helper` should exit promptly (stop kills
-   registered helpers; `run-helper` notices cancellation and returns CANCELLED).
-   Direct long-running helper Agent terminals should no longer exist outside
-   contained `run-helper` parents.
-5. **Do not** restart work, relaunch dedicated Chrome, or spawn recovery helpers.
-6. **Do not** disconnect/delete the Colab runtime, Full Reset, or delete Drive data.
-
-Default `stop` leaves an already-open dedicated Chrome window alone.
-Use `stop --close-browser` only when the user explicitly wants the operator browser closed.
-
-Lifecycle module: `core.runtime.colab_operator_lifecycle`  
-Local state: `%LOCALAPPDATA%\AI_Studio\operator\` (not Drive).
-
-**Limitation:** Cursor’s UI Stop may kill the agent without running Python hooks.
-When UI Stop abruptly kills a `run-helper` containment parent, Windows Job Object
-`KILL_ON_JOB_CLOSE` should reclaim that parent's contained transient helpers.
-Chrome relaunch remains blocked by run state (`launch_operator_chrome.py --run-id`
-requires a valid RUNNING run). Existing dedicated Chrome stays open unless
-`--close-browser` was requested. Do not claim UI Stop always runs cleanup hooks.
+Identity, service permissions, execution gates, Git/review/acceptance rules, and
+architecture conflict handling are defined in AGENTS.md, not independently here.

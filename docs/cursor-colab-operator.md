@@ -3,7 +3,25 @@
 Orchestration only. Does **not** change Package 4.12.3 benchmark semantics.
 Does **not** start Package 4.13. Does **not** re-run rejected FaceID/ReActor tests.
 
-Config source of truth: [`configs/operator/colab_operator.json`](../configs/operator/colab_operator.json)
+## Operating authority and scope
+
+[AGENTS.md](../AGENTS.md) defines agent-neutral identity, execution, Git, review,
+and acceptance policy. This runbook supplies Cursor/browser/CDP procedures only.
+All live steps below are conditional on explicit task authority and verified
+service identity; reading this procedure grants no authority to execute it.
+Google/Drive/browser-profile/GPU/Hugging Face and other service mappings remain
+unresolved as recorded in AGENTS.md. Existing sessions, paths, and URLs are not
+permission. Stop before service use when authority is unresolved.
+
+Newer accepted architecture decisions take precedence over stale procedures and
+configuration. The accepted [PATH C foundation](decisions/identity-architecture-ipadapter-plus-face-foundation.md)
+and [license/provenance decision](decisions/identity-architecture-ipadapter-plus-face-license-provenance.md)
+block InstantID (`BLOCKED_FOR_COMMERCIAL`) and Characters option 11. The historical
+benchmark description below is not execution authority. This policy checkpoint
+does not reconcile runtime UI/configuration or change notebook/workflow behavior.
+
+Procedure configuration (subordinate to AGENTS.md and accepted decisions):
+[`configs/operator/colab_operator.json`](../configs/operator/colab_operator.json)
 
 State machine: [`core/runtime/colab_operator.py`](../core/runtime/colab_operator.py)
 
@@ -11,7 +29,8 @@ State machine: [`core/runtime/colab_operator.py`](../core/runtime/colab_operator
 
 ## Canonical notebook
 
-Open **only** the GitHub-backed control panel (never a Drive copy as source of truth):
+When opening Colab is explicitly authorized, open **only** the GitHub-backed
+control panel (never a Drive copy as source of truth):
 
 **https://colab.research.google.com/github/morecolorfulthanHD/ai-studio-colab/blob/main/colab/notebooks/AI_Studio_Control_Panel_Colab.ipynb**
 
@@ -32,9 +51,9 @@ Reject stale Drive notebook duplicates.
 | `NOT_OPEN` | Browser not on canonical notebook |
 | `COLAB_OPEN` | Notebook open; runtime unknown |
 | `AUTH_REQUIRED` | **STOP** — user must complete auth/consent |
-| `DISCONNECTED` | Runtime disconnected; Connect allowed |
+| `DISCONNECTED` | Runtime disconnected; Connect requires task authority |
 | `CONNECTED` | Runtime connected |
-| `REPO_SYNCED` | Repo clone/pull OK; HEAD should track `origin/main` |
+| `REPO_SYNCED` | Repo clone/pull OK; verify the task-authorized SHA |
 | `AI_STUDIO_READY` | Run all done; control panel callable |
 | `FULL_LAUNCH_RUNNING` | Launch full in progress |
 | `FULL_LAUNCH_READY` | ComfyUI up; watcher healthy enough to proceed |
@@ -51,7 +70,9 @@ Reason from **visible labels/text**, not fixed pixel coordinates.
 
 ### 0. BEGIN OPERATOR RUN (mandatory)
 
-Every live operator session starts here:
+After the AGENTS.md service and execution gates are satisfied, every authorized
+live operator session starts here. A RUNNING local run ID does not itself prove
+service permission or GPU/billing authority:
 
 ```bash
 python core/scripts/colab_operator_control.py begin --checkpoint "<label>"
@@ -106,7 +127,7 @@ auto-foreground if they can select the window manually.
 
 ### B. CONNECT
 
-1. If UI shows Connect / Disconnected → click **Connect**.
+1. If connection is task-authorized and UI shows Connect / Disconnected → click **Connect**.
 2. State remains `DISCONNECTED` until connected evidence appears.
 3. Wait until Connected (RAM/Disk / “Connected” indicators).
 4. Only then: state → `CONNECTED`.
@@ -115,16 +136,21 @@ auto-foreground if they can select the window manually.
 
 ### C. ENVIRONMENT
 
-1. Prefer GPU runtime.
+1. Use a GPU runtime only when accelerator use is explicitly task-authorized.
 2. If wrong runtime type: **STOP and ask user** before changing billing/GPU (`may_change_gpu_runtime_without_asking=false`).
 
 ### D. REPO SYNC
 
 1. Run Repository Sync / bootstrap cells.
-2. Verify clone at `/content/ai-studio-colab` and branch `main` tracks `origin/main`.
+2. Verify clone at `/content/ai-studio-colab` matches the task-authorized ref and exact SHA; do not substitute a moving `origin/main` for an authorized checkpoint.
 3. State → `REPO_SYNCED`.
 
 ### E. RUN NOTEBOOK
+
+The notebook and **Run all** have persistent side effects, including Drive writes,
+package/dependency installation, downloads, and service/background work where
+enabled. They are not read-only validation. Check explicit task scope for each
+effect before execution; do not run a broader sequence than authorized.
 
 1. **Runtime → Run all** (or required startup cells).
 2. Wait until `control_panel()` menu is available (`=== AI Studio Control Panel ===`).
@@ -141,6 +167,12 @@ auto-foreground if they can select the window manually.
 
 ### G. LIVE QA (nested menus)
 
+**Current block:** the InstantID / option-11 benchmark route described here is
+historical and blocked by the accepted PATH C decisions above. Do not execute it
+or use the advanced raw-execute menu to bypass that block. Preserve license/asset,
+billing consent, benchmark-intent, and human-review gates for any future authorized
+route. Resolving this conflict requires a separately accepted decision/task.
+
 **Semantic rule:** after every selection, verify the next menu title before continuing.
 If the expected title is missing → **STOP / reassess** (never blindly type the next number).
 
@@ -154,23 +186,28 @@ Path:
 
 | Need | Select | Notes |
 |------|--------|-------|
-| **Run production identity benchmark** | `11` | **Normal path** — one-action S1–S4 (prepare→execute→capture→QA→report) |
+| Historical production identity benchmark | `11` | **BLOCKED** by current PATH C decisions; formerly one-action S1–S4 |
 | Status / architecture report | `12` | Report only; capture ≠ production PASS |
-| Advanced identity benchmark tools | `13` | Prepare / raw execute / diagnostics (debug escape hatch) |
+| Advanced identity benchmark tools | `13` | Prepare / raw execute / diagnostics; no bypass of PATH C blocks or execution gates |
 | Package 4.12.3 consolidated QA | run `python core/scripts/qa_package4123.py` in repo | Offline/sim QA |
 | Rejected FaceID/ReActor | **Do not re-run for production** | Status remains rejected |
 
-Live execute sequence is **`9` → `13` → `11`**, not top-level `13` → `11`.
+Historical blocked sequence: **`9` → `13` → `11`**, not top-level `13` → `11`.
 
 Helper: `navigation_sequence("run_production_identity_benchmark")` in `core/runtime/colab_operator.py`.
 
-**GPU confirmation:** Interactive menu asks `[y/N]` before GPU work. If the originating user request **explicitly** asked Cursor to RUN the live production identity benchmark, Cursor may satisfy that routine confirmation automatically (`--operator-live-intent`). Merely opening Characters never authorizes GPU execution. Still stop for Google/Drive auth, billing, CAPTCHA, or other real consent gates.
+**GPU confirmation:** The historical menu asks `[y/N]` before GPU work and exposes
+`--operator-live-intent`. Neither the flag nor a request to run this blocked
+benchmark overrides current PATH C decisions. For any future permitted route,
+apply AGENTS.md's explicit GPU/task authority and consent gates. Opening Characters
+does not authorize execution; stop for Google/Drive auth, billing, CAPTCHA, or
+other human consent gates.
 
 Orchestrator: `core/scripts/run_production_identity_benchmark.py` — emits `status=COMPLETE|HUMAN_REVIEW_REQUIRED|FAILED` plus structured JSON fields (character, scenarios, prompt IDs, durable paths, report paths, consolidated QA).
 
-**Preflight (before GPU scenarios):** ComfyUI reachable → InstantID live `/object_info` nodes → structural InstantID readiness → asset hash gates → license gate evaluation → OutputWatcher current-runtime health. Fail closed with actionable messages; never Full Reset.
+**Historical blocked-route preflight (reference only):** ComfyUI reachable → InstantID live `/object_info` nodes → structural InstantID readiness → asset hash gates → license gate evaluation → OutputWatcher current-runtime health. Fail closed with actionable messages; never Full Reset. This description does not authorize probes or GPU scenarios.
 
-**After scenario capture:** invokes authoritative Package 4.12.3 consolidated QA (`core.runtime.package4123_qa.run_consolidated_package4123_qa`). Consolidated QA failure forces `FAILED` (never `COMPLETE`).
+**Historical after-capture behavior:** invokes Package 4.12.3 consolidated QA (`core.runtime.package4123_qa.run_consolidated_package4123_qa`). Consolidated QA failure forces `FAILED` (never `COMPLETE`). QA is verification evidence, not independent acceptance.
 
 Do not ask the user to paste routine Colab logs; collect visible cell output and Drive report paths yourself.
 
@@ -196,20 +233,33 @@ Summarize:
 - QA result / provisional vs fail
 - whether human action is required
 
-### J. CHECKPOINT LEDGER (mandatory before STOP FOR REVIEW)
+### J. CHECKPOINT REPORTING AND INDEPENDENT REVIEW
 
-Before every **STOP FOR REVIEW** (and after every named checkpoint), publish
-evidence to the **single** GitHub issue titled exactly
+Prepare a checkpoint report before stopping for review. When the task explicitly
+authorizes ledger publication, publish evidence to the **single** GitHub issue titled exactly
 `AI Studio Operator Checkpoint Ledger`
 ([morecolorfulthanHD/ai-studio-colab](https://github.com/morecolorfulthanHD/ai-studio-colab)).
 
-**Order (do not skip):**
+**Order for an authorized ledger publication:**
 
 1. Construct the checkpoint report (template below).
 2. Publish **ONE** comment on the ledger issue (`gh issue comment … --body-file`).
 3. Confirm publication succeeded (comment URL / issue number). If publish fails →
    write the report locally, state the exact GitHub error, and **STOP**.
-4. Then stop. Human/ChatGPT reviews via `review checkpoint` (issue comments).
+4. Then stop for independent exact-SHA GitHub review under AGENTS.md. The comment
+   supplies a pointer and supporting evidence; it does not establish acceptance.
+
+If ledger publication is outside task scope, return the checkpoint report without
+posting. Independent review must use the canonical repository's exact SHA through
+the required project-specific connected GitHub account specified in AGENTS.md.
+If that connection is unavailable or ambiguous, review stops. A `review checkpoint`
+message, issue comment, copied Codex output, or local state cannot substitute for
+that verification.
+
+**Review ZIPs / local handoff packages:** retain them for diagnostics, archival
+handoff, and human convenience as supplementary evidence only. Uploaded ZIPs are
+not authoritative independent review. Package-building functionality remains
+available; creating a package is not acceptance and requires appropriate task scope.
 
 **Hard rules:**
 
@@ -283,17 +333,23 @@ NEXT_RECOMMENDED_STEP:
 - Uncertain destructive actions
 - `HUMAN_REVIEW_REQUIRED` visual output review
 
-All other routine STOP FOR REVIEW transmission → ledger comment only; screenshots not required.
+For authorized ledger reporting, routine screenshots are not required. Acceptance
+still requires independent exact-SHA GitHub verification and explicit acceptance
+by the AI Studio Colab ChatGPT Project.
 
 ---
 
 ## Restart / reconnect policy
 
-**Cursor may automatically:**
+**Only within explicit task authority covering recovery and its side effects:**
 
 - reconnect a disconnected runtime
 - rerun startup / Repository Sync cells
 - rerun Full Launch after a recoverable runtime death when the runbook path applies
+
+Apply AGENTS.md's separate network, dependency, download, GPU, paid-compute, and
+long-running-job gates to recovery too. Retries must not become unbounded spending;
+runtime/time/cost limits remain unresolved until separately authorized.
 
 **Cursor must NOT automatically:**
 
@@ -322,7 +378,8 @@ If uncertain → ask the user.
 - `HUMAN_REVIEW_REQUIRED` from automated QA
 - Full Launch hard failure
 
-After the user resolves the blocker → resume from last known state (`AUTH_RESOLVED` → continue sequence).
+After the user resolves the blocker, recheck service identity and task authority
+before resuming from the last known state (`AUTH_RESOLVED` → continue sequence).
 
 ---
 
@@ -331,7 +388,8 @@ After the user resolves the blocker → resume from last known state (`AUTH_RESO
 Do **not** programmatically change user settings. Recommend:
 
 - browser tooling enabled
-- auto-run allowed for trusted routine Colab clicks (Connect, Run all, menu selects)
+- auto-run only within an explicitly authorized live task and verified service
+  identity; settings do not grant authority for Connect, Run all, or menu execution
 - destructive actions still require approval
 - auth/consent always user-controlled
 
@@ -374,6 +432,10 @@ Default `stop` prevents Chrome relaunch and kills owned helper processes; it doe
 **not** close an already-open dedicated Chrome window unless `--close-browser`.
 Never kill normal/default-profile Chrome. Never disconnect Colab / Full Reset /
 delete Drive / kill remote ComfyUI or OutputWatcher as part of local cancellation.
+
+Local CANCELLED/idle status does not prove remote Colab/ComfyUI execution stopped.
+Report that uncertainty; remote inspection or shutdown needs appropriate task
+authority. Do not infer that paid compute ended from local operator cleanup.
 
 All operator-owned local children must launch via
 `OperatorLifecycle.spawn_owned_helper` / `spawn_operator_process` (central API),
@@ -430,4 +492,6 @@ python core/scripts/simulate_operator_run_helper_cli.py
 python core/scripts/colab_operator_control.py status
 ```
 
-These do not open Colab (except the gated Chrome launcher when explicitly used).
+These do not open Colab (except the gated Chrome launcher when explicitly used),
+but some create local state, reports, or child processes. Inspect each helper's
+effects before use; this list is not blanket approval for offline/static checks.
