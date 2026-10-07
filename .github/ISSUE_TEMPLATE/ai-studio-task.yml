@@ -1,0 +1,107 @@
+name: AI Studio implementation task
+description: Define durable authority for an AI Studio Colab implementation task.
+title: "[AI Studio task] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Complete this contract under current AGENTS.md and accepted PATH C decisions.
+        A template or a submitted Issue alone does not establish implementation authority.
+        The AI Studio Colab ChatGPT Project must explicitly authorize the completed contract.
+        Replace every placeholder; do not infer, invent, broaden, or repair authority.
+  - type: textarea
+    id: task-authority
+    attributes:
+      label: Task authority
+      description: Supply a stable task ID, exact full base SHA, exact branch, and durable specification reference. For this Issue, use its final canonical URL after creation.
+      value: |
+        STATUS: <explicit authorization status>
+        AI_STUDIO_TASK_ID: <stable task id>
+        AI_STUDIO_AUTHORIZED_BASE: <full commit SHA>
+        AI_STUDIO_IMPLEMENTATION_BRANCH: <branch name>
+        AI_STUDIO_SPEC_AUTHORITY: <canonical GitHub Issue URL or exact full committed SHA and path>
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: governing-goal
+    attributes:
+      label: Governing Goal
+      description: The durable cross-task Goal authority.
+      value: https://github.com/morecolorfulthanHD/ai-studio-colab/issues/2
+    validations:
+      required: true
+  - type: textarea
+    id: implementation-scope
+    attributes:
+      label: Implementation scope
+      description: Specify the objective, exact permitted files and behavior, and excluded work.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance criteria
+      description: Define concrete criteria for independent exact-SHA acceptance.
+    validations:
+      required: true
+  - type: textarea
+    id: prohibited-actions
+    attributes:
+      label: Prohibited actions
+      description: Explicitly define task prohibitions, preserving AGENTS.md, Goal, architecture, artifact, and secret boundaries.
+    validations:
+      required: true
+  - type: textarea
+    id: allowed-verification
+    attributes:
+      label: Allowed verification
+      description: List authorized checks and execution boundaries. Capability and passing checks grant no additional authority.
+    validations:
+      required: true
+  - type: textarea
+    id: human-gates
+    attributes:
+      label: Human gates
+      description: Specify conditions requiring new human authority or an AUTHORITY_BLOCKED stop. Do not invent waivers.
+    validations:
+      required: true
+  - type: textarea
+    id: review-protocol
+    attributes:
+      label: Review and delivery protocol
+      description: Preserve these governing requirements in the submitted durable contract.
+      value: |
+        Read current canonical AGENTS.md and Issue #2 before implementation.
+        Verify repository/account/SSH identity, exact base, branch, and clean state.
+        Implement in an isolated task worktree from the exact authorized base.
+        Use one draft PR with exactly one complete review-authorization block.
+        The block must exactly match this durable GitHub task contract.
+        Authorization is never inferred from title, labels, CI, implementation claims,
+        notebook outputs, QA PASS reports, ZIPs, or runtime success.
+        Mark the same PR ready only after implementation and authorized verification
+        are complete, the checkpoint is pushed normally, the working tree is clean,
+        PR HEAD equals the reported full checkpoint SHA, and no known blocker remains.
+        Independent review applies only to the exact current PR HEAD SHA through
+        morecolorfulthanHD / morecolorfulthanhidef@gmail.com, explicitly selected.
+        Each decision contains AI_STUDIO_DECISION, REVIEWED_SHA, and AI_STUDIO_TASK_ID.
+        AI_STUDIO_DECISION: ACCEPTED grants no notebook/runtime/GPU/external-service authority.
+        AI_STUDIO_DECISION: CHANGES_REQUESTED corrections stay on the same PR and branch
+        when in scope; verify, commit additively, push normally, and return to review.
+        Preserve published history; no amend, rebase, reset, replacement, or force-push
+        unless the exact durable task contract explicitly authorizes the action.
+        AI_STUDIO_DECISION: HUMAN_REQUIRED is only for genuine new human authority.
+        Stop for missing, inconsistent, inaccessible, or superseded durable authority.
+        Acceptance and merge remain separate unless this task explicitly authorizes merge.
+        Preserve PATH C: InstantID is BLOCKED_FOR_COMMERCIAL, Characters option 11
+        is blocked, and Package 4.13 remains closed.
+    validations:
+      required: true
+  - type: textarea
+    id: separate-action-authority
+    attributes:
+      label: Separate action authority
+      description: State none or give explicit authority, conditions, identity, and limits for merge or other separately gated actions. Acceptance alone grants none.
+      value: None. No merge, deployment, runtime activation, or external-service authority is granted.
+    validations:
+      required: true
