@@ -1,0 +1,132 @@
+name: AI Studio independent review
+on:
+  pull_request:
+    types: [ready_for_review, synchronize]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Canonical PR number to re-read (internal publisher redispatch)
+        required: true
+        type: string
+permissions: {}
+concurrency:
+  group: ai-studio-review-${{ github.event.pull_request.number || inputs.pr }}
+  cancel-in-progress: false
+jobs:
+  gate:
+    if: github.repository == 'morecolorfulthanHD/ai-studio-colab' && (github.actor == 'morecolorfulthanHD' || github.actor == 'github-actions[bot]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      actions: read
+    outputs:
+      allowed: ${{ steps.gate.outputs.allowed }}
+      sha: ${{ steps.gate.outputs.sha }}
+      branch: ${{ steps.gate.outputs.branch }}
+      controller_sha: ${{ steps.gate.outputs.controller_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          path: controller
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - id: gate
+        if: hashFiles('controller/tools/ai-studio-orchestration/controller.mjs') != ''
+        run: node controller/tools/ai-studio-orchestration/controller.mjs gate bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - uses: actions/upload-artifact@v4
+        if: steps.gate.outputs.allowed == 'true'
+        with:
+          name: ai-studio-plan
+          path: bundle
+          retention-days: 30
+  reviewer:
+    needs: gate
+    if: needs.gate.outputs.allowed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.controller_sha }}
+          path: controller
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: ai-studio-plan
+          path: bundle
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+          path: implementation
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: node controller/tools/ai-studio-orchestration/controller.mjs recheck bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - uses: openai/codex-action@v1
+        id: codex
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          permission-profile: ":read-only"
+          safety-strategy: drop-sudo
+          allow-bot-users: github-actions[bot]
+          working-directory: implementation
+          prompt-file: bundle/prompt.txt
+          output-schema-file: controller/tools/ai-studio-orchestration/review-schema.json
+          output-file: bundle/result.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ai-studio-review-result
+          path: bundle/result.json
+          retention-days: 30
+  publish-review:
+    needs: [gate, reviewer]
+    if: needs.gate.outputs.allowed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.controller_sha }}
+          path: controller
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: actions/download-artifact@v4
+        with:
+          name: ai-studio-plan
+          path: bundle
+      - uses: actions/download-artifact@v4
+        with:
+          name: ai-studio-review-result
+          path: bundle
+      - run: node controller/tools/ai-studio-orchestration/controller.mjs review bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ai-studio-review-receipt
+          path: bundle/receipt.json
+          retention-days: 90
