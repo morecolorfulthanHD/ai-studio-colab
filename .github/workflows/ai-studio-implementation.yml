@@ -1,0 +1,231 @@
+name: AI Studio implementation wake
+on:
+  issues:
+    types: [opened, reopened, edited]
+  issue_comment:
+    types: [created]
+  workflow_run:
+    workflows: [AI Studio independent review]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: Canonical task Issue number; wake reference only
+        required: false
+        type: string
+      review_run:
+        description: Native review run whose completed receipt must be authenticated
+        required: false
+        type: string
+permissions: {}
+concurrency:
+  group: ai-studio-implementation-source-${{ inputs.review_run || github.event.workflow_run.id || github.event.comment.id || github.event.issue.number || github.run_id }}
+  cancel-in-progress: false
+jobs:
+  dispatch-correction:
+    if: github.repository == 'morecolorfulthanHD/ai-studio-colab' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          path: controller
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Authenticate completed source and uploaded receipt before explicit correction dispatch
+        if: hashFiles('controller/tools/ai-studio-orchestration/controller.mjs') != ''
+        run: node controller/tools/ai-studio-orchestration/controller.mjs dispatch-source bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+  gate:
+    if: github.event_name != 'workflow_run' && github.repository == 'morecolorfulthanHD/ai-studio-colab' && (github.actor == 'morecolorfulthanHD' || github.actor == 'github-actions[bot]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      actions: read
+    outputs:
+      allowed: ${{ steps.gate.outputs.allowed }}
+      sha: ${{ steps.gate.outputs.sha }}
+      branch: ${{ steps.gate.outputs.branch }}
+      controller_sha: ${{ steps.gate.outputs.controller_sha }}
+      source: ${{ steps.gate.outputs.source }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          path: controller
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - id: gate
+        if: hashFiles('controller/tools/ai-studio-orchestration/controller.mjs') != ''
+        run: node controller/tools/ai-studio-orchestration/controller.mjs gate bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - uses: actions/upload-artifact@v4
+        if: steps.gate.outputs.allowed == 'true'
+        with:
+          name: ai-studio-plan
+          path: bundle
+          retention-days: 30
+  implement:
+    needs: gate
+    if: needs.gate.outputs.allowed == 'true'
+    concurrency:
+      group: ai-studio-implementation-agent-${{ needs.gate.outputs.branch }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.controller_sha }}
+          path: controller
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: ai-studio-plan
+          path: bundle
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+          path: implementation
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: node controller/tools/ai-studio-orchestration/controller.mjs recheck bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+      # This step has no GitHub/OpenAI token and inspects only the clean checkout.
+      - run: node controller/tools/ai-studio-orchestration/controller.mjs worker-preflight bundle
+      - uses: openai/codex-action@v1
+        id: codex
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          permission-profile: ":workspace"
+          safety-strategy: drop-sudo
+          allow-bot-users: github-actions[bot]
+          working-directory: implementation
+          prompt-file: bundle/prompt.txt
+          output-schema-file: controller/tools/ai-studio-orchestration/implementation-schema.json
+          output-file: bundle/result.json
+      - run: node controller/tools/ai-studio-orchestration/controller.mjs delta bundle
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ai-studio-implementation-result
+          path: |
+            bundle/result.json
+            bundle/delta.patch
+          retention-days: 30
+  verify-implementation:
+    needs: [gate, implement]
+    if: needs.gate.outputs.allowed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.controller_sha }}
+          path: controller
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: ai-studio-plan
+          path: bundle
+      - uses: actions/download-artifact@v4
+        with:
+          name: ai-studio-implementation-result
+          path: bundle
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+          path: implementation
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: node controller/tools/ai-studio-orchestration/controller.mjs recheck bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+      # No OpenAI secret or write token exists in this fresh job. Only the
+      # pinned trusted controller applies the patch and starts sanitized checks.
+      - run: node controller/tools/ai-studio-orchestration/controller.mjs verify bundle
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ai-studio-verification
+          path: |
+            bundle/verification.json
+            bundle/verification.log
+          retention-days: 30
+  publish-implementation:
+    needs: [gate, implement, verify-implementation]
+    if: always() && needs.gate.outputs.allowed == 'true' && needs.implement.result == 'success' && needs['verify-implementation'].result == 'success'
+    concurrency:
+      group: ai-studio-implementation-publish-${{ needs.gate.outputs.branch }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.controller_sha }}
+          path: controller
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: ai-studio-plan
+          path: bundle
+      - uses: actions/download-artifact@v4
+        with:
+          name: ai-studio-implementation-result
+          path: bundle
+      - uses: actions/download-artifact@v4
+        with:
+          name: ai-studio-verification
+          path: bundle
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+          path: implementation
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      # Only trusted main controller executes here. Never run patched product code
+      # in this job, and never give this write token to either Codex agent.
+      # Publish reloads current canonical activation and reauthenticates source,
+      # receipt, decision and live scope before Git mutation and remote push.
+      - run: node controller/tools/ai-studio-orchestration/controller.mjs publish bundle
+        env:
+          GH_TOKEN: ${{ github.token }}

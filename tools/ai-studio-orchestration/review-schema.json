@@ -1,0 +1,49 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status",
+    "summary",
+    "corrections"
+  ],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": [
+        "ACCEPTED",
+        "CHANGES_REQUESTED",
+        "HUMAN_REQUIRED",
+        "AUTHORITY_BLOCKED"
+      ]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "corrections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "requirement",
+          "verification"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "requirement": {
+            "type": "string"
+          },
+          "verification": {
+            "type": "string",
+            "enum": [
+              "orchestration"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

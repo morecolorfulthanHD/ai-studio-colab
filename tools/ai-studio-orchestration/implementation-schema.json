@@ -1,0 +1,28 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status",
+    "summary",
+    "changedPaths"
+  ],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": [
+        "VERIFICATION_PENDING",
+        "HUMAN_REQUIRED",
+        "AUTHORITY_BLOCKED"
+      ]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "changedPaths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}
