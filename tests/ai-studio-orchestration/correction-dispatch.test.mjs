@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  REPOSITORY, REVIEW_WORKFLOW, hash, correctionPlan, dispatchPublishedCorrection, taskContract,
+  REPOSITORY, REVIEW_WORKFLOW, hash, correctionPlan, dispatchPublishedCorrection, taskContract, publishedCheckpointGate,
 } from '../../tools/ai-studio-orchestration/policy.mjs';
 import { reviewFixture } from './policy.test.mjs';
 
@@ -79,4 +79,12 @@ test('explicit token-suppressed correction dispatch follows real upload and succ
   s.processed = [40];
   await assert.rejects(dispatchPublishedCorrection(async () => s, { dispatch: async () => ordering.push('duplicate') }));
   assert.deepEqual(ordering, ['receipt-uploaded', 'source-completed', 'dispatch']);
+});
+test('post-push correction writes reauthenticate the source run rather than carrying old success', () => {
+  const s = fixture(), plan = correctionPlan(s);
+  s.pr.head.sha = 'c'.repeat(40); s.branch.commit.sha = s.pr.head.sha;
+  s.lineage.head = s.pr.head.sha;
+  assert.equal(publishedCheckpointGate(plan, s, s.pr.head.sha), true);
+  s.source.conclusion = 'failure';
+  assert.throws(() => publishedCheckpointGate(plan, s, s.pr.head.sha), /AUTHORITY_BLOCKED/);
 });

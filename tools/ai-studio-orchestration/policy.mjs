@@ -254,6 +254,10 @@ export function publishedCheckpointGate(plan, s, checkpoint) {
     validatePR({ ...s, pr: { ...s.pr, draft: false } }, task);
     requireThat(decisions(s, task).length === 0, 'terminal/already-reviewed published HEAD');
   }
+  if (plan.source) {
+    const receipt = validateReviewReceipt({ ...s, pr: { ...s.pr, head: { ...s.pr.head, sha: plan.sha } } }, task);
+    requireThat(receipt.runId === plan.source.runId && receipt.commentId === plan.source.commentId, 'post-push source race');
+  }
   return true;
 }
 
