@@ -139,7 +139,7 @@ pattern checks. No package acquisition or workflow/API/model dispatch is needed.
 The tests use self-contained mocked canonical connectors and dispatch callbacks,
 plus disposable local bare Git repositories without credentials, hooks or network.
 The miniature subprocess verifier fixture tests actual patch reconstruction,
-syntax/test output and race rejection. Its three miniature tests are not the
+syntax/test output and race rejection. The child verifier selects the TAP reporter explicitly and requires exactly one complete positive test total, matching pass count, and zero failed, cancelled, skipped and todo tests before creating a receipt. Its three miniature tests are not the
 repository suite; the top-level command runs all three real safety suites.
 Shared policy fixtures register policy tests when imported by other suites, so
 the reported total includes those independent executions.

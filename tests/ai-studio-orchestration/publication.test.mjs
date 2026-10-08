@@ -6,7 +6,7 @@ import os from 'node:os';
 import {
   taskStartPlan, correctionPlan, hash, publicationPlan, verificationReceipt, publishAndDispatch, publishedCheckpointGate,
 } from '../../tools/ai-studio-orchestration/policy.mjs';
-import { git, reconstruct, inspectDelta, verifyOffline, sanitizedEnvironment, checkedRun } from '../../tools/ai-studio-orchestration/controller.mjs';
+import { git, reconstruct, inspectDelta, verifyOffline, sanitizedEnvironment, checkedRun, parseTestSummary } from '../../tools/ai-studio-orchestration/controller.mjs';
 import { fixture, reviewFixture } from './policy.test.mjs';
 import { fixture as correctionFixture } from './correction-dispatch.test.mjs';
 
@@ -54,6 +54,34 @@ test('verification environment strips secrets and executable Issue prose never r
   for (const key of ['GH_TOKEN', 'OPENAI_API_KEY', 'NODE_OPTIONS', 'GIT_CONFIG_COUNT', 'BASH_ENV']) assert.equal(env[key], undefined);
   assert.throws(() => checkedRun(process.execPath, ['-e', 'process.exit(7)'], process.cwd()), /verifier failed/);
 });
+
+const completeSummary = '# tests 3\n# pass 3\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n';
+test('TAP summary accepts the complete positive total and all six counters', () => {
+  assert.deepEqual(parseTestSummary('TAP version 13\n' + completeSummary + '# duration_ms 1\n'),
+    { tests: 3, pass: 3, fail: 0, cancelled: 0, skipped: 0, todo: 0 });
+  assert.deepEqual(parseTestSummary(completeSummary.replace(/\n/g, '\r\n')), parseTestSummary(completeSummary));
+});
+for (const field of ['tests', 'pass', 'fail', 'cancelled', 'skipped', 'todo']) {
+  for (const [reason, change] of [
+    ['missing', s => s.replace(new RegExp('^# ' + field + ' .*\\n', 'm'), '')],
+    ['malformed', s => s.replace(new RegExp('^# ' + field + ' .*$', 'm'), '# ' + field + ' nope')],
+    ['duplicate', s => s + '# ' + field + ' 0\n'],
+    ['negative', s => s.replace(new RegExp('^# ' + field + ' .*$', 'm'), '# ' + field + ' -1')],
+    ['unsafe', s => s.replace(new RegExp('^# ' + field + ' .*$', 'm'), '# ' + field + ' 9007199254740992')],
+  ]) test('TAP summary rejects ' + reason + ' ' + field, () => {
+    assert.throws(() => parseTestSummary(change(completeSummary)), /AUTHORITY_BLOCKED/);
+  });
+}
+for (const [reason, log] of [
+  ['empty', ''], ['malformed extra record', completeSummary + '# pass\t3\n'], ['spec reporter', completeSummary.replace(/# /g, 'ℹ ')],
+  ['zero total', completeSummary.replace('# tests 3', '# tests 0').replace('# pass 3', '# pass 0')],
+  ['total mismatch', completeSummary.replace('# tests 3', '# tests 4')],
+  ['pass mismatch', completeSummary.replace('# pass 3', '# pass 2')],
+  ...['fail', 'cancelled', 'skipped', 'todo'].map(key => [key, completeSummary.replace('# ' + key + ' 0', '# ' + key + ' 1')]),
+]) test('TAP summary rejects ' + reason + ' before any receipt is created', () => {
+  assert.throws(() => parseTestSummary(log), /AUTHORITY_BLOCKED/);
+});
+
 test('real bare Git: additive same-branch push, immutable parent, reconstruction and branch race rejection', () => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-studio-bare-'));
   try {
@@ -81,7 +109,7 @@ test('real bare Git: additive same-branch push, immutable parent, reconstruction
     const delta = inspectDelta(worker, base), result = { status: 'VERIFICATION_PENDING', summary: 'fixture', changedPaths: delta.changes.map(c => c.path) };
     const context = { runId: 20, attempt: 1 };
     const actual = verifyOffline(verifier, plan, delta.patch, result, context);
-    assert.equal(actual.tree, delta.tree); assert.match(actual.log, /# pass 3/); assert.match(actual.log, /# fail 0/);
+    assert.equal(actual.tree, delta.tree); assert.equal(actual.receipt.checks[1].passed, 3); assert.match(actual.log, /# pass 3/); assert.match(actual.log, /# fail 0/);
     const c = { ...delta, result, parent: base, ...context, verification: actual.receipt,
       verifier: { name: 'verify-implementation', conclusion: 'success', attempt: 1 } };
     assert.equal(publicationPlan(plan, s, c).branch, plan.task.branch);
@@ -123,6 +151,28 @@ test('real bare Git: additive same-branch push, immutable parent, reconstruction
     git(worker, ['merge-base', '--is-ancestor', base, second]);
     assert.equal(git(worker, ['ls-remote', remote, 'refs/heads/' + plan.task.branch]).split(/\s/)[0], second);
     assert.throws(() => reconstruct(verifier, plan, delta.patch), /unclean/);
+    // Actual Node subprocess failures or non-passing tests must never return a receipt.
+    for (const [name, body] of [
+      ['failed', "test('miniature',()=>assert.fail('fixture'));"],
+      ['skipped', "test('miniature',{skip:true},()=>assert.ok(true));"],
+      ['todo', "test('miniature',{todo:true},()=>assert.ok(true));"],
+      ['cancelled', "test('miniature',{signal:AbortSignal.abort()},()=>assert.ok(true));"],
+    ]) {
+      const rejectedVerifier = path.join(temp, 'rejected-' + name);
+      git(temp, ['clone', '--branch', 'main', remote, rejectedVerifier]);
+      fs.writeFileSync(path.join(rejectedVerifier, 'tests/ai-studio-orchestration/policy.test.mjs'),
+        "import test from 'node:test'; import assert from 'node:assert/strict'; " + body + '\n');
+      git(rejectedVerifier, ['add', '--all']);
+      git(rejectedVerifier, ['commit', '-m', 'negative verifier fixture']);
+      const negativeBase = git(rejectedVerifier, ['rev-parse', 'HEAD']).trim();
+      const negativePlan = { ...plan, sha: negativeBase };
+      fs.writeFileSync(path.join(rejectedVerifier, 'docs/ai-studio-autonomous-wake-orchestration.md'), 'negative candidate\n');
+      const negativeDelta = inspectDelta(rejectedVerifier, negativeBase);
+      git(rejectedVerifier, ['reset', '--hard', negativeBase]);
+      assert.throws(() => verifyOffline(rejectedVerifier, negativePlan, negativeDelta.patch, result, context),
+        /AUTHORITY_BLOCKED/);
+    }
+
 
   } finally { fs.rmSync(temp, { recursive: true, force: true }); }
 });

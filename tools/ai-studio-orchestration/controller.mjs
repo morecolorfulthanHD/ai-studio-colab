@@ -52,16 +52,33 @@ export function reconstruct(cwd, plan, patch) {
   validateChanges(plan.task, delta.changes);
   return delta;
 }
+export function parseTestSummary(log) {
+  requireThat(typeof log === 'string', 'missing/incomplete test summary');
+  const keys = ['tests', 'pass', 'fail', 'cancelled', 'skipped', 'todo'];
+  const summary = {};
+  for (const line of log.split(/\r?\n/)) {
+    const record = line.match(/^# (tests|pass|fail|cancelled|skipped|todo)(?=\s|$)(.*)$/);
+    if (!record) continue;
+    const [, key, suffix] = record; const value = suffix.slice(1);
+    requireThat(!Object.hasOwn(summary, key) && suffix.startsWith(' ') && /^(0|[1-9]\d*)$/.test(value),
+      'duplicate/malformed test summary');
+    const count = Number(value);
+    requireThat(Number.isSafeInteger(count), 'unsafe test summary count');
+    summary[key] = count;
+  }
+  requireThat(keys.every(key => Object.hasOwn(summary, key)) && summary.tests > 0 &&
+    summary.pass === summary.tests && ['fail', 'cancelled', 'skipped', 'todo'].every(key => summary[key] === 0),
+    'missing/incomplete/inconsistent test summary');
+  return summary;
+}
 export function verifyOffline(cwd, plan, patch, result, context) {
   const delta = reconstruct(cwd, plan, patch);
   const syntaxFiles = ['tools/ai-studio-orchestration/policy.mjs', 'tools/ai-studio-orchestration/controller.mjs'];
   for (const file of syntaxFiles) checkedRun(process.execPath, ['--check', file], cwd);
   const files = fs.readdirSync(path.join(cwd, 'tests/ai-studio-orchestration')).filter(f => f.endsWith('.test.mjs')).sort();
   requireThat(files.length === 3, 'exact authorized verification suites');
-  const log = checkedRun(process.execPath, ['--test', ...files.map(f => 'tests/ai-studio-orchestration/' + f)], cwd);
-  const passed = Number(log.match(/# pass (\d+)/)?.[1]);
-  const failed = Number(log.match(/# fail (\d+)/)?.[1]);
-  requireThat(passed > 0 && failed === 0, 'missing/incomplete test summary');
+  const log = checkedRun(process.execPath, ['--test', '--test-reporter=tap', ...files.map(f => 'tests/ai-studio-orchestration/' + f)], cwd);
+  const { pass: passed, fail: failed } = parseTestSummary(log);
   return { ...delta, log, receipt: verificationReceipt(plan, patch, result, delta.tree, context,
     [{ name: 'syntax', passed: syntaxFiles.length, failed: 0, exitCode: 0, logHash: hash(syntaxFiles.join('\n')) },
       { name: 'orchestration-tests', passed, failed, exitCode: 0, logHash: hash(log) }]) };
